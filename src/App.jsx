@@ -1,10 +1,5 @@
 import React from 'react';
-import { BrowserRouter as Router, Routes, Route, NavLink, useLocation } from 'react-router-dom';
-import {
-  LayoutDashboard, Calendar, Users, Scissors, Package,
-  DollarSign, BarChart3, Settings, Star, Award, UserCheck,
-  Megaphone, LogOut, ChevronRight, Zap, ShoppingBag
-} from 'lucide-react';
+import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 
 // Import all pages
 import Dashboard from './pages/Dashboard';
@@ -23,64 +18,8 @@ import Integration from './pages/Integration';
 import Reports from './pages/Reports';
 import ClientBooking from './pages/ClientBooking';
 
-const menuTop = [
-  { icon: LayoutDashboard, label: 'Dashboard', path: '/' },
-  { icon: Calendar, label: 'Agenda', path: '/agenda' },
-  { icon: Users, label: 'Pacientes', path: '/pacientes' },
-  { icon: UserCheck, label: 'Clientes', path: '/clients' },
-  { icon: Scissors, label: 'Serviços', path: '/services' },
-  { icon: ShoppingBag, label: 'Pacotes', path: '/packages' },
-  { icon: Package, label: 'Estoque', path: '/inventory' },
-  { icon: DollarSign, label: 'Financeiro', path: '/financial' },
-  { icon: Award, label: 'Comissões', path: '/comissoes' },
-  { icon: Star, label: 'Kanban', path: '/kanban' },
-  { icon: BarChart3, label: 'Relatórios', path: '/reports' },
-  { icon: Megaphone, label: 'Marketing', path: '/marketing' },
-  { icon: Zap, label: 'Equipe', path: '/equipe' },
-];
-
-const menuBottom = [
-  { icon: Settings, label: 'Integrações', path: '/integration' },
-  { icon: ChevronRight, label: 'Agendamento Online', path: '/client-booking' },
-];
-
-function SidebarItem({ icon: Icon, label, path }) {
-  return (
-    <NavLink
-      to={path}
-      end={path === '/'}
-      className={({ isActive }) => `sidebar-item${isActive ? ' active' : ''}`}
-    >
-      <Icon />
-      <span className="sidebar-tooltip">{label}</span>
-    </NavLink>
-  );
-}
-
-function Sidebar() {
-  return (
-    <aside className="sidebar">
-      {/* Logo */}
-      <div className="sidebar-logo">
-        <Scissors />
-      </div>
-
-      {/* Navigation top */}
-      <nav className="sidebar-nav">
-        {menuTop.map((item) => (
-          <SidebarItem key={item.path} {...item} />
-        ))}
-      </nav>
-
-      {/* Navigation bottom */}
-      <div className="sidebar-bottom">
-        {menuBottom.map((item) => (
-          <SidebarItem key={item.path} {...item} />
-        ))}
-      </div>
-    </aside>
-  );
-}
+// Import Sidebar component
+import Sidebar from './components/ui/sidebar';
 
 function App() {
   return (
