@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { Users, Plus, Search, Phone, Calendar, FileText, Star, XCircle, ChevronRight, Mail, MapPin } from 'lucide-react';
+import { Users, Plus, Search, Phone, Calendar, FileText, Star, XCircle, ChevronRight, Mail, MapPin, Upload } from 'lucide-react';
 
-const pacientes = [
+const defaultPacientes = [
   { id:1, nome:'Ana Beatriz Souza', telefone:'(11) 98765-4321', email:'ana@email.com', cidade:'São Paulo', nascimento:'15/03/1990', ultimaVisita:'10/05/2026', totalSessoes:8, totalGasto:2850, status:'ativo', avatar:'A' },
   { id:2, nome:'Carla Mendes Silva', telefone:'(11) 97654-3210', email:'carla@email.com', cidade:'São Paulo', nascimento:'22/07/1985', ultimaVisita:'08/05/2026', totalSessoes:12, totalGasto:4200, status:'ativo', avatar:'C' },
   { id:3, nome:'Fernanda Lima', telefone:'(11) 96543-2109', email:'fernanda@email.com', cidade:'Guarulhos', nascimento:'30/11/1992', ultimaVisita:'05/05/2026', totalSessoes:5, totalGasto:1750, status:'ativo', avatar:'F' },
@@ -16,9 +16,18 @@ const historico = [
   { data:'10/01/2026', servico:'Peeling Químico', valor:320 },
 ];
 
-function PacienteModal({ onClose }) {
+function PacienteModal({ onClose, onSave }) {
   const [form, setForm] = useState({ nome:'', telefone:'', email:'', nascimento:'', cidade:'', obs:'' });
   const set = (k,v) => setForm(f=>({...f,[k]:v}));
+
+  const handleSave = () => {
+    if (!form.nome) {
+      alert('Por favor, preencha o nome do paciente.');
+      return;
+    }
+    onSave(form);
+  };
+
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" onClick={e=>e.stopPropagation()}>
@@ -54,7 +63,7 @@ function PacienteModal({ onClose }) {
         </div>
         <div style={{display:'flex',gap:8,justifyContent:'flex-end',marginTop:8}}>
           <button className="btn btn-ghost" onClick={onClose}>Cancelar</button>
-          <button className="btn btn-primary" onClick={onClose}><Star />Salvar</button>
+          <button className="btn btn-primary" onClick={handleSave}><Star />Salvar</button>
         </div>
       </div>
     </div>
@@ -62,9 +71,153 @@ function PacienteModal({ onClose }) {
 }
 
 export default function Pacientes() {
+  const [pacientes, setPacientes] = useState(() => {
+    const saved = localStorage.getItem('erp_pacientes');
+    return saved ? JSON.parse(saved) : defaultPacientes;
+  });
   const [modal, setModal] = useState(false);
   const [busca, setBusca] = useState('');
   const [selected, setSelected] = useState(null);
+
+  const cleanAndTitleCaseName = (name) => {
+    if (!name) return '';
+    const cleaned = name.replace(/^["']|["']$/g, '').trim();
+    return cleaned
+      .toLowerCase()
+      .split(' ')
+      .filter(word => word.length > 0)
+      .map(word => {
+        const lowercases = ['de', 'da', 'do', 'dos', 'das', 'e'];
+        if (lowercases.includes(word)) return word;
+        return word.charAt(0).toUpperCase() + word.slice(1);
+      })
+      .join(' ');
+  };
+
+  const handleImportCSV = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const text = event.target.result;
+      const lines = text.split(/\r?\n/);
+      if (lines.length === 0) return;
+
+      let delimiter = ',';
+      const sampleLines = lines.slice(0, 10).join('\n');
+      const semicolons = (sampleLines.match(/;/g) || []).length;
+      const commas = (sampleLines.match(/,/g) || []).length;
+      if (semicolons > commas) {
+        delimiter = ';';
+      }
+
+      let headerIdx = -1;
+      for (let i = 0; i < lines.length; i++) {
+        const cleanLine = lines[i].toLowerCase();
+        if (cleanLine.includes('nome') && (cleanLine.includes('telefone') || cleanLine.includes('email') || cleanLine.includes('e-mail') || cleanLine.includes('gênero') || cleanLine.includes('genero'))) {
+          headerIdx = i;
+          break;
+        }
+      }
+
+      if (headerIdx === -1) {
+        headerIdx = 0;
+      }
+
+      const headers = lines[headerIdx]
+        .split(delimiter)
+        .map(h => h.replace(/^["']|["']$/g, '').trim().toLowerCase());
+
+      const nomeIdx = headers.findIndex(h => h.includes('nome'));
+      const telIdx = headers.findIndex(h => h.includes('telefone') || h.includes('tel') || h.includes('fone'));
+      const emailIdx = headers.findIndex(h => h.includes('email') || h.includes('e-mail'));
+      const cidadeIdx = headers.findIndex(h => h.includes('cidade') || h.includes('município'));
+      const nascimentoIdx = headers.findIndex(h => h.includes('nascimento') || h.includes('nasc'));
+
+      const importedPacientes = [];
+      for (let i = headerIdx + 1; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (!line) continue;
+
+        let cols = [];
+        if (line.includes('"')) {
+          const matches = line.match(/(".*?"|[^";\s]+)(?=\s*;|\s*$)/g) || line.split(delimiter);
+          cols = matches.map(m => m.replace(/^["']|["']$/g, '').trim());
+        } else {
+          cols = line.split(delimiter).map(c => c.trim());
+        }
+
+        const rawNome = nomeIdx !== -1 && cols[nomeIdx] ? cols[nomeIdx] : '';
+        if (!rawNome || rawNome.toLowerCase() === 'nome') continue;
+
+        const nome = cleanAndTitleCaseName(rawNome);
+        const telefone = telIdx !== -1 && cols[telIdx] ? cols[telIdx].replace(/^["']|["']$/g, '').trim() : '';
+        const email = emailIdx !== -1 && cols[emailIdx] ? cols[emailIdx].replace(/^["']|["']$/g, '').trim() : '';
+        const cidade = cidadeIdx !== -1 && cols[cidadeIdx] ? cols[cidadeIdx].replace(/^["']|["']$/g, '').trim() : 'Não informada';
+        const nascimento = nascimentoIdx !== -1 && cols[nascimentoIdx] ? cols[nascimentoIdx].replace(/^["']|["']$/g, '').trim() : '';
+
+        importedPacientes.push({
+          id: Date.now() + i,
+          nome,
+          telefone: telefone || '(00) 00000-0000',
+          email: email || '',
+          cidade: cidade || 'Não informada',
+          nascimento: nascimento || '',
+          ultimaVisita: 'Nunca',
+          totalSessoes: 0,
+          totalGasto: 0,
+          status: 'ativo',
+          avatar: nome.charAt(0).toUpperCase() || 'U'
+        });
+      }
+
+      if (importedPacientes.length > 0) {
+        setPacientes(prev => {
+          const updated = [...prev, ...importedPacientes];
+          localStorage.setItem('erp_pacientes', JSON.stringify(updated));
+          return updated;
+        });
+        alert(`${importedPacientes.length} pacientes importados com sucesso!`);
+      } else {
+        alert('Nenhum paciente válido encontrado. Verifique as colunas de sua planilha.');
+      }
+    };
+
+    reader.readAsText(file, 'UTF-8');
+    e.target.value = '';
+  };
+
+  const handleSaveNovoPaciente = (formData) => {
+    const novo = {
+      id: Date.now(),
+      nome: cleanAndTitleCaseName(formData.nome),
+      telefone: formData.telefone || '(00) 00000-0000',
+      email: formData.email || '',
+      cidade: formData.cidade || 'Não informada',
+      nascimento: formData.nascimento || '',
+      ultimaVisita: 'Hoje',
+      totalSessoes: 0,
+      totalGasto: 0,
+      status: 'ativo',
+      avatar: formData.nome.charAt(0).toUpperCase()
+    };
+    setPacientes(prev => {
+      const updated = [...prev, novo];
+      localStorage.setItem('erp_pacientes', JSON.stringify(updated));
+      return updated;
+    });
+    setModal(false);
+  };
+
+  const handleDeletePaciente = (id) => {
+    setPacientes(prev => {
+      const updated = prev.filter(p => p.id !== id);
+      localStorage.setItem('erp_pacientes', JSON.stringify(updated));
+      return updated;
+    });
+    setSelected(null);
+  };
 
   const filtrados = pacientes.filter(p =>
     p.nome.toLowerCase().includes(busca.toLowerCase()) || p.telefone.includes(busca)
@@ -72,14 +225,21 @@ export default function Pacientes() {
 
   return (
     <div>
-      {modal && <PacienteModal onClose={()=>setModal(false)} />}
+      {modal && <PacienteModal onClose={()=>setModal(false)} onSave={handleSaveNovoPaciente} />}
       <div className="page-header" style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between'}}>
         <div>
           <div className="page-header-label"><Users />PACIENTES</div>
           <h1 className="page-title">Pacientes</h1>
           <p className="page-subtitle">{pacientes.length} pacientes cadastrados</p>
         </div>
-        <button className="btn btn-primary" onClick={()=>setModal(true)}><Plus />Novo Paciente</button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <label className="btn btn-secondary" style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
+            <Upload style={{ width: 16, height: 16 }} />
+            Importar Planilha
+            <input type="file" accept=".csv" style={{ display: 'none' }} onChange={handleImportCSV} />
+          </label>
+          <button className="btn btn-primary" onClick={()=>setModal(true)}><Plus />Novo Paciente</button>
+        </div>
       </div>
 
       <div className="grid-4 section-gap">
@@ -127,7 +287,36 @@ export default function Pacientes() {
                       <td style={{fontWeight:600,textAlign:'center'}}>{p.totalSessoes}</td>
                       <td style={{fontWeight:600,color:'var(--success)'}}>R$ {p.totalGasto.toLocaleString('pt-BR')}</td>
                       <td><span className={`badge ${p.status==='ativo'?'badge-success':'badge-neutral'}`}>{p.status==='ativo'?'Ativo':'Inativo'}</span></td>
-                      <td><ChevronRight style={{width:15,height:15,color:'var(--text-muted)'}} /></td>
+                      <td>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (confirm(`Deseja realmente excluir o paciente "${p.nome}"?`)) {
+                                handleDeletePaciente(p.id);
+                              }
+                            }}
+                            style={{
+                              background: 'none',
+                              border: 'none',
+                              color: '#ef4444',
+                              cursor: 'pointer',
+                              padding: '6px',
+                              borderRadius: '4px',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              transition: 'background-color 0.2s'
+                            }}
+                            onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgba(239, 68, 68, 0.1)'}
+                            onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+                            title="Excluir Paciente"
+                          >
+                            <Trash2 style={{ width: 15, height: 15 }} />
+                          </button>
+                          <ChevronRight style={{ width: 15, height: 15, color: 'var(--text-muted)' }} />
+                        </div>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -179,6 +368,17 @@ export default function Pacientes() {
                 <button className="btn btn-secondary btn-sm" style={{flex:1}}>Editar</button>
                 <button className="btn btn-primary btn-sm" style={{flex:1}}><Calendar style={{width:13,height:13}}/>Agendar</button>
               </div>
+              <button 
+                className="btn btn-ghost btn-sm" 
+                style={{width:'100%',marginTop:8,color:'#ef4444',borderColor:'rgba(239, 68, 68, 0.2)',display:'flex',alignItems:'center',justifyContent:'center',gap:4}}
+                onClick={() => {
+                  if (confirm(`Deseja realmente excluir o paciente "${selected.nome}"?`)) {
+                    handleDeletePaciente(selected.id);
+                  }
+                }}
+              >
+                <Trash2 style={{width:13,height:13}}/>Excluir Paciente
+              </button>
             </div>
           </div>
         )}
