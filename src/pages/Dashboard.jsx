@@ -1,4 +1,3 @@
-import React, { useState } from 'react';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
 } from 'recharts';
@@ -6,33 +5,8 @@ import {
   DollarSign, Calendar, Users, AlertTriangle,
   TrendingUp, Package, ChevronRight, Clock, Star
 } from 'lucide-react';
-
-// ─── Mock Data ───────────────────────────────────────────────
-const revenueData = [
-  { dia: 'Seg', valor: 280 },
-  { dia: 'Ter', valor: 420 },
-  { dia: 'Qua', valor: 380 },
-  { dia: 'Qui', valor: 510 },
-  { dia: 'Sex', valor: 760 },
-  { dia: 'Sáb', valor: 920 },
-  { dia: 'Dom', valor: 1176 },
-];
-
-const stockAlerts = [
-  { nome: '5', lote: '5', estoque: 0, minimo: 55 },
-  { nome: 'Botox Allergan 100U', lote: 'Allergan', estoque: 5, minimo: 5 },
-  { nome: 'Juvederm Ultra', lote: 'AbbVie', estoque: 2, minimo: 10 },
-];
-
-const todayAppointments = [
-  { hora: '09:00', paciente: 'Fernanda Lima', servico: 'Botox Facial', status: 'confirmado' },
-  { hora: '10:30', paciente: 'Carla Mendes', servico: 'Preenchimento Labial', status: 'aguardando' },
-  { hora: '14:00', paciente: 'Ana Beatriz', servico: 'Harmonização Facial', status: 'confirmado' },
-];
-
-const weekDays = ['D', 'S', 'T', 'Q', 'Q', 'S', 'S'];
-const today = new Date();
-const dayOfMonth = today.getDate();
+import { useSync } from '../contexts/SyncContext';
+import SheetSyncStatus from '../components/integration/SheetSyncStatus';
 
 // ─── Sub-components ───────────────────────────────────────────
 function StatCard({ icon: Icon, iconBg, iconColor, badge, badgeClass, value, label, sub }) {
@@ -79,21 +53,97 @@ const CustomTooltip = ({ active, payload, label }) => {
 
 // ─── Dashboard ────────────────────────────────────────────────
 export default function Dashboard() {
+  const { transactions } = useSync();
+
+  const today = new Date();
   const diaSemana = today.toLocaleDateString('pt-BR', { weekday: 'long' });
   const dataBr = today.toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+
+  // Compute real stats from transactions
+  const currentMonth = today.getMonth();
+  const currentYear = today.getFullYear();
+
+  const monthTransactions = transactions.filter(t => {
+    const parts = t.data.split('/');
+    if (parts.length !== 3) return true;
+    const txMonth = parseInt(parts[1], 10) - 1;
+    const txYear = parseInt(parts[2], 10);
+    return txMonth === currentMonth && txYear === currentYear;
+  });
+
+  const faturamentoMes = monthTransactions
+    .filter(t => t.tipo === 'receita')
+    .reduce((sum, t) => sum + t.valor, 0);
+
+  const receitasHoje = transactions.filter(t => {
+    const todayStr = today.toLocaleDateString('pt-BR');
+    return t.tipo === 'receita' && t.data === todayStr;
+  });
+  const faturamentoHoje = receitasHoje.reduce((sum, t) => sum + t.valor, 0);
+
+  // Unique active patients count
+  const activePatients = new Set(
+    transactions
+      .filter(t => t.tipo === 'receita')
+      .map(t => {
+        const match = t.desc.match(/-\s*(.+)/);
+        return match ? match[1].trim() : null;
+      })
+      .filter(Boolean)
+  ).size;
+
+  // Revenue data for last 7 days
+  const revenueData = (() => {
+    const days = [];
+    const dayLabels = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sab'];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(today);
+      d.setDate(d.getDate() - i);
+      const dateStr = d.toLocaleDateString('pt-BR');
+      const dayTotal = transactions
+        .filter(t => t.tipo === 'receita' && t.data === dateStr)
+        .reduce((sum, t) => sum + t.valor, 0);
+      days.push({
+        dia: dayLabels[d.getDay()],
+        valor: dayTotal,
+      });
+    }
+    return days;
+  })();
+
+  // Stock alerts (placeholder - from Inventory page)
+  const stockAlerts = [
+    { nome: 'Botox Allergan 100U', lote: 'Allergan', estoque: 5, minimo: 5 },
+    { nome: 'Juvederm Ultra', lote: 'AbbVie', estoque: 2, minimo: 10 },
+  ];
+
+  // Today appointments (placeholder)
+  const todayAppointments = [
+    { hora: '09:00', paciente: 'Fernanda Lima', servico: 'Botox Facial', status: 'confirmado' },
+    { hora: '10:30', paciente: 'Carla Mendes', servico: 'Preenchimento Labial', status: 'aguardando' },
+    { hora: '14:00', paciente: 'Ana Beatriz', servico: 'Harmonização Facial', status: 'confirmado' },
+  ];
+
+  // Sync stats
+  const syncedTxCount = transactions.filter(t => t.origem === 'planilha').length;
 
   return (
     <div>
       {/* Page Header */}
       <div className="page-header">
-        <div className="page-header-label">
-          <Star />
-          DASHBOARD
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div>
+            <div className="page-header-label">
+              <Star />
+              DASHBOARD
+            </div>
+            <h1 className="page-title">
+              Bom {diaSemana.split('-')[0].trim().includes('seg') || diaSemana.startsWith('ter') || diaSemana.startsWith('qua') || diaSemana.startsWith('qui') || diaSemana.startsWith('sex') ? 'dia' : 'dia'}, Evelyn
+            </h1>
+            <p className="page-subtitle">{dataBr}</p>
+          </div>
+          <SheetSyncStatus compact />
         </div>
-        <h1 className="page-title">
-          Bom {diaSemana.split('-')[0].trim().includes('seg') || diaSemana.startsWith('ter') || diaSemana.startsWith('qua') || diaSemana.startsWith('qui') || diaSemana.startsWith('sex') ? 'dia' : 'dia'}, Evelyn
-        </h1>
-        <p className="page-subtitle">{dataBr}</p>
       </div>
 
       {/* Stat Cards */}
@@ -102,37 +152,35 @@ export default function Dashboard() {
           icon={DollarSign}
           iconBg="#EFF7F2"
           iconColor="var(--success)"
-          badge="12%"
+          badge={syncedTxCount > 0 ? `${syncedTxCount} sync` : null}
           badgeClass="up"
-          value="R$ 1.176,00"
+          value={`R$ ${faturamentoMes.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`}
           label="Faturamento do Mês"
-          sub="vs. mês anterior"
+          sub={syncedTxCount > 0 ? `${syncedTxCount} transações da planilha` : 'vs. mês anterior'}
         />
         <StatCard
           icon={Calendar}
           iconBg="var(--info-bg)"
           iconColor="var(--info)"
-          badge="5%"
-          badgeClass="up"
-          value="0"
-          label="Agendamentos Hoje"
-          sub="0 finalizados"
+          badge="hoje"
+          badgeClass="neutral"
+          value={`R$ ${faturamentoHoje.toLocaleString('pt-BR')}`}
+          label="Faturamento Hoje"
+          sub={`${receitasHoje.length} receitas`}
         />
         <StatCard
           icon={Users}
           iconBg="var(--info-bg)"
           iconColor="var(--info)"
-          badge="8%"
-          badgeClass="up"
-          value="6"
+          value={String(activePatients)}
           label="Clientes Ativos"
-          sub="novos este mês"
+          sub="com transações no período"
         />
         <StatCard
           icon={AlertTriangle}
           iconBg="var(--danger-bg)"
           iconColor="var(--danger)"
-          value="2"
+          value={String(stockAlerts.length)}
           label="Estoque Crítico"
           sub="produtos abaixo do mínimo"
         />

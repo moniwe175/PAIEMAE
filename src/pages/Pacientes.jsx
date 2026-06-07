@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Users, Plus, Search, Phone, Calendar, FileText, Star, XCircle, ChevronRight, Mail, MapPin, Upload } from 'lucide-react';
+import { Users, Plus, Search, Phone, Calendar, FileText, Star, XCircle, ChevronRight, Mail, MapPin, Upload, Trash2 } from 'lucide-react';
 
 const defaultPacientes = [
   { id:1, nome:'Ana Beatriz Souza', telefone:'(11) 98765-4321', email:'ana@email.com', cidade:'São Paulo', nascimento:'15/03/1990', ultimaVisita:'10/05/2026', totalSessoes:8, totalGasto:2850, status:'ativo', avatar:'A' },

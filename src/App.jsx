@@ -1,5 +1,7 @@
-import React from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+
+// Import SyncContext provider
+import { SyncProvider } from './contexts/SyncContext';
 
 // Import all pages
 import Dashboard from './pages/Dashboard';
@@ -24,28 +26,30 @@ import Sidebar from './components/ui/sidebar';
 function App() {
   return (
     <Router>
-      <div className="app-layout">
-        <Sidebar />
-        <main className="main-content">
-          <Routes>
-            <Route path="/" element={<Dashboard />} />
-            <Route path="/agenda" element={<Agenda />} />
-            <Route path="/pacientes" element={<Pacientes />} />
-            <Route path="/clients" element={<Clients />} />
-            <Route path="/kanban" element={<Kanban />} />
-            <Route path="/financial" element={<Financial />} />
-            <Route path="/comissoes" element={<Comissoes />} />
-            <Route path="/inventory" element={<Inventory />} />
-            <Route path="/services" element={<Services />} />
-            <Route path="/packages" element={<Packages />} />
-            <Route path="/equipe" element={<Equipe />} />
-            <Route path="/marketing" element={<Marketing />} />
-            <Route path="/integration" element={<Integration />} />
-            <Route path="/reports" element={<Reports />} />
-            <Route path="/client-booking" element={<ClientBooking />} />
-          </Routes>
-        </main>
-      </div>
+      <SyncProvider>
+        <div className="app-layout">
+          <Sidebar />
+          <main className="main-content">
+            <Routes>
+              <Route path="/" element={<Dashboard />} />
+              <Route path="/agenda" element={<Agenda />} />
+              <Route path="/pacientes" element={<Pacientes />} />
+              <Route path="/clients" element={<Clients />} />
+              <Route path="/kanban" element={<Kanban />} />
+              <Route path="/financial" element={<Financial />} />
+              <Route path="/comissoes" element={<Comissoes />} />
+              <Route path="/inventory" element={<Inventory />} />
+              <Route path="/services" element={<Services />} />
+              <Route path="/packages" element={<Packages />} />
+              <Route path="/equipe" element={<Equipe />} />
+              <Route path="/marketing" element={<Marketing />} />
+              <Route path="/integration" element={<Integration />} />
+              <Route path="/reports" element={<Reports />} />
+              <Route path="/client-booking" element={<ClientBooking />} />
+            </Routes>
+          </main>
+        </div>
+      </SyncProvider>
     </Router>
   );
 }

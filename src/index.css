@@ -829,6 +829,73 @@ tbody td {
   margin-top: 2px;
 }
 
+/* ===== SYNC DOT (Pulsing status indicator) ===== */
+.sync-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.sync-dot-green {
+  background: var(--success);
+  animation: sync-pulse 2s ease-in-out infinite;
+}
+
+.sync-dot-yellow {
+  background: var(--warning);
+  animation: sync-pulse 1s ease-in-out infinite;
+}
+
+.sync-dot-red {
+  background: var(--danger);
+}
+
+.sync-dot-gray {
+  background: var(--text-muted);
+}
+
+@keyframes sync-pulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 currentColor; }
+  50% { opacity: 0.7; box-shadow: 0 0 0 4px rgba(107, 155, 122, 0.2); }
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ===== ORIGEM BADGE (source tracking) ===== */
+.origem-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 99px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.origem-manual {
+  background: var(--color-accent-soft);
+  color: var(--text-medium);
+}
+
+.origem-planilha {
+  background: var(--info-bg);
+  color: var(--info);
+}
+
+/* ===== SYNC LOG ENTRY ===== */
+.sync-log-entry {
+  transition: background 0.15s;
+}
+
+.sync-log-entry:hover {
+  filter: brightness(0.97);
+}
+
 /* ===== RESPONSIVE ===== */
 @media (max-width: 1100px) {
   .grid-4 { grid-template-columns: repeat(2, 1fr); }
