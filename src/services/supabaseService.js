@@ -234,6 +234,41 @@ export function unsubscribeChannel(channel) {
   if (channel) supabase.removeChannel(channel);
 }
 
+// ─── Daily Reports (Caixa Fechamento) ─────────────────────────
+
+export async function insertDailyReport(report) {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured');
+  const { data, error } = await supabase
+    .from('daily_reports')
+    .upsert([report], { onConflict: 'user_id,data_caixa' })
+    .select()
+    .single();
+  if (error) return handleError(error);
+  return { data, error: null };
+}
+
+export async function fetchDailyReports(limit = 30) {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured', []);
+  const { data, error } = await supabase
+    .from('daily_reports')
+    .select('*')
+    .order('data_caixa', { ascending: false })
+    .limit(limit);
+  if (error) return handleError(error, []);
+  return { data: data || [], error: null };
+}
+
+export async function fetchDailyReportByDate(dateStr) {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured');
+  const { data, error } = await supabase
+    .from('daily_reports')
+    .select('*')
+    .eq('data_caixa', dateStr)
+    .single();
+  if (error) return handleError(error);
+  return { data, error: null };
+}
+
 // ─── Auth ─────────────────────────────────────────────────────
 
 export async function signUp(email, password, metadata = {}) {

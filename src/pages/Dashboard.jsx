@@ -53,7 +53,7 @@ const CustomTooltip = ({ active, payload, label }) => {
 
 // ─── Dashboard ────────────────────────────────────────────────
 export default function Dashboard() {
-  const { transactions } = useSync();
+  const { transactions, dailySheet } = useSync();
 
   const today = new Date();
   const diaSemana = today.toLocaleDateString('pt-BR', { weekday: 'long' });
@@ -79,7 +79,8 @@ export default function Dashboard() {
     const todayStr = today.toLocaleDateString('pt-BR');
     return t.tipo === 'receita' && t.data === todayStr;
   });
-  const faturamentoHoje = receitasHoje.reduce((sum, t) => sum + t.valor, 0);
+  // Use dailySheet faturamento when available, fallback to transactions
+  const faturamentoHoje = dailySheet ? dailySheet.faturamentoBruto : receitasHoje.reduce((sum, t) => sum + t.valor, 0);
 
   // Unique active patients count
   const activePatients = new Set(

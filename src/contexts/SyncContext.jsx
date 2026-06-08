@@ -10,6 +10,7 @@ import {
   fetchCashierState, upsertCashierState,
   fetchSplitConfig, upsertSplitConfig,
   insertSyncLog as sbInsertLog, clearSyncLogs as sbClearLogs,
+  insertDailyReport as sbInsertDailyReport, fetchDailyReports as sbFetchDailyReports,
 } from '../services/supabaseService';
 import { defaultCashier, defaultSplitConfig } from '../mocks/financial';
 
@@ -59,6 +60,7 @@ export function SyncProvider({ children }) {
   const [supabaseReady, setSupabaseReady] = useState(false);
   const [supabaseConnected, setSupabaseConnected] = useState(false);
   const [connectionError, setConnectionError] = useState(null);
+  const [dailySheet, setDailySheet] = useState(() => loadFromStorage('erp_daily_sheet', null));
 
   const pollTimerRef = useRef(null);
   const countdownTimerRef = useRef(null);
@@ -130,6 +132,7 @@ export function SyncProvider({ children }) {
   useEffect(() => { saveToStorage('erp_sync_split', splitConfig); }, [splitConfig]);
   useEffect(() => { saveToStorage('erp_sync_config', syncConfig); }, [syncConfig]);
   useEffect(() => { saveToStorage('erp_sync_logs', syncLogs); }, [syncLogs]);
+  useEffect(() => { saveToStorage('erp_daily_sheet', dailySheet); }, [dailySheet]);
 
   // ─── Sync helpers ───────────────────────────────────────────
   const syncToSupabase = useCallback(async (table, data) => {
@@ -249,13 +252,23 @@ export function SyncProvider({ children }) {
     addLog('info', 'Caixa aberto');
   }, [syncToSupabase, addLog, requireConnection]);
 
-  const fecharCaixa = useCallback(() => {
-    if (!requireConnection('fechar caixa')) return;
+  const fecharCaixa = useCallback(async () => {
+    if (!requireConnection('fechar caixa')) return { success: false, error: 'Supabase desconectado' };
+
+    // Save daily report to Supabase first
+    const reportResult = await saveDailyReport();
+    if (reportResult.error) {
+      addLog('error', `Erro ao salvar relatório: ${reportResult.error}`);
+      return { success: false, error: reportResult.error };
+    }
+
+    // Then close the cashier
     const newState = { ...cashier, status: 'fechado', horaAbertura: null, dataAbertura: null };
     setCashier(newState);
     syncToSupabase('cashier_state', newState);
-    addLog('info', 'Caixa fechado');
-  }, [cashier, syncToSupabase, addLog, requireConnection]);
+    addLog('info', `Caixa fechado — Faturamento: R$ ${(dailySheet?.faturamentoBruto || 0).toFixed(2)}`);
+    return { success: true, report: reportResult.data };
+  }, [cashier, syncToSupabase, addLog, requireConnection, saveDailyReport, dailySheet]);
 
   const realizarSangria = useCallback((valor, motivo) => {
     if (!requireConnection('realizar sangria')) return;
@@ -285,6 +298,57 @@ export function SyncProvider({ children }) {
       return updated;
     });
   }, [syncToSupabase, requireConnection]);
+
+  // ─── Daily Sheet (read-only from Google Sheets) ─────────────
+  const updateDailySheet = useCallback((sheetData) => {
+    setDailySheet(sheetData);
+  }, []);
+
+  // ─── Save Daily Report to Supabase (only on fecharCaixa) ────
+  const saveDailyReport = useCallback(async () => {
+    if (!dailySheet) {
+      console.warn('[SyncContext] No daily sheet data to save');
+      return { data: null, error: 'Sem dados da planilha para salvar' };
+    }
+
+    // Convert DD/MM/YYYY to YYYY-MM-DD for database
+    const dateParts = dailySheet.dataCaixa.split('/');
+    const dataCaixaISO = dateParts.length === 3
+      ? `${dateParts[2]}-${dateParts[1].padStart(2, '0')}-${dateParts[0].padStart(2, '0')}`
+      : new Date().toISOString().split('T')[0];
+
+    const report = {
+      data_caixa: dataCaixaISO,
+      fundo_inicial: dailySheet.fundoInicial,
+      fundo_final: dailySheet.fundoFinal,
+      total_pix: dailySheet.totalPix,
+      total_credito: dailySheet.totalCredito,
+      total_debito: dailySheet.totalDebito,
+      total_dinheiro: dailySheet.totalDinheiro,
+      total_repasse: dailySheet.totalRepasse,
+      faturamento_bruto: dailySheet.faturamentoBruto,
+      total_despesas: 0,
+      total_transacoes: dailySheet.totalTransacoes,
+      status: 'fechado',
+      sheet_snapshot: dailySheet.rows,
+    };
+
+    console.log('[SyncContext] Saving daily report:', report);
+
+    if (isSupabaseConfigured() && supabaseReady) {
+      const result = await sbInsertDailyReport(report);
+      if (result.error) {
+        console.error('[SyncContext] Failed to save daily report:', result.error);
+        addLog('error', `Falha ao salvar relatório diário: ${result.error}`);
+      } else {
+        addLog('success', `Relatório diário salvo: R$ ${dailySheet.faturamentoBruto.toFixed(2)}`);
+      }
+      return result;
+    } else {
+      addLog('warning', 'Supabase não disponível — relatório salvo apenas localmente');
+      return { data: report, error: null };
+    }
+  }, [dailySheet, supabaseReady, addLog]);
 
   // ─── Import from sheet (upsert to Supabase) ─────────────────
   const importFromSheet = useCallback((newTransactions, newComissoes = [], newExpenses = [], rowHashes = []) => {
@@ -380,6 +444,7 @@ export function SyncProvider({ children }) {
     syncStatus, setSyncStatus,
     lastSyncAt, syncedRowCount, nextSyncIn,
     supabaseReady, supabaseConnected, connectionError,
+    dailySheet, updateDailySheet, saveDailyReport,
 
     addTransaction, removeTransaction,
     addExpense, removeExpense,

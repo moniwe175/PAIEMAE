@@ -248,3 +248,51 @@ create index if not exists idx_transactions_data on public.transactions(data);
 create index if not exists idx_expenses_user_id on public.expenses(user_id);
 create index if not exists idx_comissoes_user_id on public.comissoes(user_id);
 create index if not exists idx_sync_logs_user_id on public.sync_logs(user_id);
+
+-- ─── 9. Daily Reports (Caixa Fechamento) ─────────────────────
+create table if not exists public.daily_reports (
+  id uuid default gen_random_uuid() primary key,
+  user_id uuid references auth.users on delete cascade not null,
+  data_caixa date not null,
+  fundo_inicial numeric(12,2) default 0,
+  fundo_final numeric(12,2) default 0,
+  total_pix numeric(12,2) default 0,
+  total_credito numeric(12,2) default 0,
+  total_debito numeric(12,2) default 0,
+  total_dinheiro numeric(12,2) default 0,
+  total_repasse numeric(12,2) default 0,
+  faturamento_bruto numeric(12,2) default 0,
+  total_despesas numeric(12,2) default 0,
+  total_transacoes integer default 0,
+  status text default 'fechado',
+  observacoes text,
+  sheet_snapshot jsonb,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null,
+  updated_at timestamp with time zone default timezone('utc'::text, now()) not null,
+  unique(user_id, data_caixa)
+);
+
+alter table public.daily_reports enable row level security;
+
+create policy "Users can view own daily reports"
+  on public.daily_reports for select
+  using ( auth.uid() = user_id );
+
+create policy "Users can insert own daily reports"
+  on public.daily_reports for insert
+  with check ( auth.uid() = user_id );
+
+create policy "Users can update own daily reports"
+  on public.daily_reports for update
+  using ( auth.uid() = user_id );
+
+create policy "Users can delete own daily reports"
+  on public.daily_reports for delete
+  using ( auth.uid() = user_id );
+
+create trigger handle_updated_at_daily_reports
+  before update on public.daily_reports
+  for each row execute function public.handle_updated_at();
+
+create index if not exists idx_daily_reports_user_id on public.daily_reports(user_id);
+create index if not exists idx_daily_reports_data on public.daily_reports(data_caixa);

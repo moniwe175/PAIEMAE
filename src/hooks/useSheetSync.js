@@ -117,6 +117,7 @@ export function useSheetSync() {
     syncConfig,
     syncStatus,
     importFromSheet,
+    updateDailySheet,
     connectSheet,
     disconnectSheet,
     addLog,
@@ -197,7 +198,7 @@ export function useSheetSync() {
     return { transaction, comissao, rowHash };
   }, []);
 
-  // Poll Google Sheets API for data
+  // Poll Google Sheets API for data (new architecture: read-only from sheet)
   const pollGoogleSheet = useCallback(async () => {
     if (typeof window === 'undefined' || !window.gapi?.client?.sheets) {
       addLog('error', 'Google Sheets API não disponível');
@@ -208,51 +209,97 @@ export function useSheetSync() {
       setSyncStatus('connecting');
       const response = await window.gapi.client.sheets.spreadsheets.values.get({
         spreadsheetId: syncConfig.sheetId,
-        range: syncConfig.range,
+        range: 'A1:H500',
       });
 
       const rows = response.result.values || [];
-      if (rows.length === 0) {
-        addLog('warning', 'Planilha vazia ou sem dados');
+      if (rows.length < 4) {
+        addLog('warning', 'Planilha vazia ou sem dados suficientes');
         setSyncStatus('connected');
         return;
       }
 
-      // First row is header (skip if we already have mapping)
-      const headerRow = rows[0];
-      const dataRows = rows.slice(1);
+      // ─── Parse metadata from row 1 (A1, C1, F1) ───────────
+      const row1 = rows[0] || [];
+      const a1Value = String(row1[0] || '');
+      const dateMatch = a1Value.match(/(\d{2}\/\d{2}\/\d{4})/);
+      const dataCaixa = dateMatch ? dateMatch[1] : new Date().toLocaleDateString('pt-BR');
+      const fundoInicial = parseMonetaryValue(row1[2]) || 0;
+      const fundoFinal = parseMonetaryValue(row1[5]) || 0;
 
-      const mapping = Object.keys(syncConfig.columnMapping).length > 0
-        ? syncConfig.columnMapping
-        : autoDetectMapping(headerRow);
+      // ─── Parse headers from row 3 (index 2) ─────────────────
+      const headers = rows[2] || [];
 
-      const newTransactions = [];
-      const newComissoes = [];
-      const newHashes = [];
-      const existingHashes = new Set(syncConfig.syncedRowHashes);
+      // ─── Parse data rows from row 4+ (index 3+) ────────────
+      let totalPix = 0;
+      let totalCredito = 0;
+      let totalDebito = 0;
+      let totalDinheiro = 0;
+      let totalRepasse = 0;
+      const dataRows = [];
 
-      for (let i = 0; i < dataRows.length; i++) {
-        const result = processRow(dataRows[i], mapping, i);
-        if (result && !existingHashes.has(result.rowHash)) {
-          newTransactions.push(result.transaction);
-          if (result.comissao) newComissoes.push(result.comissao);
-          newHashes.push(result.rowHash);
-        }
+      for (let i = 3; i < rows.length; i++) {
+        const row = rows[i];
+        if (!row || row.length === 0) continue;
+        // Skip empty rows (no client name)
+        const cliente = String(row[0] || '').trim();
+        if (!cliente) continue;
+
+        const credito = parseMonetaryValue(row[1]) || 0;
+        const debito = parseMonetaryValue(row[2]) || 0;
+        const dinheiro = parseMonetaryValue(row[3]) || 0;
+        const pix = parseMonetaryValue(row[4]) || 0;
+        const repasse = parseMonetaryValue(row[5]) || 0;
+        const profissional = String(row[6] || '').trim();
+        const comanda = String(row[7] || '').trim();
+
+        totalPix += pix;
+        totalCredito += credito;
+        totalDebito += debito;
+        totalDinheiro += dinheiro;
+        totalRepasse += repasse;
+
+        dataRows.push({
+          cliente,
+          credito,
+          debito,
+          dinheiro,
+          pix,
+          repasse,
+          profissional,
+          comanda,
+        });
       }
 
-      if (newTransactions.length > 0) {
-        importFromSheet(newTransactions, newComissoes, [], newHashes);
-        addLog('success', `${newTransactions.length} nova(s) transação(ões) sincronizada(s) da planilha`);
-      } else {
-        addLog('info', 'Sincronização concluída - nenhum dado novo');
+      const faturamentoBruto = totalPix + totalCredito + totalDebito + totalDinheiro;
+
+      // ─── Update context state (no Supabase write) ──────────
+      const sheetData = {
+        dataCaixa,
+        fundoInicial,
+        fundoFinal,
+        totalPix,
+        totalCredito,
+        totalDebito,
+        totalDinheiro,
+        totalRepasse,
+        faturamentoBruto,
+        totalTransacoes: dataRows.length,
+        rows: dataRows,
+        lastUpdated: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+      };
+
+      if (updateDailySheet) {
+        updateDailySheet(sheetData);
       }
 
+      addLog('info', `Planilha lida: ${dataRows.length} transações, faturamento R$ ${faturamentoBruto.toFixed(2)}`);
       setSyncStatus('connected');
     } catch (error) {
       addLog('error', `Erro ao sincronizar: ${error.message || 'Erro desconhecido'}`);
       setSyncStatus('error');
     }
-  }, [syncConfig, addLog, importFromSheet, processRow, setSyncStatus]);
+  }, [syncConfig.sheetId, addLog, updateDailySheet, setSyncStatus]);
 
   // Connect and start syncing
   const connect = useCallback((config) => {

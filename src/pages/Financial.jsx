@@ -47,6 +47,7 @@ export default function Financial() {
     splitConfig, updateSplitConfig,
     syncStatus, addLog,
     supabaseConnected, connectionError,
+    dailySheet,
   } = useSync();
 
   const [activeTab, setActiveTab] = useState('caixa');
@@ -100,15 +101,24 @@ export default function Financial() {
   };
 
   const handlePromptFecharCaixa = () => {
+    const resumo = dailySheet
+      ? `\n\nResumo da planilha:\n• Faturamento Bruto: R$ ${dailySheet.faturamentoBruto.toFixed(2)}\n• PIX: R$ ${dailySheet.totalPix.toFixed(2)} | Crédito: R$ ${dailySheet.totalCredito.toFixed(2)}\n• Débito: R$ ${dailySheet.totalDebito.toFixed(2)} | Dinheiro: R$ ${dailySheet.totalDinheiro.toFixed(2)}\n• Total de transações: ${dailySheet.totalTransacoes}`
+      : '\n\nAtenção: Nenhum dado da planilha disponível. O relatório será salvo vazio.';
+
     setCaixaConfirm({
       type: 'fechar',
       title: 'Fechar Caixa',
-      message: `Você está prestes a fechar o caixa do dia ${cashier.dataAbertura || hoje()}. O sistema irá gerar o relatório final e bloquear novas inserções. Esta ação não pode ser desfeita. Tem certeza?`,
+      message: `Você está prestes a fechar o caixa do dia ${cashier.dataAbertura || hoje()}. O sistema irá gerar o relatório final consolidado e enviá-lo ao Supabase. Esta ação não pode ser desfeita. Tem certeza?${resumo}`,
       action: async () => {
         setCaixaLoading(true);
-        await new Promise(r => setTimeout(r, 800));
-        fecharCaixa();
+        const result = await fecharCaixa();
         setCaixaLoading(false);
+        if (result && result.success) {
+          addLog('success', `Caixa fechado com sucesso! Relatório salvo.`);
+        } else if (result && result.error) {
+          addLog('error', `Erro ao fechar caixa: ${result.error}`);
+          alert(`Erro ao salvar relatório: ${result.error}`);
+        }
         setCaixaConfirm(null);
       },
     });
@@ -121,18 +131,30 @@ export default function Financial() {
   };
 
   const isConnected = syncStatus === 'connected';
-  const hasData = transactions.length > 0 || expenses.length > 0;
+  const hasData = dailySheet || transactions.length > 0 || expenses.length > 0;
 
   const txsHoje = useMemo(() => {
     return transactions.map(normalizeTx).filter(t => t.data === hoje() && t.status === 'paid');
   }, [transactions]);
 
-  const faturamentoHoje = txsHoje.reduce((a, t) => a + t.total, 0);
-  const ticketMedio = txsHoje.length > 0 ? faturamentoHoje / txsHoje.length : 0;
+  // Use dailySheet data when available (from Google Sheets), fallback to transactions
+  const faturamentoHoje = dailySheet ? dailySheet.faturamentoBruto : txsHoje.reduce((a, t) => a + t.total, 0);
+  const ticketMedio = dailySheet
+    ? (dailySheet.totalTransacoes > 0 ? dailySheet.faturamentoBruto / dailySheet.totalTransacoes : 0)
+    : (txsHoje.length > 0 ? faturamentoHoje / txsHoje.length : 0);
   const aReceber = transactions.map(normalizeTx).filter(t => t.status === 'pending').reduce((a, t) => a + t.total, 0);
   const pendentesCount = transactions.map(normalizeTx).filter(t => t.status === 'pending').length;
 
+  // Payment methods: use dailySheet totals when available
   const formasPagamento = useMemo(() => {
+    if (dailySheet) {
+      const total = dailySheet.totalPix + dailySheet.totalCredito + dailySheet.totalDebito + dailySheet.totalDinheiro || 1;
+      return paymentMethods.map(pm => {
+        const valorMap = { Pix: dailySheet.totalPix, Crédito: dailySheet.totalCredito, Débito: dailySheet.totalDebito, Dinheiro: dailySheet.totalDinheiro };
+        const valor = valorMap[pm.nome] || 0;
+        return { ...pm, valor, pct: Math.round((valor / total) * 100) };
+      });
+    }
     const counts = {};
     txsHoje.forEach(t => { counts[t.pagamento] = (counts[t.pagamento] || 0) + t.total; });
     const total = Object.values(counts).reduce((a, v) => a + v, 0) || 1;
@@ -141,7 +163,7 @@ export default function Financial() {
       valor: counts[pm.nome] || 0,
       pct: Math.round(((counts[pm.nome] || 0) / total) * 100),
     }));
-  }, [txsHoje]);
+  }, [txsHoje, dailySheet]);
 
   const txFiltradas = useMemo(() => {
     return transactions.map(normalizeTx).filter(t => txFiltroStatus === 'todos' || t.status === txFiltroStatus);
@@ -531,11 +553,15 @@ export default function Financial() {
             </span>
           </div>
           <div style={{ fontSize: 28, fontWeight: 800, marginBottom: 4, color: '#fff' }}>
-            {isConnected ? fmtCurrency(cashier.saldo) : 'R$ --'}
+            {isConnected
+              ? fmtCurrency(dailySheet ? dailySheet.faturamentoBruto : cashier.saldo)
+              : 'R$ --'}
           </div>
           <div style={{ fontSize: 11, color: '#A8D5BA' }}>
-            {cashier.status === 'aberto' && cashier.horaAbertura
-              ? `Aberto às ${cashier.horaAbertura}`
+            {dailySheet
+              ? `${dailySheet.totalTransacoes} transações • ${dailySheet.dataCaixa}`
+              : cashier.status === 'aberto' && cashier.horaAbertura
+                ? `Aberto às ${cashier.horaAbertura}`
               : isConnected ? 'Caixa fechado' : 'Aguardando planilha'}
           </div>
           {cashier.status === 'fechado' && (
