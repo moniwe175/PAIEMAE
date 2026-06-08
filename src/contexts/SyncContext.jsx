@@ -252,53 +252,6 @@ export function SyncProvider({ children }) {
     addLog('info', 'Caixa aberto');
   }, [syncToSupabase, addLog, requireConnection]);
 
-  const fecharCaixa = useCallback(async () => {
-    if (!requireConnection('fechar caixa')) return { success: false, error: 'Supabase desconectado' };
-
-    // Save daily report to Supabase first
-    const reportResult = await saveDailyReport();
-    if (reportResult.error) {
-      addLog('error', `Erro ao salvar relatório: ${reportResult.error}`);
-      return { success: false, error: reportResult.error };
-    }
-
-    // Then close the cashier
-    const newState = { ...cashier, status: 'fechado', horaAbertura: null, dataAbertura: null };
-    setCashier(newState);
-    syncToSupabase('cashier_state', newState);
-    addLog('info', `Caixa fechado — Faturamento: R$ ${(dailySheet?.faturamentoBruto || 0).toFixed(2)}`);
-    return { success: true, report: reportResult.data };
-  }, [cashier, syncToSupabase, addLog, requireConnection, saveDailyReport, dailySheet]);
-
-  const realizarSangria = useCallback((valor, motivo) => {
-    if (!requireConnection('realizar sangria')) return;
-    const sangria = {
-      id: 'sangria_' + Date.now(),
-      valor,
-      motivo,
-      hora: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
-      data: new Date().toLocaleDateString('pt-BR'),
-    };
-    const newState = {
-      ...cashier,
-      saldo: cashier.saldo - valor,
-      sangrias: [sangria, ...cashier.sangrias],
-    };
-    setCashier(newState);
-    syncToSupabase('cashier_state', newState);
-    addLog('warning', `Sangria realizada: R$ ${valor.toLocaleString('pt-BR')} - ${motivo}`);
-  }, [cashier, syncToSupabase, addLog, requireConnection]);
-
-  // ─── Split config ───────────────────────────────────────────
-  const updateSplitConfig = useCallback((profissional, percentual) => {
-    if (!requireConnection('atualizar configuração de split')) return;
-    setSplitConfig(prev => {
-      const updated = prev.map(s => s.profissional === profissional ? { ...s, percentual } : s);
-      syncToSupabase('split_config', updated.find(s => s.profissional === profissional));
-      return updated;
-    });
-  }, [syncToSupabase, requireConnection]);
-
   // ─── Daily Sheet (read-only from Google Sheets) ─────────────
   const updateDailySheet = useCallback((sheetData) => {
     setDailySheet(sheetData);
@@ -349,6 +302,53 @@ export function SyncProvider({ children }) {
       return { data: report, error: null };
     }
   }, [dailySheet, supabaseReady, addLog]);
+
+  const fecharCaixa = useCallback(async () => {
+    if (!requireConnection('fechar caixa')) return { success: false, error: 'Supabase desconectado' };
+
+    // Save daily report to Supabase first
+    const reportResult = await saveDailyReport();
+    if (reportResult.error) {
+      addLog('error', `Erro ao salvar relatório: ${reportResult.error}`);
+      return { success: false, error: reportResult.error };
+    }
+
+    // Then close the cashier
+    const newState = { ...cashier, status: 'fechado', horaAbertura: null, dataAbertura: null };
+    setCashier(newState);
+    syncToSupabase('cashier_state', newState);
+    addLog('info', `Caixa fechado — Faturamento: R$ ${(dailySheet?.faturamentoBruto || 0).toFixed(2)}`);
+    return { success: true, report: reportResult.data };
+  }, [cashier, syncToSupabase, addLog, requireConnection, saveDailyReport, dailySheet]);
+
+  const realizarSangria = useCallback((valor, motivo) => {
+    if (!requireConnection('realizar sangria')) return;
+    const sangria = {
+      id: 'sangria_' + Date.now(),
+      valor,
+      motivo,
+      hora: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+      data: new Date().toLocaleDateString('pt-BR'),
+    };
+    const newState = {
+      ...cashier,
+      saldo: cashier.saldo - valor,
+      sangrias: [sangria, ...cashier.sangrias],
+    };
+    setCashier(newState);
+    syncToSupabase('cashier_state', newState);
+    addLog('warning', `Sangria realizada: R$ ${valor.toLocaleString('pt-BR')} - ${motivo}`);
+  }, [cashier, syncToSupabase, addLog, requireConnection]);
+
+  // ─── Split config ───────────────────────────────────────────
+  const updateSplitConfig = useCallback((profissional, percentual) => {
+    if (!requireConnection('atualizar configuração de split')) return;
+    setSplitConfig(prev => {
+      const updated = prev.map(s => s.profissional === profissional ? { ...s, percentual } : s);
+      syncToSupabase('split_config', updated.find(s => s.profissional === profissional));
+      return updated;
+    });
+  }, [syncToSupabase, requireConnection]);
 
   // ─── Import from sheet (upsert to Supabase) ─────────────────
   const importFromSheet = useCallback((newTransactions, newComissoes = [], newExpenses = [], rowHashes = []) => {

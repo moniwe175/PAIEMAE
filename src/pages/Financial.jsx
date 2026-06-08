@@ -102,7 +102,7 @@ export default function Financial() {
 
   const handlePromptFecharCaixa = () => {
     const resumo = dailySheet
-      ? `\n\nResumo da planilha:\n• Faturamento Bruto: R$ ${dailySheet.faturamentoBruto.toFixed(2)}\n• PIX: R$ ${dailySheet.totalPix.toFixed(2)} | Crédito: R$ ${dailySheet.totalCredito.toFixed(2)}\n• Débito: R$ ${dailySheet.totalDebito.toFixed(2)} | Dinheiro: R$ ${dailySheet.totalDinheiro.toFixed(2)}\n• Total de transações: ${dailySheet.totalTransacoes}`
+      ? `\n\nResumo da planilha:\n• Faturamento Bruto: R$ ${dailySheet.faturamentoBruto.toFixed(2)}\n• Despesas (Sangria): R$ ${(dailySheet.totalDespesas || 0).toFixed(2)}\n• Faturamento Líquido: R$ ${(dailySheet.faturamentoLiquido ?? dailySheet.faturamentoBruto).toFixed(2)}\n• PIX: R$ ${dailySheet.totalPix.toFixed(2)} | Crédito: R$ ${dailySheet.totalCredito.toFixed(2)}\n• Débito: R$ ${dailySheet.totalDebito.toFixed(2)} | Dinheiro: R$ ${dailySheet.totalDinheiro.toFixed(2)}\n• Total de transações: ${dailySheet.totalTransacoes}`
       : '\n\nAtenção: Nenhum dado da planilha disponível. O relatório será salvo vazio.';
 
     setCaixaConfirm({
@@ -554,12 +554,12 @@ export default function Financial() {
           </div>
           <div style={{ fontSize: 28, fontWeight: 800, marginBottom: 4, color: '#fff' }}>
             {isConnected
-              ? fmtCurrency(dailySheet ? dailySheet.faturamentoBruto : cashier.saldo)
+              ? fmtCurrency(dailySheet ? (dailySheet.faturamentoLiquido ?? dailySheet.faturamentoBruto) : cashier.saldo)
               : 'R$ --'}
           </div>
           <div style={{ fontSize: 11, color: '#A8D5BA' }}>
             {dailySheet
-              ? `${dailySheet.totalTransacoes} transações • ${dailySheet.dataCaixa}`
+              ? `Bruto: ${fmtCurrency(dailySheet.faturamentoBruto)} • Despesas: ${fmtCurrency(dailySheet.totalDespesas || 0)} • ${dailySheet.totalTransacoes} tx`
               : cashier.status === 'aberto' && cashier.horaAbertura
                 ? `Aberto às ${cashier.horaAbertura}`
               : isConnected ? 'Caixa fechado' : 'Aguardando planilha'}
@@ -595,7 +595,7 @@ export default function Financial() {
           </div>
           <div className="stat-label">Ticket Médio</div>
           <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
-            {isConnected ? `${txsHoje.length} procedimentos pagos` : 'Aguardando planilha'}
+            {isConnected ? `${dailySheet ? dailySheet.totalTransacoes : txsHoje.length} procedimentos pagos` : 'Aguardando planilha'}
           </div>
         </div>
 

@@ -167,7 +167,7 @@ export default function Dashboard() {
           badgeClass="neutral"
           value={`R$ ${faturamentoHoje.toLocaleString('pt-BR')}`}
           label="Faturamento Hoje"
-          sub={`${receitasHoje.length} receitas`}
+          sub={dailySheet ? `${dailySheet.totalTransacoes} transações da planilha` : `${receitasHoje.length} receitas`}
         />
         <StatCard
           icon={Users}

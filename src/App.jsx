@@ -23,10 +23,20 @@ import ClientBooking from './pages/ClientBooking';
 // Import Sidebar component
 import Sidebar from './components/ui/sidebar';
 
+// Import sheet sync hook for auto-connect
+import useSheetSync from './hooks/useSheetSync';
+
+// Global component that triggers Google Sheets auto-sync
+function SheetAutoSync() {
+  useSheetSync(); // auto-connect useEffect fires on mount
+  return null;
+}
+
 function App() {
   return (
     <Router>
       <SyncProvider>
+        <SheetAutoSync />
         <div className="app-layout">
           <Sidebar />
           <main className="main-content">

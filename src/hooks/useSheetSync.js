@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { useSync } from '../contexts/SyncContext';
 
 // ─── Utility functions ─────────────────────────────────────────
@@ -198,23 +198,58 @@ export function useSheetSync() {
     return { transaction, comissao, rowHash };
   }, []);
 
-  // Poll Google Sheets API for data (new architecture: read-only from sheet)
+  // Poll Google Sheets API via direct fetch (no gapi needed)
+  // Each call FULLY REPLACES the dailySheet state — no accumulation.
   const pollGoogleSheet = useCallback(async () => {
-    if (typeof window === 'undefined' || !window.gapi?.client?.sheets) {
-      addLog('error', 'Google Sheets API não disponível');
+    const apiKey = import.meta.env.VITE_GOOGLE_API_KEY;
+    const envSheetId = import.meta.env.VITE_GOOGLE_SHEET_ID;
+    const sheetId = syncConfig.sheetId || envSheetId;
+
+    if (!apiKey || !sheetId) {
+      addLog('error', 'Google Sheets: API Key ou Sheet ID não configurados no .env');
+      setSyncStatus('error');
       return;
     }
 
     try {
       setSyncStatus('connecting');
-      const response = await window.gapi.client.sheets.spreadsheets.values.get({
-        spreadsheetId: syncConfig.sheetId,
-        range: 'A1:H500',
-      });
+      const url = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/A1:H100?key=${apiKey}`;
+      const response = await fetch(url);
 
-      const rows = response.result.values || [];
+      if (!response.ok) {
+        const errBody = await response.json().catch(() => ({}));
+        const errMsg = errBody?.error?.message || `HTTP ${response.status}`;
+        throw new Error(errMsg);
+      }
+
+      const json = await response.json();
+      const rows = json.values || [];
+
+      console.log('[SheetSync] Raw rows received:', rows.length);
+      console.log('[SheetSync] Row 1 (metadata):', JSON.stringify(rows[0]));
+      console.log('[SheetSync] Row 3 (headers):', JSON.stringify(rows[2]));
+
       if (rows.length < 4) {
-        addLog('warning', 'Planilha vazia ou sem dados suficientes');
+        // Sheet is empty — REPLACE state with zeros (do not keep old data)
+        const emptySheet = {
+          dataCaixa: new Date().toLocaleDateString('pt-BR'),
+          fundoInicial: 0,
+          fundoFinal: 0,
+          totalPix: 0,
+          totalCredito: 0,
+          totalDebito: 0,
+          totalDinheiro: 0,
+          totalRepasse: 0,
+          faturamentoBruto: 0,
+          faturamentoLiquido: 0,
+          totalDespesas: 0,
+          totalTransacoes: 0,
+          rows: [],
+          expenseRows: [],
+          lastUpdated: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+        };
+        if (updateDailySheet) updateDailySheet(emptySheet);
+        addLog('warning', 'Planilha vazia — dados zerados');
         setSyncStatus('connected');
         return;
       }
@@ -224,13 +259,11 @@ export function useSheetSync() {
       const a1Value = String(row1[0] || '');
       const dateMatch = a1Value.match(/(\d{2}\/\d{2}\/\d{4})/);
       const dataCaixa = dateMatch ? dateMatch[1] : new Date().toLocaleDateString('pt-BR');
-      const fundoInicial = parseMonetaryValue(row1[2]) || 0;
-      const fundoFinal = parseMonetaryValue(row1[5]) || 0;
-
-      // ─── Parse headers from row 3 (index 2) ─────────────────
-      const headers = rows[2] || [];
+      const fundoInicial = parseMonetaryValue(row1[2]) || 0;  // C1
+      const fundoFinal = parseMonetaryValue(row1[5]) || 0;    // F1
 
       // ─── Parse data rows from row 4+ (index 3+) ────────────
+      // IMPORTANT: All accumulators are LOCAL — they reset to 0 every poll cycle.
       let totalPix = 0;
       let totalCredito = 0;
       let totalDebito = 0;
@@ -238,13 +271,30 @@ export function useSheetSync() {
       let totalRepasse = 0;
       const dataRows = [];
 
+      // Expense categories (despesas / sangria)
+      const expenseKeywords = /^(passagem|produtos|tributos|outras?\s*sa[íi]das?)$/i;
+      const sangriaKeyword = /^sangria$/i;
+      const skipKeywords = /^(cliente|total|totalizador|subtotal|soma|---)/i;
+      let totalDespesas = 0;
+      let totalDespesasCategorias = 0; // sum of individual expense categories
+      const expenseRows = [];
+
       for (let i = 3; i < rows.length; i++) {
         const row = rows[i];
-        if (!row || row.length === 0) continue;
-        // Skip empty rows (no client name)
-        const cliente = String(row[0] || '').trim();
-        if (!cliente) continue;
 
+        // Skip empty or undefined rows
+        if (!row || row.length === 0) continue;
+
+        // Column A (index 0): CLIENTE or expense category
+        const label = String(row[0] || '').trim();
+
+        // Skip rows with no label
+        if (!label) continue;
+
+        // Skip header/total/separator rows
+        if (skipKeywords.test(label)) continue;
+
+        // Read monetary values from columns B-F
         const credito = parseMonetaryValue(row[1]) || 0;
         const debito = parseMonetaryValue(row[2]) || 0;
         const dinheiro = parseMonetaryValue(row[3]) || 0;
@@ -253,6 +303,24 @@ export function useSheetSync() {
         const profissional = String(row[6] || '').trim();
         const comanda = String(row[7] || '').trim();
 
+        // Row total (sum of all payment columns)
+        const rowTotal = credito + debito + dinheiro + pix + repasse;
+
+        // Check if this is the SANGRIA row (total of all expenses)
+        if (sangriaKeyword.test(label)) {
+          totalDespesas = rowTotal;
+          expenseRows.push({ categoria: label, valor: rowTotal, credito, debito, dinheiro, pix, repasse });
+          continue;
+        }
+
+        // Check if this is an expense category row
+        if (expenseKeywords.test(label)) {
+          totalDespesasCategorias += rowTotal;
+          expenseRows.push({ categoria: label, valor: rowTotal, credito, debito, dinheiro, pix, repasse });
+          continue;
+        }
+
+        // Otherwise, it's a revenue/client row
         totalPix += pix;
         totalCredito += credito;
         totalDebito += debito;
@@ -260,20 +328,31 @@ export function useSheetSync() {
         totalRepasse += repasse;
 
         dataRows.push({
-          cliente,
-          credito,
-          debito,
-          dinheiro,
-          pix,
-          repasse,
-          profissional,
-          comanda,
+          cliente: label, credito, debito, dinheiro, pix, repasse, profissional, comanda,
         });
       }
 
-      const faturamentoBruto = totalPix + totalCredito + totalDebito + totalDinheiro;
+      // If SANGRIA row wasn't found, use sum of individual categories
+      if (totalDespesas === 0 && totalDespesasCategorias > 0) {
+        totalDespesas = totalDespesasCategorias;
+      }
 
-      // ─── Update context state (no Supabase write) ──────────
+      const faturamentoBruto = totalPix + totalCredito + totalDebito + totalDinheiro;
+      const faturamentoLiquido = faturamentoBruto - totalDespesas;
+
+      console.log('[SheetSync] Parsed:', {
+        transacoes: dataRows.length,
+        faturamentoBruto,
+        faturamentoLiquido,
+        totalDespesas,
+        totalPix, totalCredito, totalDebito, totalDinheiro, totalRepasse,
+        clientes: dataRows.map(r => r.cliente),
+        despesas: expenseRows.map(r => `${r.categoria}: R$ ${r.valor.toFixed(2)}`),
+      });
+
+      // ─── FULL REPLACEMENT of dailySheet state ───────────────
+      // This object COMPLETELY SUBSTITUTES the previous state.
+      // If a row was deleted from the sheet, it will be gone here.
       const sheetData = {
         dataCaixa,
         fundoInicial,
@@ -284,22 +363,38 @@ export function useSheetSync() {
         totalDinheiro,
         totalRepasse,
         faturamentoBruto,
+        faturamentoLiquido,
+        totalDespesas,
         totalTransacoes: dataRows.length,
         rows: dataRows,
-        lastUpdated: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+        expenseRows,
+        lastUpdated: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
       };
 
       if (updateDailySheet) {
         updateDailySheet(sheetData);
       }
 
-      addLog('info', `Planilha lida: ${dataRows.length} transações, faturamento R$ ${faturamentoBruto.toFixed(2)}`);
+      addLog('info', `Planilha: ${dataRows.length} transações | R$ ${faturamentoBruto.toFixed(2)} bruto | R$ ${totalDespesas.toFixed(2)} despesas | R$ ${faturamentoLiquido.toFixed(2)} líquido`);
       setSyncStatus('connected');
     } catch (error) {
       addLog('error', `Erro ao sincronizar: ${error.message || 'Erro desconhecido'}`);
       setSyncStatus('error');
     }
   }, [syncConfig.sheetId, addLog, updateDailySheet, setSyncStatus]);
+
+  // Auto-connect when env vars are available
+  const autoConnectRef = useRef(false);
+  useEffect(() => {
+    const apiKey = import.meta.env.VITE_GOOGLE_API_KEY;
+    const envSheetId = import.meta.env.VITE_GOOGLE_SHEET_ID;
+    if (apiKey && envSheetId && !autoConnectRef.current) {
+      autoConnectRef.current = true;
+      connectSheet({ sheetId: envSheetId, googleApiKey: apiKey, sheetName: 'Caixa Operacional' });
+      addLog('info', 'Auto-conectando à planilha do Google Sheets...');
+      startPolling(pollGoogleSheet, 15);
+    }
+  }, [connectSheet, addLog, startPolling, pollGoogleSheet]);
 
   // Connect and start syncing
   const connect = useCallback((config) => {
