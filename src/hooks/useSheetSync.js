@@ -213,7 +213,7 @@ export function useSheetSync() {
 
     try {
       setSyncStatus('connecting');
-      const url = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/A1:H100?key=${apiKey}`;
+      const url = `https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/A1:I100?key=${apiKey}`;
       const response = await fetch(url);
 
       if (!response.ok) {
@@ -271,12 +271,10 @@ export function useSheetSync() {
       let totalRepasse = 0;
       const dataRows = [];
 
-      // Expense categories (despesas / sangria)
-      const expenseKeywords = /^(passagem|produtos|tributos|outras?\s*sa[íi]das?)$/i;
-      const sangriaKeyword = /^sangria$/i;
+      // Expense categories (all are despesas — summed together for totalDespesas)
+      const expenseKeywords = /^(passagem|produtos|tributos|outras?\s*sa[íi]das?|sangria)$/i;
       const skipKeywords = /^(cliente|total|totalizador|subtotal|soma|---)/i;
       let totalDespesas = 0;
-      let totalDespesasCategorias = 0; // sum of individual expense categories
       const expenseRows = [];
 
       for (let i = 3; i < rows.length; i++) {
@@ -300,22 +298,16 @@ export function useSheetSync() {
         const dinheiro = parseMonetaryValue(row[3]) || 0;
         const pix = parseMonetaryValue(row[4]) || 0;
         const repasse = parseMonetaryValue(row[5]) || 0;
-        const profissional = String(row[6] || '').trim();
-        const comanda = String(row[7] || '').trim();
+        const profissional = String(row[6] || '').trim();   // G: service type
+        const profNome = String(row[7] || '').trim();          // H: professional name
+        const comandaNum = String(row[8] || '').trim();         // I: command number
 
         // Row total (sum of all payment columns)
         const rowTotal = credito + debito + dinheiro + pix + repasse;
 
-        // Check if this is the SANGRIA row (total of all expenses)
-        if (sangriaKeyword.test(label)) {
-          totalDespesas = rowTotal;
-          expenseRows.push({ categoria: label, valor: rowTotal, credito, debito, dinheiro, pix, repasse });
-          continue;
-        }
-
-        // Check if this is an expense category row
+        // Check if this is an expense category row (including SANGRIA)
         if (expenseKeywords.test(label)) {
-          totalDespesasCategorias += rowTotal;
+          totalDespesas += rowTotal;
           expenseRows.push({ categoria: label, valor: rowTotal, credito, debito, dinheiro, pix, repasse });
           continue;
         }
@@ -328,13 +320,9 @@ export function useSheetSync() {
         totalRepasse += repasse;
 
         dataRows.push({
-          cliente: label, credito, debito, dinheiro, pix, repasse, profissional, comanda,
+          cliente: label, credito, debito, dinheiro, pix, repasse,
+          profissional, profNome, comanda: comandaNum,
         });
-      }
-
-      // If SANGRIA row wasn't found, use sum of individual categories
-      if (totalDespesas === 0 && totalDespesasCategorias > 0) {
-        totalDespesas = totalDespesasCategorias;
       }
 
       const faturamentoBruto = totalPix + totalCredito + totalDebito + totalDinheiro;

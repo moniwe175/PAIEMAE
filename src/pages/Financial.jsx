@@ -166,12 +166,59 @@ export default function Financial() {
   }, [txsHoje, dailySheet]);
 
   const txFiltradas = useMemo(() => {
-    return transactions.map(normalizeTx).filter(t => txFiltroStatus === 'todos' || t.status === txFiltroStatus);
-  }, [transactions, txFiltroStatus]);
+    // Transform sheet rows into transaction objects
+    const sheetTxs = (dailySheet?.rows || []).map((r, idx) => {
+      const total = r.credito + r.debito + r.dinheiro + r.pix;
+      // Detect primary payment method
+      let pagamento = 'Pix';
+      if (r.pix > 0) pagamento = 'Pix';
+      else if (r.credito > 0) pagamento = 'Crédito';
+      else if (r.debito > 0) pagamento = 'Débito';
+      else if (r.dinheiro > 0) pagamento = 'Dinheiro';
+
+      return {
+        id: `sheet_tx_${idx}_${r.cliente}`,
+        tipo: 'receita',
+        desc: r.cliente,
+        cliente: r.cliente,
+        procedimento: r.profissional || '—',  // G column = service type (e.g. depilaçao)
+        total,
+        valor: total,
+        data: dailySheet?.dataCaixa || '--',
+        hora: dailySheet?.lastUpdated || '--:--',
+        pagamento,
+        status: 'paid',
+        profissionalNome: r.profNome || '—',    // H column = professional name
+        comanda: r.comanda || '—',               // I column = command number
+        origem: 'planilha',
+        clinica: total - (r.repasse || 0),
+        profissional: r.repasse || 0,
+      };
+    });
+
+    // Supabase transactions (exclude old sheet ones to avoid duplicates)
+    const supabaseTxs = transactions
+      .filter(t => t.origem !== 'planilha')
+      .map(normalizeTx);
+
+    const all = [...supabaseTxs, ...sheetTxs];
+    return all.filter(t => txFiltroStatus === 'todos' || t.status === txFiltroStatus);
+  }, [transactions, dailySheet, txFiltroStatus]);
 
   const expFiltradas = useMemo(() => {
-    return expenses.filter(e => expFiltroCat === 'todos' || e.categoria === expFiltroCat);
-  }, [expenses, expFiltroCat]);
+    // Merge Supabase expenses + sheet expense rows
+    const sheetExpenses = (dailySheet?.expenseRows || []).map(e => ({
+      id: `sheet_${e.categoria}`,
+      data: dailySheet?.dataCaixa || '--',
+      descricao: e.categoria,
+      categoria: e.categoria,
+      metodo: 'Planilha',
+      valor: e.valor,
+      origem: 'planilha',
+    }));
+    const all = [...expenses, ...sheetExpenses];
+    return all.filter(e => expFiltroCat === 'todos' || e.categoria === expFiltroCat);
+  }, [expenses, dailySheet, expFiltroCat]);
 
   const handleSangria = () => {
     const v = parseFloat(sangriaForm.valor);
@@ -739,45 +786,24 @@ export default function Financial() {
             <table>
               <thead>
                 <tr>
-                  <th>Hora</th>
                   <th>Cliente</th>
                   <th>Procedimento</th>
-                  <th style={{ textAlign: 'right' }}>Total</th>
-                  <th style={{ textAlign: 'right' }}>Clínica</th>
-                  <th style={{ textAlign: 'right' }}>Profissional</th>
+                  <th style={{ textAlign: 'right' }}>Valor</th>
                   <th>Pagamento</th>
-                  <th>Status</th>
+                  <th>Profissional</th>
+                  <th>Comanda</th>
                   <th>Origem</th>
                 </tr>
               </thead>
               <tbody>
                 {txFiltradas.map(t => (
                   <tr key={t.id}>
-                    <td style={{ fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{t.hora}</td>
                     <td style={{ fontWeight: 500, fontSize: 13 }}>{t.cliente}</td>
                     <td style={{ fontSize: 13, color: 'var(--text-medium)' }}>{t.procedimento}</td>
                     <td style={{ textAlign: 'right', fontWeight: 700, fontSize: 13 }}>{fmtCurrency(t.total)}</td>
-                    <td style={{ textAlign: 'right', fontSize: 12, color: 'var(--text-muted)' }}>{fmtCurrency(t.clinica)}</td>
-                    <td style={{ textAlign: 'right', fontSize: 12, color: 'var(--text-muted)' }}>{fmtCurrency(t.profissional)}</td>
                     <td><span className="badge badge-neutral" style={{ fontSize: 10 }}>{t.pagamento}</span></td>
-                    <td>
-                      <span style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: 4,
-                        padding: '2px 8px',
-                        borderRadius: 99,
-                        fontSize: 10,
-                        fontWeight: 700,
-                        background: STATUS_BG[t.status],
-                        color: STATUS_COLORS[t.status],
-                      }}>
-                        {t.status === 'paid' && <CheckCircle style={{ width: 10, height: 10 }} />}
-                        {t.status === 'pending' && <Clock style={{ width: 10, height: 10 }} />}
-                        {t.status === 'cancelled' && <X style={{ width: 10, height: 10 }} />}
-                        {STATUS_LABELS[t.status]}
-                      </span>
-                    </td>
+                    <td style={{ fontWeight: 500, fontSize: 12 }}>{t.profissionalNome || '—'}</td>
+                    <td><span className="badge" style={{ fontSize: 10, background: '#E8F5E9', color: '#2E7D32' }}>{t.comanda || '—'}</span></td>
                     <td>
                       <span className={`origem-badge ${t.origem === 'planilha' ? 'origem-planilha' : 'origem-manual'}`} style={{ fontSize: 10 }}>
                         {t.origem === 'planilha' ? <><FileSpreadsheet style={{ width: 10, height: 10 }} />Planilha</> : 'Manual'}
@@ -820,28 +846,34 @@ export default function Financial() {
                 <tr><th>Data</th><th>Descrição</th><th>Categoria</th><th>Método</th><th style={{ textAlign: 'right' }}>Valor</th><th style={{ width: 40 }} /></tr>
               </thead>
               <tbody>
-                {expFiltradas.map(e => (
+                {expFiltradas.map(e => {
+                  const isFromSheet = e.origem === 'planilha';
+                  const metodo = e.metodoPagamento || e.metodo || '—';
+                  return (
                   <tr key={e.id}>
                     <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>{e.data}</td>
                     <td style={{ fontWeight: 500, fontSize: 13 }}>{e.descricao}</td>
                     <td>
                       <span className="badge" style={{
                         fontSize: 10,
-                        background: e.categoria === 'Estoque' ? '#E3F2FD' : e.categoria === 'Fixo' ? '#FFF3E0' : e.categoria === 'Marketing' ? '#F3E5F5' : 'var(--neutral-bg)',
-                        color: e.categoria === 'Estoque' ? '#1565C0' : e.categoria === 'Fixo' ? '#E65100' : e.categoria === 'Marketing' ? '#6A1B9A' : 'var(--text-medium)',
+                        background: e.categoria === 'Estoque' ? '#E3F2FD' : e.categoria === 'Fixo' ? '#FFF3E0' : e.categoria === 'Marketing' ? '#F3E5F5' : isFromSheet ? '#FDE8E8' : 'var(--neutral-bg)',
+                        color: e.categoria === 'Estoque' ? '#1565C0' : e.categoria === 'Fixo' ? '#E65100' : e.categoria === 'Marketing' ? '#6A1B9A' : isFromSheet ? '#B91C1C' : 'var(--text-medium)',
                       }}>
                         {e.categoria}
                       </span>
                     </td>
-                    <td><span className="badge badge-neutral" style={{ fontSize: 10 }}>{e.metodoPagamento}</span></td>
+                    <td><span className="badge badge-neutral" style={{ fontSize: 10 }}>{metodo}</span></td>
                     <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--danger)', fontSize: 13 }}>- {fmtCurrency(e.valor)}</td>
                     <td>
-                      <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 4 }} onClick={() => removeExpense(e.id)}>
-                        <Trash2 style={{ width: 12, height: 12 }} />
-                      </button>
+                      {!isFromSheet && (
+                        <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 4 }} onClick={() => removeExpense(e.id)}>
+                          <Trash2 style={{ width: 12, height: 12 }} />
+                        </button>
+                      )}
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
             {expFiltradas.length === 0 && (
