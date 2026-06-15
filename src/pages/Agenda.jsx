@@ -10,7 +10,7 @@ import { useProfissionais } from '../lib/profissionais';
 
 // ─── Constants ───────────────────────────────────────────────
 
-const SLOT_HEIGHT = 48; // px por hora — compacto como na imagem
+const SLOT_HEIGHT = 80; // px por hora — maior para melhor visualização
 const HOUR_START = 7;
 const HOUR_END = 20;
 const PX_PER_MIN = SLOT_HEIGHT / 60;
@@ -177,6 +177,11 @@ function getWeekDays(date) {
 // ═══════════════════════════════════════════════════════════════
 function MiniCalendar({ selectedDate, onSelect, agendamentos }) {
   const [viewDate, setViewDate] = useState(new Date(selectedDate));
+
+  useEffect(() => {
+    setViewDate(new Date(selectedDate));
+  }, [selectedDate]);
+
   const year = viewDate.getFullYear();
   const month = viewDate.getMonth();
   const today = new Date();
@@ -754,28 +759,79 @@ function DayStats({ agendamentos, date }) {
   const dateStr = fmtDate(date);
   const apts = agendamentos.filter(a => a.data === dateStr);
   const total = apts.length;
-  const conf = apts.filter(a => a.status === 'confirmado' || a.status === 'em_atendimento').length;
-  const receita = apts.filter(a => a.status === 'finalizado').reduce((s, a) => s + (Number(a.valor) || 0), 0);
+
+  const conf = apts.filter(a => a.status === 'confirmado').length;
   const pend = apts.filter(a => a.status === 'aguardando_confirmacao').length;
-  const stats = [
-    { label: 'Agendamentos', value: total, icon: CalendarCheck, color: '#C73B6D', bg: '#FDF4F7' },
-    { label: 'Confirmados', value: conf, icon: CheckSquare, color: '#059669', bg: '#ECFDF5' },
-    { label: 'Aguardando', value: pend, icon: Clock, color: '#D97706', bg: '#FFFBEB' },
-    { label: 'Receita do dia', value: receita ? `R$ ${receita.toFixed(0)}` : '—', icon: TrendingUp, color: '#7C3AED', bg: '#F5F3FF' },
+  const atend = apts.filter(a => a.status === 'em_atendimento').length;
+  const finalizado = apts.filter(a => a.status === 'finalizado').length;
+  const faltou = apts.filter(a => a.status === 'cliente_faltou').length;
+
+  const getPct = (val) => total > 0 ? Math.round((val / total) * 100) : 0;
+
+  const confPct = getPct(conf);
+  const pendPct = getPct(pend);
+  const atendPct = getPct(atend);
+  const finalizadoPct = getPct(finalizado);
+  const faltouPct = getPct(faltou);
+
+  const items = [
+    { label: 'Confirmados', value: conf, pct: confPct, icon: CheckSquare, color: '#27AE60', bg: '#EAFAF1' },
+    { label: 'Aguardando', value: pend, pct: pendPct, icon: Clock, color: '#E67E22', bg: '#FDF2E9' },
+    { label: 'Em Atendimento', value: atend, pct: atendPct, icon: Scissors, color: '#46D6BF', bg: '#E5FAF6' },
+    { label: 'Finalizado', value: finalizado, pct: finalizadoPct, icon: CheckCircle, color: '#3498DB', bg: '#EBF5FB' },
+    { label: 'Cliente Faltou', value: faltou, pct: faltouPct, icon: XCircle, color: '#7F8C8D', bg: '#F2F3F4' },
   ];
+
   return (
-    <div style={{ display: 'flex', gap: 10, marginBottom: 14 }}>
-      {stats.map(({ label, value, icon: Icon, color, bg }) => (
-        <div key={label} style={{ flex: 1, background: '#fff', borderRadius: 14, padding: '10px 14px', border: '1px solid #F0EBE6', display: 'flex', alignItems: 'center', gap: 10, boxShadow: '0 1px 4px rgba(0,0,0,0.04)' }}>
-          <div style={{ width: 34, height: 34, borderRadius: 10, background: bg, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-            <Icon style={{ width: 15, height: 15, color }} />
-          </div>
-          <div>
-            <div style={{ fontSize: 17, fontWeight: 700, color: '#1F2937', lineHeight: 1.1 }}>{value}</div>
-            <div style={{ fontSize: 10, color: '#9CA3AF', fontWeight: 500 }}>{label}</div>
-          </div>
+    <div style={{ background: '#fff', borderRadius: 16, padding: 14, border: '1px solid #F0EBE6', boxShadow: '0 1px 4px rgba(0,0,0,0.04)', display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: 1, color: '#9CA3AF', marginBottom: 2, textTransform: 'uppercase' }}>Resumo do Dia</div>
+      
+      {/* Total Card Hero */}
+      <div style={{ background: 'linear-gradient(135deg, #FDF4F7, #FFF5F8)', borderRadius: 12, padding: '10px 12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div>
+          <div style={{ fontSize: 20, fontWeight: 800, color: '#C73B6D', lineHeight: 1 }}>{total}</div>
+          <div style={{ fontSize: 11, fontWeight: 600, color: '#852A4B', marginTop: 2 }}>Agendamentos</div>
         </div>
-      ))}
+        <div style={{ width: 32, height: 32, borderRadius: '50%', background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 6px rgba(199,59,109,0.1)' }}>
+          <CalendarCheck style={{ width: 14, height: 14, color: '#C73B6D' }} />
+        </div>
+      </div>
+
+      {/* Progress bar */}
+      {total > 0 && (
+        <div style={{ display: 'flex', height: 6, borderRadius: 3, overflow: 'hidden', background: '#F3F4F6' }}>
+          <div style={{ width: `${confPct}%`, background: '#27AE60', transition: 'width 0.3s ease' }} title={`Confirmados: ${confPct}%`} />
+          <div style={{ width: `${pendPct}%`, background: '#E67E22', transition: 'width 0.3s ease' }} title={`Aguardando: ${pendPct}%`} />
+          <div style={{ width: `${atendPct}%`, background: '#46D6BF', transition: 'width 0.3s ease' }} title={`Em Atendimento: ${atendPct}%`} />
+          <div style={{ width: `${finalizadoPct}%`, background: '#3498DB', transition: 'width 0.3s ease' }} title={`Finalizado: ${finalizadoPct}%`} />
+          <div style={{ width: `${faltouPct}%`, background: '#7F8C8D', transition: 'width 0.3s ease' }} title={`Cliente Faltou: ${faltouPct}%`} />
+        </div>
+      )}
+
+      {/* Rows */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {items.map((item) => {
+          const Icon = item.icon;
+          return (
+            <div key={item.label} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <div style={{ width: 22, height: 22, borderRadius: 6, background: item.bg, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <Icon style={{ width: 11, height: 11, color: item.color }} />
+                </div>
+                <span style={{ fontSize: 11, fontWeight: 600, color: '#4B5563' }}>{item.label}</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <span style={{ fontSize: 11, fontWeight: 700, color: '#1F2937' }}>{item.value}</span>
+                {total > 0 && (
+                  <span style={{ fontSize: 9, color: '#6B7280', background: '#F3F4F6', padding: '1px 4px', borderRadius: 4 }}>
+                    {item.pct}%
+                  </span>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -956,9 +1012,6 @@ export default function Agenda() {
           onSave={handleSaveBloqueio} onDelete={handleDeleteBloqueio} />
       )}
 
-      {/* Stats */}
-      <DayStats agendamentos={agendamentos} date={selectedDate} />
-
       {/* Top Nav */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, gap: 12 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -990,7 +1043,7 @@ export default function Agenda() {
           <button onClick={() => openBloqueio()} style={{ background: '#F3F4F6', color: '#374151', border: '1px solid #E5E7EB', borderRadius: 10, padding: '8px 14px', fontSize: 13, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5, transition: 'all 0.12s' }}
             onMouseEnter={e => { e.currentTarget.style.background = '#E5E7EB'; }}
             onMouseLeave={e => { e.currentTarget.style.background = '#F3F4F6'; }}>
-            <Ban style={{ width: 14, height: 14 }} />Bloquear
+            <Ban style={{ width: 14, height: 14 }} />Ausência
           </button>
           {/* Novo Agendamento */}
           <button onClick={() => openNew()} style={{ background: 'linear-gradient(135deg,#C73B6D,#9B2C50)', color: '#fff', border: 'none', borderRadius: 10, padding: '8px 16px', fontSize: 13, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, boxShadow: '0 3px 10px rgba(199,59,109,0.35)', transition: 'transform 0.12s,box-shadow 0.12s' }}
@@ -1007,29 +1060,11 @@ export default function Agenda() {
         {/* Sidebar */}
         <div style={{ width: 220, display: 'flex', flexDirection: 'column', gap: 10, flexShrink: 0, overflowY: 'auto' }}>
           <MiniCalendar selectedDate={selectedDate} onSelect={setSelectedDate} agendamentos={agendamentos} />
+          
+          {/* Stats */}
+          <DayStats agendamentos={agendamentos} date={selectedDate} />
 
-          {/* Equipe */}
-          <div style={{ background: '#fff', borderRadius: 16, padding: 14, border: '1px solid #F0EBE6', boxShadow: '0 1px 4px rgba(0,0,0,0.04)' }}>
-            <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: 1, color: '#9CA3AF', marginBottom: 10, textTransform: 'uppercase' }}>Equipe</div>
-            {profissionais.map(p => {
-              const count = aptsDodia.filter(a => a.profissional === p.nome).length;
-              return (
-                <div key={p.nome} style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 7, cursor: 'pointer', borderRadius: 10, padding: '5px 7px', transition: 'background 0.12s' }}
-                  onClick={() => openNew(p.nome, '')}
-                  onMouseEnter={e => e.currentTarget.style.background = '#FDF8F5'}
-                  onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-                  <div style={{ width: 32, height: 32, borderRadius: '50%', background: p.cor, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 700, flexShrink: 0, boxShadow: `0 2px 5px ${p.cor}44` }}>{p.nome.charAt(0)}</div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 12, fontWeight: 600, color: '#1F2937' }}>{p.nome}</div>
-                    <div style={{ fontSize: 10, color: '#9CA3AF' }}>{p.cargo}</div>
-                  </div>
-                  {count > 0 && (
-                    <span style={{ minWidth: 18, height: 18, borderRadius: 9, background: p.cor, color: '#fff', fontSize: 10, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 4px' }}>{count}</span>
-                  )}
-                </div>
-              );
-            })}
-          </div>
+
 
           {/* Legenda Status */}
           <div style={{ background: '#fff', borderRadius: 16, padding: 14, border: '1px solid #F0EBE6', boxShadow: '0 1px 4px rgba(0,0,0,0.04)' }}>
@@ -1049,7 +1084,7 @@ export default function Agenda() {
 
           {/* Header colunas */}
           <div style={{ display: 'flex', borderBottom: '2px solid #F0EBE6', background: '#FAFAFA', flexShrink: 0 }}>
-            <div style={{ width: 52, flexShrink: 0 }} />
+            <div style={{ width: 64, flexShrink: 0 }} />
             {(viewMode === 'day' ? profissionais : weekDays).map((item, i) => {
               if (viewMode === 'day') {
                 const p = item;
@@ -1063,10 +1098,6 @@ export default function Agenda() {
                     <div style={{ width: 36, height: 36, borderRadius: '50%', background: p.cor, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 700, marginBottom: 4, boxShadow: `0 2px 8px ${p.cor}44` }}>{p.nome.charAt(0)}</div>
                     <div style={{ fontSize: 12, fontWeight: 700, color: '#1F2937' }}>{p.nome}</div>
                     <div style={{ fontSize: 10, color: '#9CA3AF' }}>{p.cargo}</div>
-                    <div style={{ display: 'flex', gap: 5, marginTop: 4 }}>
-                      {cnt > 0 && <div style={{ fontSize: 10, color: p.cor, fontWeight: 700, background: `${p.cor}15`, padding: '1px 7px', borderRadius: 10 }}>{cnt} apt{cnt > 1 ? 's' : ''}</div>}
-                      {blqCnt > 0 && <div style={{ fontSize: 10, color: '#6B7280', fontWeight: 700, background: '#F3F4F6', padding: '1px 7px', borderRadius: 10 }}>{blqCnt} blq</div>}
-                    </div>
                   </div>
                 );
               } else {
@@ -1090,16 +1121,16 @@ export default function Agenda() {
 
           {/* Time Grid */}
           <div style={{ flex: 1, overflowY: 'auto', position: 'relative' }}>
-            <div style={{ position: 'relative', minHeight: gridHeight + 'px', display: 'flex' }}>
+            <div style={{ position: 'relative', minHeight: (gridHeight + 32) + 'px', display: 'flex', paddingBottom: 32 }}>
 
               {/* Coluna de horas */}
-              <div style={{ width: 52, flexShrink: 0, position: 'relative', background: '#FAFAFA', borderRight: '1px solid #F0EBE6' }}>
+              <div style={{ width: 64, flexShrink: 0, position: 'relative', background: '#FAFAFA', borderRight: '1px solid #F0EBE6' }}>
                 {Array.from({ length: HOUR_END - HOUR_START + 1 }, (_, i) => {
                   const h = HOUR_START + i;
                   const top = i * SLOT_HEIGHT;
                   return (
-                    <div key={h} style={{ position: 'absolute', top: top - 7, left: 0, width: 52, display: 'flex', alignItems: 'center', justifyContent: 'flex-end', paddingRight: 8 }}>
-                      <span style={{ fontSize: 10, color: '#9CA3AF', fontWeight: 600 }}>{String(h).padStart(2, '0')}h</span>
+                    <div key={h} style={{ position: 'absolute', top: top - 7, left: 0, width: 64, display: 'flex', alignItems: 'center', justifyContent: 'flex-end', paddingRight: 10 }}>
+                      <span style={{ fontSize: 11, color: '#374151', fontWeight: 600 }}>{String(h).padStart(2, '0')}:00</span>
                     </div>
                   );
                 })}
@@ -1134,12 +1165,25 @@ export default function Agenda() {
 
                     {/* Zona clicável */}
                     <div style={{ position: 'absolute', inset: 0, zIndex: 1 }}
-                      onClick={() => {
-                        if (viewMode === 'day') openNew(item.nome, '');
-                        else { setSelectedDate(new Date(item)); setViewMode('day'); }
+                      onClick={(e) => {
+                        if (viewMode === 'day') {
+                          const rect = e.currentTarget.getBoundingClientRect();
+                          const clickY = e.clientY - rect.top;
+                          const hourIndex = Math.floor(clickY / SLOT_HEIGHT);
+                          const minutesFraction = clickY % SLOT_HEIGHT;
+                          let clickedHour = HOUR_START + hourIndex;
+                          let clickedMinute = minutesFraction >= SLOT_HEIGHT / 2 ? 30 : 0;
+                          if (clickedHour >= HOUR_END) {
+                            clickedHour = HOUR_END;
+                            clickedMinute = 0;
+                          }
+                          const timeString = `${String(clickedHour).padStart(2, '0')}:${String(clickedMinute).padStart(2, '0')}`;
+                          openNew(item.nome, timeString);
+                        } else {
+                          setSelectedDate(new Date(item));
+                          setViewMode('day');
+                        }
                       }}
-                      onMouseEnter={e => e.currentTarget.style.background = `${colColor}06`}
-                      onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
                     />
 
                     {/* Bloqueios */}

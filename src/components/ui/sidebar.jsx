@@ -16,13 +16,15 @@ import {
   Zap,
   CalendarDays,
   LogOut,
-  Sparkles
+  Sparkles,
+  ClipboardCheck
 } from 'lucide-react';
 
 const menuItems = [
   { name: 'Dashboard', path: '/', icon: LayoutDashboard },
   { name: 'Agenda', path: '/agenda', icon: Calendar },
   { name: 'Pacientes', path: '/pacientes', icon: Users },
+  { name: 'Anamnese', path: '/anamnese', icon: ClipboardCheck },
   { name: 'Equipe', path: '/equipe', icon: UserCheck },
   { name: 'Serviços', path: '/services', icon: Scissors },
   { name: 'Estoque', path: '/inventory', icon: Package },

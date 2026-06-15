@@ -19,6 +19,7 @@ import Marketing from './pages/Marketing';
 import Integration from './pages/Integration';
 import Reports from './pages/Reports';
 import ClientBooking from './pages/ClientBooking';
+import Anamnese from './pages/Anamnese';
 
 // Import Sidebar component
 import Sidebar from './components/ui/sidebar';
@@ -56,6 +57,7 @@ function App() {
               <Route path="/integration" element={<Integration />} />
               <Route path="/reports" element={<Reports />} />
               <Route path="/client-booking" element={<ClientBooking />} />
+              <Route path="/anamnese" element={<Anamnese />} />
             </Routes>
           </main>
         </div>
