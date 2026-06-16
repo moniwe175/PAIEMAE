@@ -296,3 +296,47 @@ create trigger handle_updated_at_daily_reports
 
 create index if not exists idx_daily_reports_user_id on public.daily_reports(user_id);
 create index if not exists idx_daily_reports_data on public.daily_reports(data_caixa);
+
+-- ─── 10. Campaigns (Marketing) ────────────────────────────────
+create table if not exists public.campaigns (
+  id text primary key,
+  nome text not null,
+  canal text not null default 'WhatsApp',
+  mensagem text,
+  status text default 'rascunho',
+  data_inicio text,
+  data_fim text,
+  enviados integer default 0,
+  abertos integer default 0,
+  cliques integer default 0,
+  conversoes integer default 0,
+  publico_alvo text,
+  orcamento numeric default 0,
+  user_id uuid references auth.users,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null,
+  updated_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+alter table public.campaigns enable row level security;
+
+create policy "Users can view own campaigns"
+  on public.campaigns for select
+  using ( auth.uid() = user_id );
+
+create policy "Users can insert own campaigns"
+  on public.campaigns for insert
+  with check ( auth.uid() = user_id );
+
+create policy "Users can update own campaigns"
+  on public.campaigns for update
+  using ( auth.uid() = user_id );
+
+create policy "Users can delete own campaigns"
+  on public.campaigns for delete
+  using ( auth.uid() = user_id );
+
+create trigger handle_updated_at_campaigns
+  before update on public.campaigns
+  for each row execute function public.handle_updated_at();
+
+create index if not exists idx_campaigns_user_id on public.campaigns(user_id);

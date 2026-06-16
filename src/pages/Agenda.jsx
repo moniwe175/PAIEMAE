@@ -4,7 +4,7 @@ import {
   Clock, User, Scissors, AlertCircle, Calendar, UserPlus,
   Trash2, Edit3, Phone, DollarSign, TrendingUp,
   CalendarCheck, Grid, List, CheckSquare, X,
-  Ban, Coffee, UtensilsCrossed, Lock, AlertTriangle,
+  Ban, Coffee, UtensilsCrossed, Lock, AlertTriangle, Repeat2,
 } from 'lucide-react';
 import { useProfissionais } from '../lib/profissionais';
 
@@ -454,7 +454,14 @@ function AppointmentDetailModal({ apt, profissionais, onClose, onEdit, onDelete,
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
             <div>
               <div style={{ fontSize: 11, fontWeight: 700, color: 'rgba(255,255,255,0.7)', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 5 }}>Agendamento</div>
-              <div style={{ fontSize: 20, fontWeight: 700, color: '#fff', marginBottom: 4 }}>{apt.paciente}</div>
+              <div style={{ fontSize: 20, fontWeight: 700, color: '#fff', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 8 }}>
+                {apt.paciente}
+                {apt.fixo && (
+                  <div title="Cliente Fixo" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: '#3B82F6', borderRadius: 20, padding: '2px 10px', fontSize: 10, fontWeight: 700, color: '#fff' }}>
+                    <Repeat2 style={{ width: 10, height: 10 }} />FIXO
+                  </div>
+                )}
+              </div>
               <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.85)', display: 'flex', alignItems: 'center', gap: 5 }}>
                 <Scissors style={{ width: 13, height: 13 }} />{apt.servico}
               </div>
@@ -549,6 +556,35 @@ function AgendamentoModal({ onClose, date, profissional: prefillProf, hora: pref
     paciente: '', telefone: '', profissional: prefillProf || '', servico: '',
     status: 'aguardando_confirmacao', valor: '', observacoes: '',
   });
+  const [repetir, setRepetir] = useState(false);
+  const [recFreq, setRecFreq] = useState('semanal');
+  const [recAte, setRecAte] = useState('');
+
+  const REC_FREQ = [
+    { k: 'semanal', l: 'Toda semana' },
+    { k: 'quinzenal', l: 'Semana sim, semana não' },
+    { k: '3semanas', l: 'A cada 3 semanas' },
+    { k: '4semanas', l: 'A cada 4 semanas' },
+    { k: '6semanas', l: 'A cada 6 semanas' },
+    { k: '8semanas', l: 'A cada 8 semanas' },
+    { k: '12semanas', l: 'A cada 12 semanas' },
+  ];
+
+  const previewRecDates = useMemo(() => {
+    if (!repetir || !recAte || !form.data) return [];
+    const dates = [];
+    const base = new Date(form.data + 'T12:00:00');
+    const until = new Date(recAte + 'T23:59:59');
+    const step = { semanal: 7, quinzenal: 14, '3semanas': 21, '4semanas': 28, '6semanas': 42, '8semanas': 56, '12semanas': 84 }[recFreq] || 7;
+    let cur = new Date(base);
+    cur.setDate(cur.getDate() + step);
+    while (cur <= until && dates.length < 52) {
+      dates.push(cur.toISOString().split('T')[0]);
+      cur = new Date(cur);
+      cur.setDate(cur.getDate() + step);
+    }
+    return dates;
+  }, [repetir, recAte, recFreq, form.data]);
 
   const set = useCallback((k, v) => setForm(f => {
     const next = { ...f, [k]: v };
@@ -568,7 +604,15 @@ function AgendamentoModal({ onClose, date, profissional: prefillProf, hora: pref
 
   const handleSave = () => {
     if (!canSave) return;
-    onSave({ ...form, id: apt?.id || genId(), horaFim: calcEndTime(form.hora, Number(form.duracao) || 60), duracao: Number(form.duracao) || 60, valor: Number(form.valor) || 0 });
+    const isFixo = repetir && previewRecDates.length > 0;
+    const base = { ...form, horaFim: calcEndTime(form.hora, Number(form.duracao) || 60), duracao: Number(form.duracao) || 60, valor: Number(form.valor) || 0, fixo: isFixo || false };
+    if (isFixo && !isEdit) {
+      const all = [{ ...base, id: genId() }];
+      previewRecDates.forEach(d => all.push({ ...base, id: genId(), data: d }));
+      onSave(all);
+    } else {
+      onSave({ ...base, id: apt?.id || genId() });
+    }
     onClose();
   };
 
@@ -728,10 +772,58 @@ function AgendamentoModal({ onClose, date, profissional: prefillProf, hora: pref
             </div>
           </div>
 
+          {/* Repetir */}
+          <div style={{ marginBottom: 14, padding: 14, borderRadius: 12, border: '1.5px solid #E5E7EB', background: '#F9FAFB' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <label style={{ ...labelSt, display: 'flex', alignItems: 'center', gap: 6, marginBottom: 0, whiteSpace: 'nowrap' }}>
+                <Repeat2 style={{ width: 14, height: 14, color: '#C73B6D' }} />Repetir:
+              </label>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer', fontSize: 13, fontWeight: 500, color: !repetir ? '#1F2937' : '#9CA3AF' }}>
+                  <input type="radio" name="repetir" checked={!repetir} onChange={() => setRepetir(false)} style={{ width: 16, height: 16, accentColor: '#C73B6D', cursor: 'pointer' }} />
+                  Não
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer', fontSize: 13, fontWeight: 500, color: repetir ? '#1F2937' : '#9CA3AF' }}>
+                  <input type="radio" name="repetir" checked={repetir} onChange={() => setRepetir(true)} style={{ width: 16, height: 16, accentColor: '#C73B6D', cursor: 'pointer' }} />
+                  Sim
+                </label>
+              </div>
+            </div>
+            {repetir && (
+              <div style={{ marginTop: 12, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                <div>
+                  <label style={{ ...labelSt, fontSize: 11 }}>Frequência</label>
+                  <select value={recFreq} onChange={e => setRecFreq(e.target.value)} style={inputSt}>
+                    {REC_FREQ.map(o => <option key={o.k} value={o.k}>{o.l}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label style={{ ...labelSt, fontSize: 11 }}>Repetir até</label>
+                  <input type="date" value={recAte} min={form.data} onChange={e => setRecAte(e.target.value)} style={inputSt} />
+                </div>
+                {previewRecDates.length > 0 && (
+                  <div style={{ gridColumn: 'span 2' }}>
+                    <div style={{ fontSize: 11, fontWeight: 600, color: '#6B7280', marginBottom: 6 }}>{previewRecDates.length} agendamento(s) adicionais:</div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, maxHeight: 60, overflowY: 'auto' }}>
+                      {previewRecDates.map(d => {
+                        const [y, m, dd] = d.split('-');
+                        return <span key={d} style={{ fontSize: 10, background: '#FDF2F8', color: '#C73B6D', padding: '2px 8px', borderRadius: 99, fontWeight: 600 }}>{dd}/{m}</span>;
+                      })}
+                    </div>
+                  </div>
+                )}
+                {repetir && !recAte && (
+                  <div style={{ gridColumn: 'span 2', fontSize: 11, color: '#E67E22' }}>Selecione a data final da recorrência</div>
+                )}
+              </div>
+            )}
+          </div>
+
           {/* Observações */}
           <div style={{ marginBottom: 22 }}>
-            <label style={labelSt}>Observações</label>
-            <textarea value={form.observacoes} onChange={e => set('observacoes', e.target.value)} placeholder="Notas sobre o atendimento..." style={{ ...inputSt, minHeight: 64, resize: 'vertical' }} />
+            <label style={labelSt}>Observações (opcional):</label>
+            <textarea value={form.observacoes} maxLength={400} onChange={e => set('observacoes', e.target.value)} placeholder="Notas sobre o atendimento..." style={{ ...inputSt, minHeight: 64, resize: 'vertical' }} />
+            <div style={{ textAlign: 'right', fontSize: 10, color: '#9CA3AF', marginTop: 2 }}>{(form.observacoes || '').length} de 400 caracteres</div>
           </div>
 
           <div style={{ display: 'flex', gap: 8, paddingTop: 14, borderTop: '1px solid #F0EBE6' }}>
@@ -858,6 +950,7 @@ function BlockCard({ blq, onClick, col, totalCols }) {
         cursor: 'pointer', overflow: 'hidden', transition: 'opacity 0.12s',
         display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 1,
         boxSizing: 'border-box',
+        pointerEvents: 'auto',
       }}
       onMouseEnter={e => e.currentTarget.style.opacity = '0.8'}
       onMouseLeave={e => e.currentTarget.style.opacity = '1'}>
@@ -894,11 +987,19 @@ function AppointmentCard({ apt, prof, onClick, col, totalCols }) {
         cursor: 'pointer', overflow: 'hidden',
         transition: 'transform 0.1s, box-shadow 0.1s',
         zIndex: 10,
+        pointerEvents: 'auto',
       }}
       onMouseEnter={e => { e.currentTarget.style.transform = 'scale(1.01)'; e.currentTarget.style.boxShadow = `0 3px 10px ${st.color}30`; }}
       onMouseLeave={e => { e.currentTarget.style.transform = 'scale(1)'; e.currentTarget.style.boxShadow = 'none'; }}>
-      <div style={{ fontSize: 11, fontWeight: 700, color: st.color, lineHeight: 1.2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-        {apt.paciente}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: st.color, lineHeight: 1.2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: 1 }}>
+          {apt.paciente}
+        </div>
+        {apt.fixo && (
+          <div title="Cliente Fixo" style={{ width: 14, height: 14, borderRadius: '50%', background: '#3B82F6', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <Repeat2 style={{ width: 8, height: 8, color: '#fff' }} />
+          </div>
+        )}
       </div>
       <div style={{ fontSize: 10, color: `${st.color}cc`, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{apt.servico}</div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 3, marginTop: 1 }}>
@@ -942,10 +1043,21 @@ export default function Agenda() {
   const openDetail = apt => setDetailModal({ open: true, apt });
   const openBloqueio = (prof = '', hora = '', blq = null) => setBloqueioModal({ open: true, bloqueio: blq, prefillProf: prof, prefillHora: hora });
 
-  const handleSave = payload => setAgendamentos(prev => {
-    const ex = prev.find(a => a.id === payload.id);
-    return ex ? prev.map(a => a.id === payload.id ? payload : a) : [...prev, payload];
-  });
+  const handleSave = payload => {
+    if (Array.isArray(payload)) {
+      setAgendamentos(prev => {
+        const ids = new Set(prev.map(a => a.id));
+        const novos = payload.filter(p => !ids.has(p.id));
+        const atualizados = payload.filter(p => ids.has(p.id));
+        return [...prev.map(a => { const u = atualizados.find(x => x.id === a.id); return u || a; }), ...novos];
+      });
+    } else {
+      setAgendamentos(prev => {
+        const ex = prev.find(a => a.id === payload.id);
+        return ex ? prev.map(a => a.id === payload.id ? payload : a) : [...prev, payload];
+      });
+    }
+  };
 
   const handleDelete = id => { setAgendamentos(prev => prev.filter(a => a.id !== id)); setDetailModal({ open: false, apt: null }); };
   const handleStatusChange = (id, status) => {
@@ -1191,7 +1303,7 @@ export default function Agenda() {
                       const { top, height } = itemPos(blq);
                       const lay = layout[blq.id] || { col: 0, totalCols: 1 };
                       return (
-                        <div key={blq.id} style={{ position: 'absolute', top, left: 0, right: 0, height, zIndex: 4 }}>
+                        <div key={blq.id} style={{ position: 'absolute', top, left: 0, right: 0, height, zIndex: 4, pointerEvents: 'none' }}>
                           <BlockCard blq={blq} onClick={() => openBloqueio(blq.profissional, blq.hora, blq)} col={lay.col} totalCols={lay.totalCols} />
                         </div>
                       );
@@ -1203,7 +1315,7 @@ export default function Agenda() {
                       const lay = layout[apt.id] || { col: 0, totalCols: 1 };
                       const profItem = viewMode === 'day' ? item : profissionais.find(p => p.nome === apt.profissional);
                       return (
-                        <div key={apt.id} style={{ position: 'absolute', top, left: 0, right: 0, height, zIndex: 5 }}>
+                        <div key={apt.id} style={{ position: 'absolute', top, left: 0, right: 0, height, zIndex: 5, pointerEvents: 'none' }}>
                           <AppointmentCard apt={apt} prof={profItem} onClick={openDetail} col={lay.col} totalCols={lay.totalCols} />
                         </div>
                       );

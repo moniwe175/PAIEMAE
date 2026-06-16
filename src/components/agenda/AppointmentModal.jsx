@@ -315,72 +315,87 @@ export default function AppointmentModal({ open, onClose, onSave, onDelete, appo
             <Textarea value={form.notes || ''} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} placeholder="Notas sobre o agendamento..." rows={2} />
           </div>
 
-          {/* Recorrência — só para novos */}
-          {isNew && (
-            <div className="rounded-xl border border-border/60 bg-secondary/20 p-4 space-y-3">
-              <button
-                type="button"
-                onClick={() => setRecurring(r => !r)}
-                className="flex items-center gap-2 text-sm font-semibold w-full"
-              >
-                <div className={`w-9 h-5 rounded-full transition-colors flex items-center px-0.5 ${recurring ? 'bg-primary' : 'bg-muted-foreground/30'}`}>
-                  <div className={`w-4 h-4 bg-white rounded-full shadow transition-transform ${recurring ? 'translate-x-4' : ''}`} />
-                </div>
+          {/* Recorrência — Repetir Sim/Não */}
+          <div className="rounded-xl border border-border/60 bg-secondary/20 p-4 space-y-3">
+            <div className="flex items-center gap-4">
+              <Label className="text-sm font-semibold flex items-center gap-2 shrink-0">
                 <Repeat2 className="w-4 h-4 text-primary" />
-                Fixar cliente (recorrência)
-              </button>
+                Repetir:
+              </Label>
+              <div className="flex items-center gap-4">
+                <label className="flex items-center gap-1.5 cursor-pointer text-sm font-medium">
+                  <input
+                    type="radio"
+                    name="repetir"
+                    checked={!recurring}
+                    onChange={() => setRecurring(false)}
+                    className="w-4 h-4 accent-primary cursor-pointer"
+                  />
+                  Não
+                </label>
+                <label className="flex items-center gap-1.5 cursor-pointer text-sm font-medium">
+                  <input
+                    type="radio"
+                    name="repetir"
+                    checked={recurring}
+                    onChange={() => setRecurring(true)}
+                    className="w-4 h-4 accent-primary cursor-pointer"
+                  />
+                  Sim
+                </label>
+              </div>
+            </div>
 
-              {recurring && (
-                <div className="space-y-3 pt-1">
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <Label className="text-xs">Frequência</Label>
-                      <Select value={recFrequency} onValueChange={setRecFrequency}>
-                        <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          {RECURRENCE_OPTIONS.map(o => (
-                            <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div>
-                      <Label className="text-xs">Repetir até</Label>
-                      <Input
-                        type="date"
-                        className="h-8 text-sm"
-                        value={recUntil}
-                        min={form.date}
-                        onChange={e => setRecUntil(e.target.value)}
-                      />
+            {recurring && (
+              <div className="space-y-3 pt-1">
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <Label className="text-xs">Frequência</Label>
+                    <Select value={recFrequency} onValueChange={setRecFrequency}>
+                      <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {RECURRENCE_OPTIONS.map(o => (
+                          <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <Label className="text-xs">Repetir até</Label>
+                    <Input
+                      type="date"
+                      className="h-8 text-sm"
+                      value={recUntil}
+                      min={form.date}
+                      onChange={e => setRecUntil(e.target.value)}
+                    />
+                  </div>
+                </div>
+
+                {previewDates.length > 0 && (
+                  <div>
+                    <p className="text-xs font-medium text-muted-foreground mb-1.5">
+                      {previewDates.length} agendamento(s) adicionais serão criados:
+                    </p>
+                    <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto">
+                      {previewDates.map(d => (
+                        <span
+                          key={d}
+                          className="text-[11px] bg-primary/10 text-primary px-2 py-0.5 rounded-full font-medium"
+                        >
+                          {format(parseISO(d), "dd/MM", { locale: ptBR })}
+                        </span>
+                      ))}
                     </div>
                   </div>
+                )}
 
-                  {previewDates.length > 0 && (
-                    <div>
-                      <p className="text-xs font-medium text-muted-foreground mb-1.5">
-                        {previewDates.length} agendamento(s) adicionais serão criados:
-                      </p>
-                      <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto">
-                        {previewDates.map(d => (
-                          <span
-                            key={d}
-                            className="text-[11px] bg-primary/10 text-primary px-2 py-0.5 rounded-full font-medium"
-                          >
-                            {format(parseISO(d), "dd/MM", { locale: ptBR })}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {recurring && !recUntil && (
-                    <p className="text-xs text-amber-600">Selecione a data final da recorrência</p>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
+                {recurring && !recUntil && (
+                  <p className="text-xs text-amber-600">Selecione a data final da recorrência</p>
+                )}
+              </div>
+            )}
+          </div>
         </div>
 
         <DialogFooter className="flex items-center justify-between gap-2">

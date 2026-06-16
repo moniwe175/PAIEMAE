@@ -269,6 +269,39 @@ export async function fetchDailyReportByDate(dateStr) {
   return { data, error: null };
 }
 
+// ─── Campaigns (Marketing) ─────────────────────────────────
+
+export async function fetchCampaigns() {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured', []);
+  const { data, error } = await supabase
+    .from('campaigns')
+    .select('*')
+    .order('created_at', { ascending: false });
+  if (error) return handleError(error, []);
+  return { data: data || [], error: null };
+}
+
+export async function insertCampaign(campaign) {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured');
+  const { data, error } = await supabase.from('campaigns').insert([campaign]).select().single();
+  if (error) return handleError(error);
+  return { data, error: null };
+}
+
+export async function updateCampaign(id, updates) {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured');
+  const { data, error } = await supabase.from('campaigns').update(updates).eq('id', id).select().single();
+  if (error) return handleError(error);
+  return { data, error: null };
+}
+
+export async function deleteCampaign(id) {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured');
+  const { error } = await supabase.from('campaigns').delete().eq('id', id);
+  if (error) return handleError(error);
+  return { data: true, error: null };
+}
+
 // ─── Auth ─────────────────────────────────────────────────────
 
 export async function signUp(email, password, metadata = {}) {
