@@ -31,10 +31,18 @@ def print_qr_to_terminal(qr_base64: str):
 
 
 def bootstrap() -> MarketingEngine:
-    whatsapp = WhatsAppConnector()
-    whatsapp.start_session(wait_qr_callback=print_qr_to_terminal)
-
     db = get_client()
+
+    if settings.DRY_RUN:
+        logger.info(
+            "DRY_RUN ativo — pulando conexão com WhatsApp, "
+            "wppconnect-server não é necessário ainda."
+        )
+        whatsapp = WhatsAppConnector()  # objeto criado, mas sem start_session()
+    else:
+        whatsapp = WhatsAppConnector()
+        whatsapp.start_session(wait_qr_callback=print_qr_to_terminal)
+
     return MarketingEngine(db_client=db, whatsapp=whatsapp)
 
 
