@@ -3,7 +3,7 @@ import {
   RefreshCw, Table2, Clock, AlertTriangle, Plus, Trash2,
   Copy, ToggleLeft, ToggleRight, Link2, FileSpreadsheet,
   CheckCircle, XCircle, WifiOff,
-  ScrollText, BarChart3, ArrowRightLeft
+  ScrollText, BarChart3, ArrowRightLeft, Zap, Loader2
 } from 'lucide-react';
 import { useSync } from '../contexts/SyncContext';
 import useSheetSync from '../hooks/useSheetSync';
@@ -11,6 +11,7 @@ import AddSheetModal from '../components/integration/AddSheetModal';
 import AuthorizeConnectionModal from '../components/integration/AuthorizeConnectionModal';
 import ColumnMappingEditor from '../components/integration/ColumnMappingEditor';
 import SyncLogPanel from '../components/integration/SyncLogPanel';
+import { getMarketingEngineStatus, setMarketingEngineEnabled } from '../services/supabaseService';
 
 // Default configured spreadsheets
 const defaultSheets = [
@@ -43,9 +44,31 @@ export default function Integration() {
     } catch { return defaultSheets; }
   });
 
+  // Marketing Engine toggle state
+  const [engineEnabled, setEngineEnabled] = useState(true);
+  const [engineUpdatedAt, setEngineUpdatedAt] = useState(null);
+  const [engineLoading, setEngineLoading] = useState(true);
+  const [engineSaving, setEngineSaving] = useState(false);
+  const [engineError, setEngineError] = useState(null);
+
   useEffect(() => {
     localStorage.setItem('erp_configured_sheets', JSON.stringify(sheets));
   }, [sheets]);
+
+  // Fetch marketing engine status on mount
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setEngineLoading(true);
+      const { data } = await getMarketingEngineStatus();
+      if (!cancelled && data) {
+        setEngineEnabled(data.enabled !== false);
+        setEngineUpdatedAt(data.updated_at || null);
+      }
+      setEngineLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   const isSheetConnected = syncStatus === 'connected' || syncStatus === 'connecting';
 
@@ -77,6 +100,20 @@ export default function Integration() {
     navigator.clipboard?.writeText(url);
   };
 
+  const handleToggleEngine = async () => {
+    const newValue = !engineEnabled;
+    setEngineSaving(true);
+    setEngineError(null);
+    const { error } = await setMarketingEngineEnabled(newValue);
+    if (error) {
+      setEngineError('Erro ao atualizar status do motor. Tente novamente.');
+    } else {
+      setEngineEnabled(newValue);
+      setEngineUpdatedAt(new Date().toISOString());
+    }
+    setEngineSaving(false);
+  };
+
   const handleAddSheet = (newSheet) => {
     setSheets(prev => [...prev, newSheet]);
   };
@@ -86,6 +123,7 @@ export default function Integration() {
     { key: 'log', label: 'Log de Sync', icon: ScrollText },
     { key: 'relatorios', label: 'Relatórios', icon: BarChart3 },
     { key: 'mapeamento', label: 'Mapeamento', icon: ArrowRightLeft },
+    { key: 'motor', label: 'Motor Marketing', icon: Zap },
   ];
 
   return (
@@ -488,6 +526,98 @@ export default function Integration() {
       {/* Tab Content: Mapeamento */}
       {activeTab === 'mapeamento' && (
         <ColumnMappingEditor />
+      )}
+
+      {/* Tab Content: Motor Marketing */}
+      {activeTab === 'motor' && (
+        <div className="card" style={{ padding: '24px 28px' }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16, flex: 1 }}>
+              {/* Icon */}
+              <div style={{
+                width: 48, height: 48, borderRadius: 12,
+                background: engineEnabled ? '#2ECC7118' : '#FF9AA218',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                flexShrink: 0,
+              }}>
+                <Zap style={{ width: 22, height: 22, color: engineEnabled ? 'var(--success)' : '#FF9AA2' }} />
+              </div>
+
+              {/* Text block */}
+              <div style={{ flex: 1 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
+                  <span style={{ fontWeight: 700, fontSize: 15, color: 'var(--text-dark)' }}>
+                    Marketing Automático (WhatsApp)
+                  </span>
+                  <span
+                    className="badge"
+                    style={{
+                      background: engineEnabled ? 'var(--success-bg)' : 'var(--danger-bg)',
+                      color: engineEnabled ? 'var(--success)' : 'var(--danger)',
+                      fontSize: 10,
+                    }}
+                  >
+                    {engineEnabled
+                      ? <><CheckCircle style={{ width: 10, height: 10 }} />Ativo</>
+                      : <><XCircle style={{ width: 10, height: 10 }} />Desativado</>
+                    }
+                  </span>
+                </div>
+
+                <p style={{ fontSize: 13, color: 'var(--text-medium)', lineHeight: 1.6, margin: '0 0 10px' }}>
+                  Controla o motor Python que roda no Railway. Quando <strong>desativado</strong>,
+                  o ciclo do scheduler pula todas as ferramentas (aniversário, reaquecimento, no-show, etc.)
+                  sem enviar nenhuma mensagem.
+                </p>
+
+                <p style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.5, margin: '0 0 14px' }}>
+                  Mudanças entram em vigor no próximo ciclo do motor (a cada 30 minutos),
+                  não interrompe instantaneamente um ciclo já em andamento.
+                </p>
+
+                {engineUpdatedAt && (
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 12 }}>
+                    Última alteração:{' '}
+                    {new Date(engineUpdatedAt).toLocaleString('pt-BR', {
+                      day: '2-digit', month: '2-digit', year: 'numeric',
+                      hour: '2-digit', minute: '2-digit'
+                    })}
+                  </div>
+                )}
+
+                {engineError && (
+                  <div style={{
+                    background: 'var(--danger-bg)', border: '1px solid #FF9AA2',
+                    borderRadius: 'var(--radius-sm)', padding: '8px 12px',
+                    fontSize: 12, color: 'var(--danger)', marginBottom: 12,
+                    display: 'flex', alignItems: 'center', gap: 8,
+                  }}>
+                    <AlertTriangle style={{ width: 14, height: 14, flexShrink: 0 }} />
+                    {engineError}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Toggle */}
+            <button
+              onClick={handleToggleEngine}
+              disabled={engineLoading || engineSaving}
+              style={{
+                background: 'none', border: 'none', cursor: engineLoading || engineSaving ? 'not-allowed' : 'pointer',
+                display: 'flex', alignItems: 'center', padding: 0, opacity: engineLoading || engineSaving ? 0.5 : 1,
+              }}
+              title={engineEnabled ? 'Desativar motor' : 'Ativar motor'}
+            >
+              {engineLoading
+                ? <Loader2 style={{ width: 36, height: 36, color: 'var(--text-muted)', animation: 'spin 1s linear infinite' }} />
+                : engineEnabled
+                  ? <ToggleRight style={{ width: 40, height: 40, color: 'var(--success)' }} />
+                  : <ToggleLeft style={{ width: 40, height: 40, color: 'var(--text-muted)' }} />
+              }
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );

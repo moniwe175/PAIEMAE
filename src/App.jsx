@@ -20,6 +20,7 @@ import Integration from './pages/Integration';
 import Reports from './pages/Reports';
 import ClientBooking from './pages/ClientBooking';
 import Anamnese from './pages/Anamnese';
+import Estrategia from './pages/Estrategia';
 
 // Import Sidebar component
 import Sidebar from './components/ui/sidebar';
@@ -58,6 +59,7 @@ function App() {
               <Route path="/reports" element={<Reports />} />
               <Route path="/client-booking" element={<ClientBooking />} />
               <Route path="/anamnese" element={<Anamnese />} />
+              <Route path="/estrategia" element={<Estrategia />} />
             </Routes>
           </main>
         </div>

@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.env
+config/tokens/
+.git/
+.gitignore
+README.md
+DEPLOY_RAILWAY.md
+schema*.sql
+*.png

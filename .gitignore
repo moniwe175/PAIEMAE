@@ -15,6 +15,8 @@ dist-ssr
 # Environment variables
 .env
 .env.*
+!.env.example
+!marketing_engine/config/.env.example
 
 # Editor directories and files
 .vscode/*
@@ -26,3 +28,9 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Python (marketing_engine)
+__pycache__/
+*.pyc
+*.pyo
+config/tokens/

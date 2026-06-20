@@ -302,6 +302,31 @@ export async function deleteCampaign(id) {
   return { data: true, error: null };
 }
 
+// ─── Marketing Engine Settings ──────────────────────────────
+
+export async function getMarketingEngineStatus() {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured', { enabled: true });
+  const { data, error } = await supabase
+    .from('marketing_engine_settings')
+    .select('enabled, updated_at, updated_by')
+    .eq('id', 1)
+    .maybeSingle();
+  if (error) return handleError(error, { enabled: true, updated_at: null, updated_by: null });
+  return { data: data || { enabled: true, updated_at: null, updated_by: null }, error: null };
+}
+
+export async function setMarketingEngineEnabled(enabled) {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured');
+  const { data, error } = await supabase
+    .from('marketing_engine_settings')
+    .update({ enabled, updated_at: new Date().toISOString(), updated_by: 'frontend' })
+    .eq('id', 1)
+    .select()
+    .single();
+  if (error) return handleError(error);
+  return { data, error: null };
+}
+
 // ─── Auth ─────────────────────────────────────────────────────
 
 export async function signUp(email, password, metadata = {}) {

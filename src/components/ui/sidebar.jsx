@@ -17,7 +17,8 @@ import {
   CalendarDays,
   LogOut,
   Sparkles,
-  ClipboardCheck
+  ClipboardCheck,
+  Target
 } from 'lucide-react';
 
 const menuItems = [
@@ -30,6 +31,7 @@ const menuItems = [
   { name: 'Estoque', path: '/inventory', icon: Package },
   { name: 'Pacotes', path: '/packages', icon: ShoppingBag },
   { name: 'Relatórios', path: '/reports', icon: BarChart3 },
+  { name: 'Estratégia', path: '/estrategia', icon: Target },
   { name: 'Tarefas', path: '/kanban', icon: ClipboardList },
   { name: 'Marketing', path: '/marketing', icon: Megaphone },
   { name: 'Comissões', path: '/comissoes', icon: Coins },

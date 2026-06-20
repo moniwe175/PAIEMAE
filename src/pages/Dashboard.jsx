@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
 } from 'recharts';
@@ -7,6 +8,9 @@ import {
 } from 'lucide-react';
 import { useSync } from '../contexts/SyncContext';
 import SheetSyncStatus from '../components/integration/SheetSyncStatus';
+import OKRWeeklySnapshot from '../components/dashboard/OKRWeeklySnapshot';
+import StickyNotesPanel from '../components/dashboard/StickyNotesPanel';
+import { generateAutoNotes } from '../lib/noteAutomation';
 
 // ─── Sub-components ───────────────────────────────────────────
 function StatCard({ icon: Icon, iconBg, iconColor, badge, badgeClass, value, label, sub }) {
@@ -51,9 +55,28 @@ const CustomTooltip = ({ active, payload, label }) => {
   return null;
 };
 
+// ─── Seed OKR data ──────────────────────────────────────────
+const SEED_KEY_RESULTS = [
+  { id: 'kr1', titulo: 'Faturamento mensal >= R$ 50k', metrica: 'R$', valor_inicial: 30000, valor_atual: 38500, valor_meta: 50000, status: 'alerta', action_hint: 'Intensificar campanhas de upsell e reativar clientes inativos.' },
+  { id: 'kr2', titulo: 'Ticket medio >= R$ 350', metrica: 'R$', valor_inicial: 280, valor_atual: 320, valor_meta: 350, status: 'alerta', action_hint: 'Oferecer pacotes e combos para aumentar o ticket medio.' },
+  { id: 'kr3', titulo: 'Taxa de retorno >= 40%', metrica: '%', valor_inicial: 25, valor_atual: 35, valor_meta: 40, status: 'no_alvo', action_hint: '' },
+  { id: 'kr4', titulo: 'NPS >= 85', metrica: 'count', valor_inicial: 72, valor_atual: 88, valor_meta: 85, status: 'no_alvo', action_hint: '' },
+  { id: 'kr5', titulo: 'No-Show <= 10%', metrica: '%', valor_inicial: 18, valor_atual: 14, valor_meta: 10, status: 'alerta', action_hint: 'Ativar regua Wolf Pack de confirmacao por WhatsApp.' },
+  { id: 'kr6', titulo: 'Estoque critico = 0 itens', metrica: 'count', valor_inicial: 3, valor_atual: 2, valor_meta: 0, status: 'critico', action_hint: 'Repor imediatamente: Botox Allergan e Juvederm Ultra.' },
+];
+
+function loadStickyNotes() {
+  try { return JSON.parse(localStorage.getItem('erp_sticky_notes') || '[]'); } catch { return []; }
+}
+function saveStickyNotes(notes) {
+  try { localStorage.setItem('erp_sticky_notes', JSON.stringify(notes)); } catch {}
+}
+
 // ─── Dashboard ────────────────────────────────────────────────
 export default function Dashboard() {
   const { transactions, dailySheet } = useSync();
+  const [manualNotes, setManualNotes] = useState(loadStickyNotes);
+  const [keyResults] = useState(SEED_KEY_RESULTS);
 
   const today = new Date();
   const diaSemana = today.toLocaleDateString('pt-BR', { weekday: 'long' });
@@ -117,6 +140,27 @@ export default function Dashboard() {
     { nome: 'Botox Allergan 100U', lote: 'Allergan', estoque: 5, minimo: 5 },
     { nome: 'Juvederm Ultra', lote: 'AbbVie', estoque: 2, minimo: 10 },
   ];
+
+  // Auto-generate notes from system state
+  const autoNotes = generateAutoNotes({ stockAlerts, okrs: keyResults, appointments: [] });
+  const allNotes = [...autoNotes, ...manualNotes.filter(n => !n.dismissed)];
+
+  const handleDismissNote = (note) => {
+    if (note.auto_generated) return;
+    const updated = manualNotes.map(n => n.id === note.id ? { ...n, dismissed: true } : n);
+    setManualNotes(updated);
+    saveStickyNotes(updated);
+  };
+  const handleAddNote = (note) => {
+    const updated = [...manualNotes, note];
+    setManualNotes(updated);
+    saveStickyNotes(updated);
+  };
+  const handleMoveNote = (noteId, newPriority) => {
+    const updated = manualNotes.map(n => n.id === noteId ? { ...n, prioridade: newPriority } : n);
+    setManualNotes(updated);
+    saveStickyNotes(updated);
+  };
 
   // Today appointments (placeholder)
   const todayAppointments = [
@@ -187,6 +231,11 @@ export default function Dashboard() {
         />
       </div>
 
+      {/* OKR Weekly Snapshot */}
+      <div className="section-gap">
+        <OKRWeeklySnapshot keyResults={keyResults} onKRClick={kr => document.getElementById('sticky-notes-panel')?.scrollIntoView({ behavior: 'smooth' })} />
+      </div>
+
       {/* Revenue Chart + Stock Alerts */}
       <div className="grid-2-1 section-gap">
         {/* Revenue Chart */}
@@ -250,6 +299,11 @@ export default function Dashboard() {
             ))}
           </div>
         </div>
+      </div>
+
+      {/* Sticky Notes Panel */}
+      <div className="section-gap" id="sticky-notes-panel">
+        <StickyNotesPanel notes={allNotes} onDismiss={handleDismissNote} onAdd={handleAddNote} onMove={handleMoveNote} />
       </div>
 
       {/* Today Appointments */}

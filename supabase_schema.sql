@@ -340,3 +340,171 @@ create trigger handle_updated_at_campaigns
   for each row execute function public.handle_updated_at();
 
 create index if not exists idx_campaigns_user_id on public.campaigns(user_id);
+
+-- ─── 11. OKR System ──────────────────────────────────────────
+
+-- 11a. OKR Cycles (trimester periods)
+create table if not exists public.ciclos_okr (
+  id text primary key,
+  nome text not null,
+  data_inicio date not null,
+  data_fim date not null,
+  status text default 'ativo',
+  user_id uuid references auth.users,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+alter table public.ciclos_okr enable row level security;
+
+create policy "Users can view own ciclos_okr"
+  on public.ciclos_okr for select using ( auth.uid() = user_id );
+create policy "Users can insert own ciclos_okr"
+  on public.ciclos_okr for insert with check ( auth.uid() = user_id );
+create policy "Users can update own ciclos_okr"
+  on public.ciclos_okr for update using ( auth.uid() = user_id );
+create policy "Users can delete own ciclos_okr"
+  on public.ciclos_okr for delete using ( auth.uid() = user_id );
+
+create index if not exists idx_ciclos_okr_user_id on public.ciclos_okr(user_id);
+
+-- 11b. Objectives (macro goals per cycle)
+create table if not exists public.objetivos (
+  id text primary key,
+  ciclo_id text references public.ciclos_okr(id) on delete cascade,
+  titulo text not null,
+  descricao text,
+  ordem integer default 0,
+  user_id uuid references auth.users,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+alter table public.objetivos enable row level security;
+
+create policy "Users can view own objetivos"
+  on public.objetivos for select using ( auth.uid() = user_id );
+create policy "Users can insert own objetivos"
+  on public.objetivos for insert with check ( auth.uid() = user_id );
+create policy "Users can update own objetivos"
+  on public.objetivos for update using ( auth.uid() = user_id );
+create policy "Users can delete own objetivos"
+  on public.objetivos for delete using ( auth.uid() = user_id );
+
+create index if not exists idx_objetivos_ciclo_id on public.objetivos(ciclo_id);
+
+-- 11c. Key Results (measurable per objective)
+create table if not exists public.key_results (
+  id text primary key,
+  objetivo_id text references public.objetivos(id) on delete cascade,
+  titulo text not null,
+  metrica text,
+  valor_inicial numeric default 0,
+  valor_atual numeric default 0,
+  valor_meta numeric not null,
+  status text default 'no_alvo',
+  action_hint text,
+  user_id uuid references auth.users,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null,
+  updated_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+alter table public.key_results enable row level security;
+
+create policy "Users can view own key_results"
+  on public.key_results for select using ( auth.uid() = user_id );
+create policy "Users can insert own key_results"
+  on public.key_results for insert with check ( auth.uid() = user_id );
+create policy "Users can update own key_results"
+  on public.key_results for update using ( auth.uid() = user_id );
+create policy "Users can delete own key_results"
+  on public.key_results for delete using ( auth.uid() = user_id );
+
+create trigger handle_updated_at_key_results
+  before update on public.key_results
+  for each row execute function public.handle_updated_at();
+
+create index if not exists idx_key_results_objetivo_id on public.key_results(objetivo_id);
+
+-- 11d. Weekly snapshots for trend charts
+create table if not exists public.kr_weekly_snapshots (
+  id serial primary key,
+  kr_id text references public.key_results(id) on delete cascade,
+  semana date not null,
+  valor numeric not null,
+  user_id uuid references auth.users,
+  unique(kr_id, semana)
+);
+
+alter table public.kr_weekly_snapshots enable row level security;
+
+create policy "Users can view own kr_weekly_snapshots"
+  on public.kr_weekly_snapshots for select using ( auth.uid() = user_id );
+create policy "Users can insert own kr_weekly_snapshots"
+  on public.kr_weekly_snapshots for insert with check ( auth.uid() = user_id );
+create policy "Users can delete own kr_weekly_snapshots"
+  on public.kr_weekly_snapshots for delete using ( auth.uid() = user_id );
+
+create index if not exists idx_kr_snapshots_kr_id on public.kr_weekly_snapshots(kr_id);
+
+-- 11e. Sticky Notes (priority notes on dashboard)
+create table if not exists public.sticky_notes (
+  id text primary key,
+  texto text not null,
+  prioridade text not null default 'medio',
+  source text,
+  source_kr_id text references public.key_results(id),
+  auto_generated boolean default false,
+  dismissed boolean default false,
+  ordem integer default 0,
+  user_id uuid references auth.users,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null,
+  updated_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+alter table public.sticky_notes enable row level security;
+
+create policy "Users can view own sticky_notes"
+  on public.sticky_notes for select using ( auth.uid() = user_id );
+create policy "Users can insert own sticky_notes"
+  on public.sticky_notes for insert with check ( auth.uid() = user_id );
+create policy "Users can update own sticky_notes"
+  on public.sticky_notes for update using ( auth.uid() = user_id );
+create policy "Users can delete own sticky_notes"
+  on public.sticky_notes for delete using ( auth.uid() = user_id );
+
+create trigger handle_updated_at_sticky_notes
+  before update on public.sticky_notes
+  for each row execute function public.handle_updated_at();
+
+create index if not exists idx_sticky_notes_user_id on public.sticky_notes(user_id);
+
+-- 11f. Strategic Kanban tasks
+create table if not exists public.strategic_tasks (
+  id text primary key,
+  titulo text not null,
+  descricao text,
+  coluna text default 'todo',
+  objetivo_id text references public.objetivos(id),
+  responsavel text,
+  prioridade text default 'medio',
+  ordem integer default 0,
+  user_id uuid references auth.users,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null,
+  updated_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+alter table public.strategic_tasks enable row level security;
+
+create policy "Users can view own strategic_tasks"
+  on public.strategic_tasks for select using ( auth.uid() = user_id );
+create policy "Users can insert own strategic_tasks"
+  on public.strategic_tasks for insert with check ( auth.uid() = user_id );
+create policy "Users can update own strategic_tasks"
+  on public.strategic_tasks for update using ( auth.uid() = user_id );
+create policy "Users can delete own strategic_tasks"
+  on public.strategic_tasks for delete using ( auth.uid() = user_id );
+
+create trigger handle_updated_at_strategic_tasks
+  before update on public.strategic_tasks
+  for each row execute function public.handle_updated_at();
+
+create index if not exists idx_strategic_tasks_user_id on public.strategic_tasks(user_id);
