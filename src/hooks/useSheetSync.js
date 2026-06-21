@@ -15,6 +15,7 @@ export default function useSheetSync() {
     syncConfig,
     syncStatus,
     connectSheet,
+    disconnectSheet,
     startPolling,
     addLog,
   } = useSync();
@@ -46,4 +47,35 @@ export default function useSheetSync() {
 
     hasAttempted.current = true;
   }, [syncConfig, syncStatus, connectSheet, startPolling, addLog]);
+
+  // Auto-detect column mapping from spreadsheet headers
+  function autoDetectMapping(headers) {
+    const rules = [
+      { key: 'cliente',      match: h => /client|pacient|nome/.test(h) },
+      { key: 'procedimento', match: h => /proced|servi[çc]|tratamento/.test(h) },
+      { key: 'valor',        match: h => /valor|pre[çc]o|total/.test(h) },
+      { key: 'profissional', match: h => /profiss/.test(h) },
+      { key: 'comissao',     match: h => /comiss/.test(h) },
+      { key: 'data',         match: h => /data|date/.test(h) },
+      { key: 'tipo',         match: h => /tipo|type/.test(h) },
+      { key: 'categoria',    match: h => /categ/.test(h) },
+    ];
+    const mapping = {};
+    (headers || []).forEach((raw, idx) => {
+      const h = (raw || '').toString().toLowerCase().trim();
+      for (const rule of rules) {
+        if (!mapping[rule.key] && rule.match(h)) {
+          mapping[rule.key] = idx;
+          break;
+        }
+      }
+    });
+    return mapping;
+  }
+
+  return {
+    connect: connectSheet,
+    disconnect: disconnectSheet,
+    autoDetectMapping,
+  };
 }
