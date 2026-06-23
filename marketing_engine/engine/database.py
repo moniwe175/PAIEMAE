@@ -2,15 +2,49 @@
 engine/database.py
 Camada de acesso a dados (Supabase / PostgreSQL).
 
-Adaptado para o schema real do PAIEMAE:
-  - Tabela `pacientes` (em vez de `patients`)
-  - Tabela `agendamentos` (em vez de `appointments`)
-  - Campos em português: nome, telefone, data_nascimento, status, etc.
-  - Filtro de pacientes ativos via `status = 'ativo'` (em vez de `active = True`)
-  - Filtro LGPD via `whatsapp_opt_out = False`
+Schema real do PAIEMAE:
+  - Tabela `clients`
+      id          integer (PK)
+      name        text
+      phone       text
+      birthdate   date  (YYYY-MM-DD)
+      last_visit  date
+      status      'active' | 'inactive'
 
-Regra de ouro: nenhum outro módulo do sistema fala diretamente com o
-Supabase — tudo passa por aqui.
+  - Tabela `appointments`
+      id                integer (PK)
+      client_id         integer (FK → clients.id)
+      client_name       text
+      client_phone      text
+      appointment_date  date
+      appointment_time  time
+      status            'scheduled'|'confirmed'|'cancelled'|'no_show'|'completed'
+
+  - Tabela `marketing_log`
+      id          integer (PK, serial)
+      client_id   integer (FK → clients.id)
+      tool_name   text
+      channel     text
+      status      text
+      payload     jsonb
+      created_at  timestamptz (default now())
+
+  - Tabela `marketing_approval_queue`
+      id            integer (PK, serial)
+      client_id     integer (FK → clients.id)
+      client_name   text
+      client_phone  text
+      strategy      text
+      suggested_message text
+      context       jsonb
+      status        text  (default 'pending')
+
+  - Tabela `marketing_engine_settings`
+      id       integer (PK)
+      enabled  boolean
+
+Regra de ouro: nenhum outro módulo fala diretamente com o Supabase —
+tudo passa por aqui.
 """
 from datetime import datetime, date, timedelta
 
@@ -31,16 +65,17 @@ def get_client() -> Client:
 # Helpers genéricos (idempotência e auditoria)
 # ---------------------------------------------------------------------------
 
-def already_notified_today(db: Client, paciente_id: str, tool_name: str) -> bool:
+def already_notified_today(db: Client, client_id: int, tool_name: str) -> bool:
     """
-    Evita duplicar o disparo da mesma ferramenta para o mesmo paciente no
-    mesmo dia (essencial: o ciclo do scheduler roda várias vezes ao dia).
+    Evita duplicar o disparo da mesma ferramenta para o mesmo cliente no
+    mesmo dia (o scheduler pode rodar várias vezes ao dia).
+    client_id é integer — FK real da tabela clients.
     """
     today_start = datetime.combine(date.today(), datetime.min.time()).isoformat()
     resp = (
         db.table("marketing_log")
         .select("id")
-        .eq("paciente_id", paciente_id)
+        .eq("client_id", client_id)
         .eq("tool_name", tool_name)
         .gte("created_at", today_start)
         .execute()
@@ -50,7 +85,7 @@ def already_notified_today(db: Client, paciente_id: str, tool_name: str) -> bool
 
 def log_dispatch(
     db: Client,
-    paciente_id: str,
+    client_id: int,
     tool_name: str,
     channel: str,
     status: str,
@@ -59,7 +94,7 @@ def log_dispatch(
     """Registra todo disparo (auto) ou enfileiramento (approval) para auditoria."""
     db.table("marketing_log").insert(
         {
-            "paciente_id": paciente_id,
+            "client_id": client_id,
             "tool_name": tool_name,
             "channel": channel,   # "whatsapp" | "approval_queue"
             "status": status,     # "sent" | "failed" | "queued"
@@ -90,67 +125,70 @@ def is_engine_enabled(db: Client) -> bool:
 
 # ---------------------------------------------------------------------------
 # Queries específicas por ferramenta
-# (cada função aqui alimenta o `finder` de um Tool em engine/rules.py)
+# (cada função alimenta o `finder` de um Tool em engine/rules.py)
 # ---------------------------------------------------------------------------
 
-def get_patients_with_birthday_today(db: Client) -> list[dict]:
+def get_clients_with_birthday_today(db: Client) -> list[dict]:
     """
-    Pacientes cujo aniversário é hoje.
-    Filtra por `status = 'ativo'` e `whatsapp_opt_out = False` (LGPD).
+    Clientes cujo aniversário é hoje.
+    Usa EXTRACT para comparar apenas dia e mês, ignorando o ano.
+    Filtra apenas clients com status='active'.
     """
     today = date.today()
     resp = (
-        db.table("pacientes")
+        db.table("clients")
         .select("*")
-        .eq("status", "ativo")
-        .eq("whatsapp_opt_out", False)
-        .not_("data_nascimento", "is", "null")
+        .eq("status", "active")
+        .not_("birthdate", "is", "null")
         .execute()
     )
-    return [
-        p for p in resp.data
-        if p.get("data_nascimento") and _is_same_day_month(p["data_nascimento"], today)
-    ]
-
-
-def _is_same_day_month(birth_date_str: str, today: date) -> bool:
-    """Compara dia/mês de uma data (string ISO ou date) com hoje."""
-    if isinstance(birth_date_str, str):
-        bd = datetime.fromisoformat(birth_date_str).date()
-    else:
-        bd = birth_date_str
-    return bd.day == today.day and bd.month == today.month
+    # Filtragem em Python: extrai dia e mês do birthdate e compara com hoje
+    result = []
+    for c in resp.data:
+        bd_str = c.get("birthdate")
+        if not bd_str:
+            continue
+        try:
+            if isinstance(bd_str, str):
+                bd = date.fromisoformat(bd_str[:10])  # garante só YYYY-MM-DD
+            else:
+                bd = bd_str
+            if bd.day == today.day and bd.month == today.month:
+                result.append(c)
+        except (ValueError, AttributeError):
+            continue
+    return result
 
 
 def get_cold_leads(db: Client, days_inactive: int = 60) -> list[dict]:
     """
-    Pacientes sem agendamento há X dias — candidatos a reaquecimento.
-    Usa o campo `ultimo_agendamento` da tabela pacientes.
+    Clientes ativos sem visita há X dias — candidatos a reaquecimento.
+    Usa o campo `last_visit` da tabela clients.
     """
-    cutoff = (datetime.now() - timedelta(days=days_inactive)).isoformat()
+    cutoff = (date.today() - timedelta(days=days_inactive)).isoformat()
     resp = (
-        db.table("pacientes")
+        db.table("clients")
         .select("*")
-        .eq("status", "ativo")
-        .eq("whatsapp_opt_out", False)
-        .lte("ultimo_agendamento", cutoff)
+        .eq("status", "active")
+        .not_("last_visit", "is", "null")
+        .lte("last_visit", cutoff)
         .execute()
     )
     return resp.data
 
 
-def get_no_show_patients(db: Client, hours_window: int = 24) -> list[dict]:
+def get_no_show_appointments(db: Client, days_window: int = 1) -> list[dict]:
     """
-    Pacientes cujo agendamento teve status 'no_show' nas últimas N horas.
-    Lê da tabela `agendamentos` e faz join com `pacientes`.
+    Agendamentos com status 'no_show' no último dia.
+    Faz JOIN com clients via client_id para retornar dados do cliente.
+    Retorna lista de dicts com campos de appointments + clients aninhado.
     """
-    cutoff = (datetime.now() - timedelta(hours=hours_window)).isoformat()
+    cutoff = (date.today() - timedelta(days=days_window)).isoformat()
     resp = (
-        db.table("agendamentos")
-        .select("*, pacientes(*)")
+        db.table("appointments")
+        .select("*, clients(*)")
         .eq("status", "no_show")
-        .gte("created_at", cutoff)
+        .gte("appointment_date", cutoff)
         .execute()
     )
     return resp.data
-

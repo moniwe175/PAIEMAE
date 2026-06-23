@@ -29,20 +29,12 @@ const defaultSyncConfig = {
 };
 
 function loadFromStorage(key, fallback) {
-  try {
-    const saved = localStorage.getItem(key);
-    return saved ? JSON.parse(saved) : fallback;
-  } catch {
-    return fallback;
-  }
+  // Desativado localStorage: retorna sempre o fallback
+  return fallback;
 }
 
 function saveToStorage(key, data) {
-  try {
-    localStorage.setItem(key, JSON.stringify(data));
-  } catch (e) {
-    console.warn('Failed to save to localStorage:', e);
-  }
+  // Desativado localStorage: no-op
 }
 
 export function SyncProvider({ children }) {

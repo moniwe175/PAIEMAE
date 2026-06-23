@@ -2,8 +2,13 @@
 engine/marketing_engine.py
 Núcleo do sistema. A classe MarketingEngine não conhece regras de negócio
 específicas — ela apenas itera o TOOL_REGISTRY (rules.py) e decide, para
-cada paciente elegível, se a mensagem é disparada direto (auto) ou
+cada client elegível, se a mensagem é disparada direto (auto) ou
 inserida na fila de aprovação (approval).
+
+Campos reais usados aqui (de clients):
+  client["id"]    -> integer (FK real)
+  client["phone"] -> telefone
+  client["name"]  -> nome
 """
 import logging
 
@@ -26,6 +31,7 @@ class MarketingEngine:
     # -----------------------------------------------------------------
 
     def process_all_tasks(self):
+        # Verifica se o motor está ligado antes de qualquer coisa
         if not db_module.is_engine_enabled(self.db):
             logger.info("Motor desativado via Integrações — pulando ciclo.")
             return
@@ -42,27 +48,27 @@ class MarketingEngine:
         logger.info("Ciclo de processamento concluído.")
 
     def _process_tool(self, tool_name: str, tool):
-        patients = tool.finder(self.db) or []
-        logger.info("[%s] %d paciente(s) elegível(is).", tool_name, len(patients))
+        clients = tool.finder(self.db) or []
+        logger.info("[%s] %d cliente(s) elegível(is).", tool_name, len(clients))
 
-        for patient in patients:
-            if not patient.get("id") or not patient.get("telefone"):
-                logger.warning("Paciente sem id/telefone — pulando registro: %s", patient)
+        for client in clients:
+            if not client.get("id") or not client.get("phone"):
+                logger.warning("Cliente sem id/phone — pulando registro: %s", client)
                 continue
 
             # Idempotência: nunca dispara a mesma regra 2x no mesmo dia
-            # para o mesmo paciente, mesmo que o scheduler rode várias vezes.
-            if db_module.already_notified_today(self.db, patient["id"], tool_name):
+            # para o mesmo cliente, mesmo que o scheduler rode várias vezes.
+            if db_module.already_notified_today(self.db, client["id"], tool_name):
                 continue
 
             if tool.flow == "auto":
-                message = tool.build_message(patient)
-                self.send_message(patient, message, tool_name)
+                message = tool.build_message(client)
+                self.send_message(client, message, tool_name)
 
             elif tool.flow == "approval":
-                draft = tool.build_message(patient)  # {strategy, suggested_message, context}
+                draft = tool.build_message(client)  # {strategy, suggested_message, context}
                 self.queue_for_review(
-                    patient,
+                    client,
                     strategy=draft["strategy"],
                     suggested_msg=draft["suggested_message"],
                     context=draft.get("context", {}),
@@ -73,29 +79,29 @@ class MarketingEngine:
     # Fluxo Automático — Python puro, dispara direto
     # -----------------------------------------------------------------
 
-    def send_message(self, patient: dict, message: str, tool_name: str):
-        success = self.whatsapp.send_message(patient["telefone"], message)
+    def send_message(self, client: dict, message: str, tool_name: str):
+        success = self.whatsapp.send_message(client["phone"], message)
         db_module.log_dispatch(
             self.db,
-            paciente_id=patient["id"],
+            client_id=client["id"],
             tool_name=tool_name,
             channel="whatsapp",
             status="sent" if success else "failed",
             payload={"message": message},
         )
         if not success:
-            logger.error("Falha ao enviar '%s' para paciente %s.", tool_name, patient["id"])
+            logger.error("Falha ao enviar '%s' para cliente %s.", tool_name, client["id"])
 
     # -----------------------------------------------------------------
     # Fluxo de Aprovação — insere na fila, NUNCA dispara direto
     # -----------------------------------------------------------------
 
-    def queue_for_review(self, patient: dict, strategy: str, suggested_msg: str, context: dict, tool_name: str):
+    def queue_for_review(self, client: dict, strategy: str, suggested_msg: str, context: dict, tool_name: str):
         self.db.table("marketing_approval_queue").insert(
             {
-                "paciente_id": patient["id"],
-                "paciente_nome": patient.get("nome"),
-                "paciente_telefone": patient.get("telefone"),
+                "client_id": client["id"],
+                "client_name": client.get("name"),
+                "client_phone": client.get("phone"),
                 "strategy": strategy,
                 "suggested_message": suggested_msg,
                 "context": context,
@@ -105,10 +111,10 @@ class MarketingEngine:
 
         db_module.log_dispatch(
             self.db,
-            paciente_id=patient["id"],
+            client_id=client["id"],
             tool_name=tool_name,
             channel="approval_queue",
             status="queued",
             payload={"strategy": strategy},
         )
-        logger.info("Paciente %s enfileirado para aprovação (%s).", patient["id"], strategy)
+        logger.info("Cliente %s enfileirado para aprovação (%s).", client["id"], strategy)
