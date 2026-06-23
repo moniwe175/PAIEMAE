@@ -363,3 +363,71 @@ export function onAuthStateChange(callback) {
   if (!isSupabaseConfigured()) return { data: { subscription: { unsubscribe: () => {} } } };
   return supabase.auth.onAuthStateChange(callback);
 }
+
+// ─── Clients (Patients) ───────────────────────────────────────
+
+export async function fetchClients() {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured', []);
+  const { data, error } = await supabase
+    .from('clients')
+    .select('*')
+    .order('name', { ascending: true });
+  if (error) return handleError(error, []);
+  return { data: data || [], error: null };
+}
+
+export async function insertClient(client) {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured');
+  const { data, error } = await supabase.from('clients').insert([client]).select().single();
+  if (error) return handleError(error);
+  return { data, error: null };
+}
+
+export async function updateClient(id, updates) {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured');
+  const { data, error } = await supabase.from('clients').update(updates).eq('id', id).select().single();
+  if (error) return handleError(error);
+  return { data, error: null };
+}
+
+export async function deleteClient(id) {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured');
+  const { error } = await supabase.from('clients').delete().eq('id', id);
+  if (error) return handleError(error);
+  return { data: true, error: null };
+}
+
+// ─── Appointments ─────────────────────────────────────────────
+
+export async function fetchAppointments() {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured', []);
+  const { data, error } = await supabase
+    .from('appointments')
+    .select('*')
+    .order('appointment_date', { ascending: true })
+    .order('appointment_time', { ascending: true });
+  if (error) return handleError(error, []);
+  return { data: data || [], error: null };
+}
+
+export async function insertAppointment(apt) {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured');
+  const { data, error } = await supabase.from('appointments').insert([apt]).select().single();
+  if (error) return handleError(error);
+  return { data, error: null };
+}
+
+export async function updateAppointment(id, updates) {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured');
+  const { data, error } = await supabase.from('appointments').update(updates).eq('id', id).select().single();
+  if (error) return handleError(error);
+  return { data, error: null };
+}
+
+export async function deleteAppointment(id) {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured');
+  const { error } = await supabase.from('appointments').delete().eq('id', id);
+  if (error) return handleError(error);
+  return { data: true, error: null };
+}
+

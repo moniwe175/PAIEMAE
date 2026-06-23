@@ -7,6 +7,14 @@ import {
   Ban, Coffee, UtensilsCrossed, Lock, AlertTriangle, Repeat2,
 } from 'lucide-react';
 import { useProfissionais } from '../lib/profissionais';
+import {
+  fetchClients,
+  insertClient,
+  fetchAppointments,
+  insertAppointment,
+  updateAppointment,
+  deleteAppointment
+} from '../services/supabaseService';
 
 // ─── Constants ───────────────────────────────────────────────
 
@@ -68,6 +76,78 @@ function genId() {
   return 'id_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
 }
 
+function mapToSupabase(item, isBlock = false) {
+  const time = item.hora.length === 5 ? `${item.hora}:00` : item.hora;
+  if (isBlock) {
+    return {
+      client_name: 'BLOQUEIO',
+      procedure: item.tipo,
+      professional: item.profissional,
+      appointment_date: item.data,
+      appointment_time: time,
+      status: 'bloqueado',
+      notes: item.observacoes || ''
+    };
+  } else {
+    return {
+      client_name: item.paciente,
+      client_phone: item.telefone || '',
+      procedure: item.servico,
+      professional: item.profissional,
+      appointment_date: item.data,
+      appointment_time: time,
+      status: item.status,
+      notes: JSON.stringify({
+        valor: item.valor,
+        duracao: item.duracao,
+        observacoes: item.observacoes,
+        fixo: item.fixo
+      })
+    };
+  }
+}
+
+function mapFromSupabase(item) {
+  const time = item.appointment_time ? item.appointment_time.substring(0, 5) : '00:00';
+  if (item.status === 'bloqueado') {
+    return {
+      id: item.id,
+      data: item.appointment_date,
+      hora: time,
+      horaFim: calcEndTime(time, 60),
+      duracao: 60,
+      tipo: item.procedure || 'almoco',
+      profissional: item.professional,
+      observacoes: item.notes || ''
+    };
+  } else {
+    let extra = { valor: 0, duracao: 60, observacoes: '', fixo: false };
+    try {
+      if (item.notes && item.notes.startsWith('{')) {
+        extra = JSON.parse(item.notes);
+      } else {
+        extra.observacoes = item.notes || '';
+      }
+    } catch (e) {}
+
+    return {
+      id: item.id,
+      data: item.appointment_date,
+      hora: time,
+      horaFim: calcEndTime(time, extra.duracao || 60),
+      duracao: extra.duracao || 60,
+      paciente: item.client_name,
+      telefone: item.client_phone || '',
+      profissional: item.professional,
+      servico: item.procedure,
+      status: item.status || 'aguardando_confirmacao',
+      valor: extra.valor || 0,
+      observacoes: extra.observacoes || '',
+      fixo: extra.fixo || false
+    };
+  }
+}
+
 // ─── Overlap layout algorithm ─────────────────────────────────
 // Retorna para cada item: { col, totalCols }
 function computeColumns(items) {
@@ -101,64 +181,12 @@ function computeColumns(items) {
   return result;
 }
 
-// ─── Load agendamentos ────────────────────────────────────────
-function loadAgendamentos() {
-  try {
-    const raw = localStorage.getItem(AGENDA_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) return parsed;
-    }
-  } catch (e) { }
-  const hoje = new Date();
-  const seed = [
-    { id: 'apt_d1', data: fmtDate(hoje), hora: '09:00', horaFim: '10:00', duracao: 60, paciente: 'Fernanda Lima', telefone: '(11) 98765-4321', profissional: 'Bárbara', servico: 'Limpeza de Pele', status: 'confirmado', valor: 180, observacoes: '' },
-    { id: 'apt_d2', data: fmtDate(hoje), hora: '10:00', horaFim: '11:00', duracao: 60, paciente: 'Carla Mendes', telefone: '(11) 91234-5678', profissional: 'Evelyn', servico: 'Harmonização Facial', status: 'aguardando_confirmacao', valor: 450, observacoes: '' },
-    { id: 'apt_d3', data: fmtDate(hoje), hora: '09:22', horaFim: '10:22', duracao: 60, paciente: 'Marina Silva', telefone: '', profissional: 'Bárbara', servico: 'Peeling Químico', status: 'aguardando_confirmacao', valor: 220, observacoes: '' },
-    { id: 'apt_d4', data: fmtDate(hoje), hora: '14:00', horaFim: '15:00', duracao: 60, paciente: 'Ana Beatriz', telefone: '(11) 99876-5432', profissional: 'Bárbara', servico: 'Drenagem Linfática', status: 'aguardando_confirmacao', valor: 150, observacoes: '' },
-  ];
-  localStorage.setItem(AGENDA_KEY, JSON.stringify(seed));
-  return seed;
-}
-function saveAgendamentos(list) { localStorage.setItem(AGENDA_KEY, JSON.stringify(list)); }
-
-// ─── Load bloqueios ───────────────────────────────────────────
-function loadBloqueios() {
-  try {
-    const raw = localStorage.getItem(BLOQUEIOS_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) return parsed;
-    }
-  } catch (e) { }
-  const hoje = new Date();
-  const seed = [
-    { id: 'blq_d1', data: fmtDate(hoje), hora: '12:00', horaFim: '13:00', duracao: 60, tipo: 'almoco', profissional: 'Bárbara', observacoes: 'Almoço' },
-    { id: 'blq_d2', data: fmtDate(hoje), hora: '11:30', horaFim: '18:00', duracao: 390, tipo: 'ausencia', profissional: 'Evelyn', observacoes: 'ausencia' },
-  ];
-  localStorage.setItem(BLOQUEIOS_KEY, JSON.stringify(seed));
-  return seed;
-}
-function saveBloqueios(list) { localStorage.setItem(BLOQUEIOS_KEY, JSON.stringify(list)); }
-
-// ─── Pacientes ────────────────────────────────────────────────
-const DEFAULT_PACIENTES = [
-  { nome: 'Fernanda Lima', telefone: '(11) 98765-4321', email: 'fernanda@email.com' },
-  { nome: 'Carla Mendes', telefone: '(11) 91234-5678', email: 'carla@email.com' },
-  { nome: 'Ana Beatriz', telefone: '(11) 99876-5432', email: 'ana@email.com' },
-  { nome: 'Juliana Costa', telefone: '(11) 94567-8901', email: '' },
-  { nome: 'Marina Silva', telefone: '', email: '' },
-  { nome: 'Patrícia Rocha', telefone: '(11) 93456-7890', email: '' },
-];
-function loadPacientes() {
-  try {
-    const raw = localStorage.getItem(PACIENTES_KEY);
-    if (raw) { const p = JSON.parse(raw); if (Array.isArray(p) && p.length > 0) return p; }
-  } catch (e) { }
-  localStorage.setItem(PACIENTES_KEY, JSON.stringify(DEFAULT_PACIENTES));
-  return [...DEFAULT_PACIENTES];
-}
-function savePacientes(list) { localStorage.setItem(PACIENTES_KEY, JSON.stringify(list)); }
+function loadAgendamentos() { return []; }
+function saveAgendamentos(list) {}
+function loadBloqueios() { return []; }
+function saveBloqueios(list) {}
+function loadPacientes() { return []; }
+function savePacientes(list) {}
 
 function getWeekDays(date) {
   const d = new Date(date);
@@ -527,11 +555,25 @@ function AppointmentDetailModal({ apt, profissionais, onClose, onEdit, onDelete,
 // ═══════════════════════════════════════════════════════════════
 function AgendamentoModal({ onClose, date, profissional: prefillProf, hora: prefillHora, profissionais, apt, onSave }) {
   const isEdit = !!apt;
-  const [pacientes, setPacientes] = useState(loadPacientes);
+  const [pacientes, setPacientes] = useState([]);
   const [showNewClient, setShowNewClient] = useState(false);
   const [clienteBusca, setClienteBusca] = useState(isEdit ? apt.paciente : '');
   const [showClienteList, setShowClienteList] = useState(false);
   const clienteRef = useRef(null);
+
+  useEffect(() => {
+    async function load() {
+      const { data } = await fetchClients();
+      if (data) {
+        setPacientes(data.map(item => ({
+          nome: item.name,
+          telefone: item.phone,
+          email: item.email
+        })));
+      }
+    }
+    load();
+  }, []);
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -622,9 +664,22 @@ function AgendamentoModal({ onClose, date, profissional: prefillProf, hora: pref
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,20,30,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10000, backdropFilter: 'blur(6px)', padding: 16 }} onClick={onClose}>
       {showNewClient && (
-        <QuickClientModal onClose={() => setShowNewClient(false)} onSave={c => {
-          const updated = [...pacientes, c]; setPacientes(updated); savePacientes(updated);
-          set('paciente', c.nome); set('telefone', c.telefone || ''); setClienteBusca(c.nome); setShowNewClient(false);
+        <QuickClientModal onClose={() => setShowNewClient(false)} onSave={async (c) => {
+          const clientData = {
+            name: c.nome,
+            phone: c.telefone || '(00) 00000-0000',
+            email: c.email || '',
+            status: 'ativo'
+          };
+          const { data } = await insertClient(clientData);
+          if (data) {
+            const mapped = { nome: data.name, telefone: data.phone, email: data.email };
+            setPacientes(prev => [...prev, mapped]);
+            set('paciente', mapped.nome);
+            set('telefone', mapped.telefone || '');
+            setClienteBusca(mapped.nome);
+          }
+          setShowNewClient(false);
         }} />
       )}
       <div style={{ background: '#fff', borderRadius: 22, width: '100%', maxWidth: 560, boxShadow: '0 32px 80px rgba(0,0,0,0.25)', maxHeight: '92vh', overflowY: 'auto' }} onClick={e => e.stopPropagation()}>
@@ -1016,8 +1071,8 @@ function AppointmentCard({ apt, prof, onClick, col, totalCols }) {
 export default function Agenda() {
   const { profissionais } = useProfissionais();
   const [selectedDate, setSelectedDate] = useState(new Date());
-  const [agendamentos, setAgendamentos] = useState(loadAgendamentos);
-  const [bloqueios, setBloqueios] = useState(loadBloqueios);
+  const [agendamentos, setAgendamentos] = useState([]);
+  const [bloqueios, setBloqueios] = useState([]);
   const [viewMode, setViewMode] = useState('day');
 
   // Modals
@@ -1025,9 +1080,27 @@ export default function Agenda() {
   const [detailModal, setDetailModal] = useState({ open: false, apt: null });
   const [bloqueioModal, setBloqueioModal] = useState({ open: false, bloqueio: null, prefillProf: '', prefillHora: '' });
 
-  // Persist
-  useEffect(() => { saveAgendamentos(agendamentos); }, [agendamentos]);
-  useEffect(() => { saveBloqueios(bloqueios); }, [bloqueios]);
+  // Load from Supabase on mount
+  useEffect(() => {
+    async function loadData() {
+      const { data: aptData } = await fetchAppointments();
+      if (aptData) {
+        const mappedApts = [];
+        const mappedBloqueios = [];
+        aptData.forEach(item => {
+          const mapped = mapFromSupabase(item);
+          if (item.status === 'bloqueado') {
+            mappedBloqueios.push(mapped);
+          } else {
+            mappedApts.push(mapped);
+          }
+        });
+        setAgendamentos(mappedApts);
+        setBloqueios(mappedBloqueios);
+      }
+    }
+    loadData();
+  }, []);
 
   const weekDays = useMemo(() => getWeekDays(selectedDate), [selectedDate]);
 
@@ -1043,33 +1116,60 @@ export default function Agenda() {
   const openDetail = apt => setDetailModal({ open: true, apt });
   const openBloqueio = (prof = '', hora = '', blq = null) => setBloqueioModal({ open: true, bloqueio: blq, prefillProf: prof, prefillHora: hora });
 
-  const handleSave = payload => {
-    if (Array.isArray(payload)) {
-      setAgendamentos(prev => {
-        const ids = new Set(prev.map(a => a.id));
-        const novos = payload.filter(p => !ids.has(p.id));
-        const atualizados = payload.filter(p => ids.has(p.id));
-        return [...prev.map(a => { const u = atualizados.find(x => x.id === a.id); return u || a; }), ...novos];
-      });
-    } else {
-      setAgendamentos(prev => {
-        const ex = prev.find(a => a.id === payload.id);
-        return ex ? prev.map(a => a.id === payload.id ? payload : a) : [...prev, payload];
-      });
+  const handleSave = async (payload) => {
+    const list = Array.isArray(payload) ? payload : [payload];
+    const updatedApts = [];
+    for (const item of list) {
+      const sbItem = mapToSupabase(item, false);
+      let res;
+      if (item.id && !item.id.startsWith('apt_') && !item.id.startsWith('id_')) {
+        res = await updateAppointment(item.id, sbItem);
+      } else {
+        res = await insertAppointment(sbItem);
+      }
+      if (res.data) {
+        updatedApts.push(mapFromSupabase(res.data));
+      }
+    }
+    setAgendamentos(prev => {
+      const ids = new Set(updatedApts.map(a => a.id));
+      return [...prev.filter(a => !ids.has(a.id)), ...updatedApts];
+    });
+  };
+
+  const handleDelete = async (id) => {
+    await deleteAppointment(id);
+    setAgendamentos(prev => prev.filter(a => a.id !== id));
+    setDetailModal({ open: false, apt: null });
+  };
+
+  const handleStatusChange = async (id, status) => {
+    const { data } = await updateAppointment(id, { status });
+    if (data) {
+      const mapped = mapFromSupabase(data);
+      setAgendamentos(prev => prev.map(a => a.id === id ? mapped : a));
+      setDetailModal(prev => prev.apt?.id === id ? { ...prev, apt: mapped } : prev);
     }
   };
 
-  const handleDelete = id => { setAgendamentos(prev => prev.filter(a => a.id !== id)); setDetailModal({ open: false, apt: null }); };
-  const handleStatusChange = (id, status) => {
-    setAgendamentos(prev => prev.map(a => a.id === id ? { ...a, status } : a));
-    setDetailModal(prev => prev.apt?.id === id ? { ...prev, apt: { ...prev.apt, status } } : prev);
+  const handleSaveBloqueio = async (payload) => {
+    const sbItem = mapToSupabase(payload, true);
+    let res;
+    if (payload.id && !payload.id.startsWith('blq_') && !payload.id.startsWith('id_')) {
+      res = await updateAppointment(payload.id, sbItem);
+    } else {
+      res = await insertAppointment(sbItem);
+    }
+    if (res.data) {
+      const mapped = mapFromSupabase(res.data);
+      setBloqueios(prev => [...prev.filter(b => b.id !== mapped.id), mapped]);
+    }
   };
 
-  const handleSaveBloqueio = payload => setBloqueios(prev => {
-    const ex = prev.find(b => b.id === payload.id);
-    return ex ? prev.map(b => b.id === payload.id ? payload : b) : [...prev, payload];
-  });
-  const handleDeleteBloqueio = id => setBloqueios(prev => prev.filter(b => b.id !== id));
+  const handleDeleteBloqueio = async (id) => {
+    await deleteAppointment(id);
+    setBloqueios(prev => prev.filter(b => b.id !== id));
+  };
 
   const dateLabel = useMemo(() => {
     if (viewMode === 'week') {
