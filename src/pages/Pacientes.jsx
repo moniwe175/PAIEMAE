@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Users, Plus, Search, Phone, Calendar, FileText, Star, XCircle, ChevronRight, Mail, MapPin, Upload, Trash2 } from 'lucide-react';
+import { fetchClients, insertClient, deleteClient } from '../services/supabaseService';
 
 const defaultPacientes = [
   { id:1, nome:'Ana Beatriz Souza', telefone:'(11) 98765-4321', email:'ana@email.com', cidade:'São Paulo', nascimento:'15/03/1990', ultimaVisita:'10/05/2026', totalSessoes:8, totalGasto:2850, status:'ativo', avatar:'A' },
@@ -71,13 +72,37 @@ function PacienteModal({ onClose, onSave }) {
 }
 
 export default function Pacientes() {
-  const [pacientes, setPacientes] = useState(() => {
-    const saved = localStorage.getItem('erp_pacientes');
-    return saved ? JSON.parse(saved) : defaultPacientes;
-  });
+  const [pacientes, setPacientes] = useState([]);
   const [modal, setModal] = useState(false);
   const [busca, setBusca] = useState('');
   const [selected, setSelected] = useState(null);
+
+  // Clean up any stale localStorage on component mount
+  useEffect(() => {
+    // Remove legacy localStorage entry that may keep deleted records
+    localStorage.removeItem('erp_pacientes');
+    // Load fresh data from Supabase
+    async function load() {
+      const { data } = await fetchClients();
+      if (data) {
+        const mapped = data.map(item => ({
+          id: item.id,
+          nome: item.name || '',
+          telefone: item.phone || '',
+          email: item.email || '',
+          cidade: 'Não informada',
+          nascimento: item.birthdate ? item.birthdate.split('-').reverse().join('/') : '',
+          ultimaVisita: item.last_visit ? item.last_visit.split('-').reverse().join('/') : 'Nunca',
+          totalSessoes: item.points || 0,
+          totalGasto: Number(item.total_spent) || 0,
+          status: item.status || 'ativo',
+          avatar: item.avatar || (item.name ? item.name.charAt(0).toUpperCase() : 'U')
+        }));
+        setPacientes(mapped);
+      }
+    }
+    load();
+  }, []);
 
   const cleanAndTitleCaseName = (name) => {
     if (!name) return '';
@@ -94,24 +119,24 @@ export default function Pacientes() {
       .join(' ');
   };
 
-  const handleImportCSV = (e) => {
+  const handleImportCSV = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
 
     const reader = new FileReader();
-    reader.onload = (event) => {
+    reader.onload = async (event) => {
       const text = event.target.result;
       const lines = text.split(/\r?\n/);
       if (lines.length === 0) return;
 
+      // Detect delimiter
       let delimiter = ',';
       const sampleLines = lines.slice(0, 10).join('\n');
       const semicolons = (sampleLines.match(/;/g) || []).length;
       const commas = (sampleLines.match(/,/g) || []).length;
-      if (semicolons > commas) {
-        delimiter = ';';
-      }
+      if (semicolons > commas) delimiter = ';';
 
+      // Find header row
       let headerIdx = -1;
       for (let i = 0; i < lines.length; i++) {
         const cleanLine = lines[i].toLowerCase();
@@ -120,10 +145,7 @@ export default function Pacientes() {
           break;
         }
       }
-
-      if (headerIdx === -1) {
-        headerIdx = 0;
-      }
+      if (headerIdx === -1) headerIdx = 0;
 
       const headers = lines[headerIdx]
         .split(delimiter)
@@ -135,87 +157,107 @@ export default function Pacientes() {
       const cidadeIdx = headers.findIndex(h => h.includes('cidade') || h.includes('município'));
       const nascimentoIdx = headers.findIndex(h => h.includes('nascimento') || h.includes('nasc'));
 
-      const importedPacientes = [];
+      const imported = [];
       for (let i = headerIdx + 1; i < lines.length; i++) {
         const line = lines[i].trim();
         if (!line) continue;
-
-        let cols = [];
-        if (line.includes('"')) {
-          const matches = line.match(/(".*?"|[^";\s]+)(?=\s*;|\s*$)/g) || line.split(delimiter);
-          cols = matches.map(m => m.replace(/^["']|["']$/g, '').trim());
-        } else {
-          cols = line.split(delimiter).map(c => c.trim());
-        }
+        const cols = line.includes('"')
+          ? (line.match(/(".*?"|[^";\s]+)(?=\s*;|\s*$)/g) || line.split(delimiter)).map(m => m.replace(/^["']|["']$/g, '').trim())
+          : line.split(delimiter).map(c => c.trim());
 
         const rawNome = nomeIdx !== -1 && cols[nomeIdx] ? cols[nomeIdx] : '';
         if (!rawNome || rawNome.toLowerCase() === 'nome') continue;
-
         const nome = cleanAndTitleCaseName(rawNome);
-        const telefone = telIdx !== -1 && cols[telIdx] ? cols[telIdx].replace(/^["']|["']$/g, '').trim() : '';
-        const email = emailIdx !== -1 && cols[emailIdx] ? cols[emailIdx].replace(/^["']|["']$/g, '').trim() : '';
-        const cidade = cidadeIdx !== -1 && cols[cidadeIdx] ? cols[cidadeIdx].replace(/^["']|["']$/g, '').trim() : 'Não informada';
-        const nascimento = nascimentoIdx !== -1 && cols[nascimentoIdx] ? cols[nascimentoIdx].replace(/^["']|["']$/g, '').trim() : '';
+        const telefone = telIdx !== -1 && cols[telIdx] ? cols[telIdx] : '(00) 00000-0000';
+        const email = emailIdx !== -1 && cols[emailIdx] ? cols[emailIdx] : '';
+        const cidade = cidadeIdx !== -1 && cols[cidadeIdx] ? cols[cidadeIdx] : 'Não informada';
+        const nascimento = nascimentoIdx !== -1 && cols[nascimentoIdx] ? cols[nascimentoIdx] : null;
 
-        importedPacientes.push({
-          id: Date.now() + i,
-          nome,
-          telefone: telefone || '(00) 00000-0000',
-          email: email || '',
-          cidade: cidade || 'Não informada',
-          nascimento: nascimento || '',
-          ultimaVisita: 'Nunca',
-          totalSessoes: 0,
-          totalGasto: 0,
+        const clientData = {
+          name: nome,
+          phone: telefone,
+          email,
+          birthdate: nascimento,
           status: 'ativo',
-          avatar: nome.charAt(0).toUpperCase() || 'U'
-        });
+          avatar: nome.charAt(0).toUpperCase(),
+          total_spent: 0,
+          points: 0
+        };
+        // Insert into Supabase
+        const { data, error } = await insertClient(clientData);
+        if (!error && data) imported.push(data);
       }
 
-      if (importedPacientes.length > 0) {
-        setPacientes(prev => {
-          const updated = [...prev, ...importedPacientes];
-          localStorage.setItem('erp_pacientes', JSON.stringify(updated));
-          return updated;
-        });
-        alert(`${importedPacientes.length} pacientes importados com sucesso!`);
+      if (imported.length > 0) {
+        setPacientes(prev => [...prev, ...imported.map(item => ({
+          id: item.id,
+          nome: item.name,
+          telefone: item.phone,
+          email: item.email,
+          cidade: 'Não informada',
+          nascimento: item.birthdate ? item.birthdate.split('-').reverse().join('/') : '',
+          ultimaVisita: 'Nunca',
+          totalSessoes: item.points || 0,
+          totalGasto: Number(item.total_spent) || 0,
+          status: item.status || 'ativo',
+          avatar: item.avatar || (item.name ? item.name.charAt(0).toUpperCase() : 'U')
+        }))]);
+        alert(`${imported.length} pacientes importados com sucesso!`);
       } else {
         alert('Nenhum paciente válido encontrado. Verifique as colunas de sua planilha.');
       }
     };
-
     reader.readAsText(file, 'UTF-8');
     e.target.value = '';
   };
 
-  const handleSaveNovoPaciente = (formData) => {
-    const novo = {
-      id: Date.now(),
-      nome: cleanAndTitleCaseName(formData.nome),
-      telefone: formData.telefone || '(00) 00000-0000',
+  const handleSaveNovoPaciente = async (formData) => {
+    const clientData = {
+      name: cleanAndTitleCaseName(formData.nome),
+      phone: formData.telefone || '(00) 00000-0000',
       email: formData.email || '',
-      cidade: formData.cidade || 'Não informada',
-      nascimento: formData.nascimento || '',
-      ultimaVisita: 'Hoje',
-      totalSessoes: 0,
-      totalGasto: 0,
+      birthdate: formData.nascimento || null,
       status: 'ativo',
-      avatar: formData.nome.charAt(0).toUpperCase()
+      avatar: formData.nome.charAt(0).toUpperCase(),
+      total_spent: 0,
+      points: 0
     };
-    setPacientes(prev => {
-      const updated = [...prev, novo];
-      localStorage.setItem('erp_pacientes', JSON.stringify(updated));
-      return updated;
-    });
+
+    const { data, error } = await insertClient(clientData);
+    if (error) {
+      alert('Erro ao salvar paciente no banco de dados: ' + (error.message || error));
+      return;
+    }
+
+    if (data) {
+      const novo = {
+        id: data.id,
+        nome: data.name,
+        telefone: data.phone,
+        email: data.email,
+        cidade: 'Não informada',
+        nascimento: data.birthdate ? data.birthdate.split('-').reverse().join('/') : '',
+        ultimaVisita: 'Nunca',
+        totalSessoes: data.points || 0,
+        totalGasto: Number(data.total_spent) || 0,
+        status: data.status,
+        avatar: data.avatar
+      };
+      setPacientes(prev => [...prev, novo]);
+    }
     setModal(false);
   };
 
-  const handleDeletePaciente = (id) => {
-    setPacientes(prev => {
-      const updated = prev.filter(p => p.id !== id);
-      localStorage.setItem('erp_pacientes', JSON.stringify(updated));
-      return updated;
-    });
+  const handleDeletePaciente = async (id) => {
+    const { error } = await deleteClient(id);
+    if (error) {
+      alert('Erro ao excluir paciente no banco de dados: ' + (error.message || error));
+      return;
+    }
+    // Remove from state
+    setPacientes(prev => prev.filter(p => p.id !== id));
+    // Also clear any legacy localStorage entry to prevent stale data on reload
+    localStorage.removeItem('erp_pacientes');
     setSelected(null);
   };
 
