@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
+import { supabase, isSupabaseConfigured } from './supabase';
 
 // ─── Available categories ───────────────────────────────────
 export const CATEGORIAS = [
@@ -34,40 +35,68 @@ const DEFAULT_SERVICOS = [
   { id: 'svc_11', nome: 'Massagem', categoria: 'Massagem', duracao: 60, preco: 150, comissao: 25, ativo: true, descricao: '' },
 ];
 
-const STORAGE_KEY = 'erp_servicos';
-
-// ─── Load / Save helpers ────────────────────────────────────
-function loadServicos() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-    }
-  } catch (e) {
-    console.warn('[Servicos] Failed to load from localStorage', e);
-  }
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(DEFAULT_SERVICOS));
-  return DEFAULT_SERVICOS;
-}
-
-function saveServicos(list) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
-}
-
 function genId() {
   return 'svc_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 }
 
+// ─── Supabase helpers ────────────────────────────────────────
+async function loadFromSupabase() {
+  if (!isSupabaseConfigured()) return null;
+  const { data, error } = await supabase.from('servicos').select('*').order('created_at');
+  if (error || !data) return null;
+  return data;
+}
+
+async function upsertToSupabase(svc) {
+  if (!isSupabaseConfigured()) return;
+  await supabase.from('servicos').upsert([svc], { onConflict: 'id' });
+}
+
+async function deleteFromSupabase(id) {
+  if (!isSupabaseConfigured()) return;
+  await supabase.from('servicos').delete().eq('id', id);
+}
+
+async function seedSupabase() {
+  if (!isSupabaseConfigured()) return;
+  const { data } = await supabase.from('servicos').select('id');
+  if (data && data.length > 0) return; // already seeded
+  await supabase.from('servicos').insert(DEFAULT_SERVICOS);
+}
+
 // ─── Hook ───────────────────────────────────────────────────
 export function useServicos() {
-  const [servicos, setServicos] = useState(loadServicos);
+  const [servicos, setServicos] = useState([]);
+  const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
-    saveServicos(servicos);
-  }, [servicos]);
+    async function init() {
+      await seedSupabase();
+      const remote = await loadFromSupabase();
+      if (remote && remote.length > 0) {
+        setServicos(remote);
+      } else {
+        // fallback: use localStorage or defaults
+        const raw = localStorage.getItem('erp_servicos');
+        if (raw) {
+          try { setServicos(JSON.parse(raw)); } catch { setServicos(DEFAULT_SERVICOS); }
+        } else {
+          setServicos(DEFAULT_SERVICOS);
+        }
+      }
+      setLoaded(true);
+    }
+    init();
+  }, []);
 
-  const addServico = useCallback((data) => {
+  // Persist to localStorage as fallback
+  useEffect(() => {
+    if (loaded) {
+      localStorage.setItem('erp_servicos', JSON.stringify(servicos));
+    }
+  }, [servicos, loaded]);
+
+  const addServico = useCallback(async (data) => {
     const novo = {
       id: genId(),
       nome: data.nome || 'Novo Serviço',
@@ -78,20 +107,32 @@ export function useServicos() {
       ativo: true,
       descricao: data.descricao || '',
     };
+    await upsertToSupabase(novo);
     setServicos(prev => [...prev, novo]);
     return novo;
   }, []);
 
-  const updateServico = useCallback((id, updates) => {
-    setServicos(prev => prev.map(s => s.id === id ? { ...s, ...updates } : s));
+  const updateServico = useCallback(async (id, updates) => {
+    setServicos(prev => prev.map(s => {
+      if (s.id !== id) return s;
+      const updated = { ...s, ...updates };
+      upsertToSupabase(updated);
+      return updated;
+    }));
   }, []);
 
-  const removeServico = useCallback((id) => {
+  const removeServico = useCallback(async (id) => {
+    await deleteFromSupabase(id);
     setServicos(prev => prev.filter(s => s.id !== id));
   }, []);
 
-  const toggleAtivo = useCallback((id) => {
-    setServicos(prev => prev.map(s => s.id === id ? { ...s, ativo: !s.ativo } : s));
+  const toggleAtivo = useCallback(async (id) => {
+    setServicos(prev => prev.map(s => {
+      if (s.id !== id) return s;
+      const updated = { ...s, ativo: !s.ativo };
+      upsertToSupabase(updated);
+      return updated;
+    }));
   }, []);
 
   return {

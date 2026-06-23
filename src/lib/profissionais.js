@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
+import { supabase, isSupabaseConfigured } from './supabase';
 
 // ─── Available services catalog ─────────────────────────────
 export const CATALOGO_SERVICOS = [
@@ -58,43 +59,68 @@ const DEFAULT_PROFISSIONAIS = [
   },
 ];
 
-const STORAGE_KEY = 'erp_profissionais';
-
-// ─── Load / Save helpers ────────────────────────────────────
-function loadProfissionais() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-    }
-  } catch (e) {
-    console.warn('[Profissionais] Failed to load from localStorage', e);
-  }
-  // Seed defaults
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(DEFAULT_PROFISSIONAIS));
-  return DEFAULT_PROFISSIONAIS;
-}
-
-function saveProfissionais(list) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
-}
-
-// ─── Generate unique ID ─────────────────────────────────────
 function genId() {
   return 'prof_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 }
 
+// ─── Supabase helpers ────────────────────────────────────────
+async function loadFromSupabase() {
+  if (!isSupabaseConfigured()) return null;
+  const { data, error } = await supabase.from('profissionais').select('*').order('created_at');
+  if (error || !data) return null;
+  return data.map(r => ({ ...r, servicos: r.servicos || [] }));
+}
+
+async function upsertToSupabase(prof) {
+  if (!isSupabaseConfigured()) return;
+  await supabase.from('profissionais').upsert([prof], { onConflict: 'id' });
+}
+
+async function deleteFromSupabase(id) {
+  if (!isSupabaseConfigured()) return;
+  await supabase.from('profissionais').delete().eq('id', id);
+}
+
+async function seedSupabase() {
+  if (!isSupabaseConfigured()) return;
+  const { data } = await supabase.from('profissionais').select('id');
+  if (data && data.length > 0) return; // already seeded
+  await supabase.from('profissionais').insert(DEFAULT_PROFISSIONAIS);
+}
+
 // ─── Hook ───────────────────────────────────────────────────
 export function useProfissionais() {
-  const [profissionais, setProfissionais] = useState(loadProfissionais);
+  const [profissionais, setProfissionais] = useState([]);
+  const [loaded, setLoaded] = useState(false);
 
-  // Persist on every change
   useEffect(() => {
-    saveProfissionais(profissionais);
-  }, [profissionais]);
+    async function init() {
+      await seedSupabase();
+      const remote = await loadFromSupabase();
+      if (remote && remote.length > 0) {
+        setProfissionais(remote);
+      } else {
+        // fallback: no Supabase configured, use defaults stored in localStorage
+        const raw = localStorage.getItem('erp_profissionais');
+        if (raw) {
+          try { setProfissionais(JSON.parse(raw)); } catch { setProfissionais(DEFAULT_PROFISSIONAIS); }
+        } else {
+          setProfissionais(DEFAULT_PROFISSIONAIS);
+        }
+      }
+      setLoaded(true);
+    }
+    init();
+  }, []);
 
-  const addProfissional = useCallback((data) => {
+  // Persist to localStorage as fallback
+  useEffect(() => {
+    if (loaded) {
+      localStorage.setItem('erp_profissionais', JSON.stringify(profissionais));
+    }
+  }, [profissionais, loaded]);
+
+  const addProfissional = useCallback(async (data) => {
     const newProf = {
       id: genId(),
       nome: data.nome || 'Novo Profissional',
@@ -105,30 +131,41 @@ export function useProfissionais() {
       comissao: data.comissao || 0,
       servicos: data.servicos || [],
     };
+    await upsertToSupabase(newProf);
     setProfissionais(prev => [...prev, newProf]);
     return newProf;
   }, []);
 
-  const updateProfissional = useCallback((id, updates) => {
-    setProfissionais(prev => prev.map(p => p.id === id ? { ...p, ...updates } : p));
-  }, []);
-
-  const removeProfissional = useCallback((id) => {
-    setProfissionais(prev => prev.filter(p => p.id !== id));
-  }, []);
-
-  const addServicoToProfissional = useCallback((profId, servico) => {
+  const updateProfissional = useCallback(async (id, updates) => {
     setProfissionais(prev => prev.map(p => {
-      if (p.id !== profId) return p;
-      if (p.servicos.includes(servico)) return p;
-      return { ...p, servicos: [...p.servicos, servico] };
+      if (p.id !== id) return p;
+      const updated = { ...p, ...updates };
+      upsertToSupabase(updated);
+      return updated;
     }));
   }, []);
 
-  const removeServicoFromProfissional = useCallback((profId, servico) => {
+  const removeProfissional = useCallback(async (id) => {
+    await deleteFromSupabase(id);
+    setProfissionais(prev => prev.filter(p => p.id !== id));
+  }, []);
+
+  const addServicoToProfissional = useCallback(async (profId, servico) => {
     setProfissionais(prev => prev.map(p => {
       if (p.id !== profId) return p;
-      return { ...p, servicos: p.servicos.filter(s => s !== servico) };
+      if (p.servicos.includes(servico)) return p;
+      const updated = { ...p, servicos: [...p.servicos, servico] };
+      upsertToSupabase(updated);
+      return updated;
+    }));
+  }, []);
+
+  const removeServicoFromProfissional = useCallback(async (profId, servico) => {
+    setProfissionais(prev => prev.map(p => {
+      if (p.id !== profId) return p;
+      const updated = { ...p, servicos: p.servicos.filter(s => s !== servico) };
+      upsertToSupabase(updated);
+      return updated;
     }));
   }, []);
 
