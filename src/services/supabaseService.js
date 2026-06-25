@@ -368,12 +368,22 @@ export function onAuthStateChange(callback) {
 
 export async function fetchClients() {
   if (!isSupabaseConfigured()) return handleError('Supabase not configured', []);
-  const { data, error } = await supabase
-    .from('clients')
-    .select('*')
-    .order('name', { ascending: true });
-  if (error) return handleError(error, []);
-  return { data: data || [], error: null };
+  const PAGE_SIZE = 1000;
+  let allData = [];
+  let from = 0;
+  while (true) {
+    const { data, error } = await supabase
+      .from('clients')
+      .select('*')
+      .order('name', { ascending: true })
+      .range(from, from + PAGE_SIZE - 1);
+    if (error) return handleError(error, []);
+    if (!data || data.length === 0) break;
+    allData = [...allData, ...data];
+    if (data.length < PAGE_SIZE) break;
+    from += PAGE_SIZE;
+  }
+  return { data: allData, error: null };
 }
 
 export async function insertClient(client) {
