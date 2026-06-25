@@ -368,22 +368,22 @@ export function onAuthStateChange(callback) {
 
 export async function fetchClients() {
   if (!isSupabaseConfigured()) return handleError('Supabase not configured', []);
-  const PAGE_SIZE = 1000;
-  let allData = [];
-  let from = 0;
-  while (true) {
-    const { data, error } = await supabase
-      .from('clients')
-      .select('*')
-      .order('name', { ascending: true })
-      .range(from, from + PAGE_SIZE - 1);
-    if (error) return handleError(error, []);
-    if (!data || data.length === 0) break;
-    allData = [...allData, ...data];
-    if (data.length < PAGE_SIZE) break;
-    from += PAGE_SIZE;
+  try {
+    // Fetch all clients in parallel batches of 1000 to bypass Supabase row limit
+    const [batch1, batch2, batch3] = await Promise.all([
+      supabase.from('clients').select('*').order('name', { ascending: true }).range(0, 999),
+      supabase.from('clients').select('*').order('name', { ascending: true }).range(1000, 1999),
+      supabase.from('clients').select('*').order('name', { ascending: true }).range(2000, 2999),
+    ]);
+    const allData = [
+      ...(batch1.data || []),
+      ...(batch2.data || []),
+      ...(batch3.data || []),
+    ];
+    return { data: allData, error: null };
+  } catch (err) {
+    return handleError(err, []);
   }
-  return { data: allData, error: null };
 }
 
 export async function insertClient(client) {
