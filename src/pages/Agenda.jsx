@@ -587,9 +587,24 @@ function AgendamentoModal({ onClose, date, profissional: prefillProf, hora: pref
   const clientesFiltrados = useMemo(() => {
     const q = clienteBusca.toLowerCase().trim();
     if (!q) return pacientes.slice(0, 8);
-    return pacientes.filter(p =>
-      p.nome.toLowerCase().includes(q) || (p.telefone && p.telefone.includes(q))
-    );
+
+    const filtered = pacientes.filter(p => {
+      const nome = (p.nome || '').toLowerCase();
+      return nome.includes(q) || (p.telefone && p.telefone.includes(q));
+    });
+
+    // Sort by relevance: names that START with the search term come first
+    filtered.sort((a, b) => {
+      const aName = (a.nome || '').toLowerCase();
+      const bName = (b.nome || '').toLowerCase();
+      const aStarts = aName.startsWith(q);
+      const bStarts = bName.startsWith(q);
+      if (aStarts && !bStarts) return -1;
+      if (!aStarts && bStarts) return 1;
+      return aName.localeCompare(bName, 'pt-BR');
+    });
+
+    return filtered;
   }, [pacientes, clienteBusca]);
 
   const [form, setForm] = useState(() => isEdit ? { ...apt } : {
