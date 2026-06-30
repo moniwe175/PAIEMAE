@@ -11,24 +11,66 @@ import AddSheetModal from '../components/integration/AddSheetModal';
 import AuthorizeConnectionModal from '../components/integration/AuthorizeConnectionModal';
 import ColumnMappingEditor from '../components/integration/ColumnMappingEditor';
 import SyncLogPanel from '../components/integration/SyncLogPanel';
-import { getMarketingEngineStatus, setMarketingEngineEnabled } from '../services/supabaseService';
+import {
+  getMarketingEngineStatus, setMarketingEngineEnabled,
+  fetchSheetConnections, upsertSheetConnection, deleteSheetConnection
+} from '../services/supabaseService';
+import { getCurrentUser } from '../lib/supabase';
 
-// Default configured spreadsheets
-const defaultSheets = [
-  {
-    id: 'sheet_1',
-    nome: 'CONTROLE DE CAIXA 01',
-    tipo: 'excel', // 'excel' | 'google'
-    tipoLabel: 'Excel Online (Microsoft 365)',
-    url: 'https://centauretecombr-my.sharepoint.com/:x:/r/personal/iurydacosta_centau...',
-    status: 'aguardando', // 'conectado' | 'aguardando' | 'erro'
-    autoSync: true,
-    pollingInterval: 60,
-    tags: ['Data', 'Cliente', 'Procedimento', 'Valor', 'Profissional', 'Comissão', 'Forma Pagamento'],
-    linhasSincronizadas: 0,
-    ultimoSync: null,
-  },
-];
+// Default configured spreadsheet used to seed Supabase when empty
+const defaultSheet = {
+  id: 'sheet_1',
+  nome: 'CONTROLE DE CAIXA 01',
+  tipo: 'excel',
+  tipoLabel: 'Excel Online (Microsoft 365)',
+  url: 'https://centauretecombr-my.sharepoint.com/:x:/r/personal/iurydacosta_centau...',
+  status: 'aguardando',
+  autoSync: true,
+  pollingInterval: 60,
+  tags: ['Data', 'Cliente', 'Procedimento', 'Valor', 'Profissional', 'Comissão', 'Forma Pagamento'],
+  linhasSincronizadas: 0,
+  ultimoSync: null,
+};
+
+function mapFromSupabase(conn) {
+  return {
+    id: conn.id,
+    nome: conn.nome,
+    tipo: conn.tipo,
+    tipoLabel: conn.tipo_label || conn.tipo,
+    url: conn.url,
+    status: conn.status,
+    autoSync: conn.auto_sync,
+    pollingInterval: conn.polling_interval,
+    tags: conn.tags || [],
+    linhasSincronizadas: conn.linhas_sincronizadas || 0,
+    ultimoSync: conn.ultimo_sync,
+  };
+}
+
+function mapToSupabase(sheet) {
+  return {
+    id: sheet.id,
+    nome: sheet.nome,
+    tipo: sheet.tipo,
+    tipo_label: sheet.tipoLabel,
+    url: sheet.url,
+    status: sheet.status,
+    auto_sync: sheet.autoSync,
+    polling_interval: sheet.pollingInterval,
+    tags: sheet.tags || [],
+    linhas_sincronizadas: sheet.linhasSincronizadas || 0,
+    ultimo_sync: sheet.ultimoSync,
+  };
+}
+
+async function seedSheets() {
+  const { data } = await fetchSheetConnections();
+  if (!data || data.length === 0) {
+    const user = await getCurrentUser();
+    await upsertSheetConnection({ ...mapToSupabase(defaultSheet), user_id: user?.id });
+  }
+}
 
 export default function Integration() {
   const { syncStatus, syncConfig, syncLogs, transactions, lastSyncAt, syncedRowCount, addLog } = useSync();
@@ -37,12 +79,8 @@ export default function Integration() {
   const [authorizeSheet, setAuthorizeSheet] = useState(null);
   const [showAddModal, setShowAddModal] = useState(false);
   const [activeTab, setActiveTab] = useState('conexoes');
-  const [sheets, setSheets] = useState(() => {
-    try {
-      const saved = localStorage.getItem('erp_configured_sheets');
-      return saved ? JSON.parse(saved) : defaultSheets;
-    } catch { return defaultSheets; }
-  });
+  const [sheets, setSheets] = useState([]);
+  const [loading, setLoading] = useState(true);
 
   // Marketing Engine toggle state
   const [engineEnabled, setEngineEnabled] = useState(true);
@@ -51,9 +89,17 @@ export default function Integration() {
   const [engineSaving, setEngineSaving] = useState(false);
   const [engineError, setEngineError] = useState(null);
 
+  const loadSheets = async () => {
+    setLoading(true);
+    await seedSheets();
+    const { data } = await fetchSheetConnections();
+    if (data) setSheets(data.map(mapFromSupabase));
+    setLoading(false);
+  };
+
   useEffect(() => {
-    localStorage.setItem('erp_configured_sheets', JSON.stringify(sheets));
-  }, [sheets]);
+    loadSheets();
+  }, []);
 
   // Fetch marketing engine status on mount
   useEffect(() => {
@@ -79,19 +125,31 @@ export default function Integration() {
   const syncsHoje = syncLogs.filter(l => l.type === 'success').length;
   const filaPendente = sheets.filter(s => s.status === 'aguardando').length;
 
+  const persistSheet = async (sheet) => {
+    const user = await getCurrentUser();
+    const payload = { ...mapToSupabase(sheet), user_id: user?.id };
+    const { data, error } = await upsertSheetConnection(payload);
+    if (!error && data) {
+      return mapFromSupabase(data);
+    }
+    return sheet;
+  };
+
   const handleConnectSheet = (sheet) => {
-    // Open the authorize modal for this specific sheet
     setAuthorizeSheet(sheet);
   };
 
-  const handleToggleAutoSync = (sheetId) => {
-    setSheets(prev => prev.map(s =>
-      s.id === sheetId ? { ...s, autoSync: !s.autoSync } : s
-    ));
+  const handleToggleAutoSync = async (sheetId) => {
+    const sheet = sheets.find(s => s.id === sheetId);
+    if (!sheet) return;
+    const updated = { ...sheet, autoSync: !sheet.autoSync };
+    const persisted = await persistSheet(updated);
+    setSheets(prev => prev.map(s => s.id === sheetId ? persisted : s));
   };
 
-  const handleDeleteSheet = (sheetId) => {
+  const handleDeleteSheet = async (sheetId) => {
     if (confirm('Deseja realmente remover esta planilha?')) {
+      await deleteSheetConnection(sheetId);
       setSheets(prev => prev.filter(s => s.id !== sheetId));
     }
   };
@@ -114,8 +172,9 @@ export default function Integration() {
     setEngineSaving(false);
   };
 
-  const handleAddSheet = (newSheet) => {
-    setSheets(prev => [...prev, newSheet]);
+  const handleAddSheet = async (newSheet) => {
+    const persisted = await persistSheet(newSheet);
+    setSheets(prev => [...prev, persisted]);
   };
 
   const tabs = [
@@ -138,10 +197,10 @@ export default function Integration() {
         <AuthorizeConnectionModal
           sheet={authorizeSheet}
           onClose={() => setAuthorizeSheet(null)}
-          onAuthorized={(s) => {
-            setSheets(prev => prev.map(sh =>
-              sh.id === s.id ? { ...sh, status: 'conectado', ultimoSync: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) } : sh
-            ));
+          onAuthorized={async (s) => {
+            const updated = { ...s, status: 'conectado', ultimoSync: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) };
+            const persisted = await persistSheet(updated);
+            setSheets(prev => prev.map(sh => sh.id === s.id ? persisted : sh));
             setAuthorizeSheet(null);
           }}
         />
@@ -310,7 +369,12 @@ export default function Integration() {
           </div>
 
           {/* Sheet cards */}
-          {sheets.length === 0 ? (
+          {loading ? (
+            <div className="card" style={{ textAlign: 'center', padding: 40 }}>
+              <Loader2 style={{ width: 32, height: 32, animation: 'spin 1s linear infinite', margin: '0 auto 12px', color: 'var(--text-muted)' }} />
+              <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>Carregando planilhas...</p>
+            </div>
+          ) : sheets.length === 0 ? (
             <div className="card" style={{ textAlign: 'center', padding: 40 }}>
               <FileSpreadsheet style={{ width: 40, height: 40, color: 'var(--text-muted)', margin: '0 auto 12px', opacity: 0.4 }} />
               <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>Nenhuma planilha configurada</p>
@@ -401,7 +465,7 @@ export default function Integration() {
                           className="btn btn-ghost btn-sm"
                           onClick={() => {
                             disconnect();
-                            setSheets(prev => prev.map(s => s.id === sheet.id ? { ...s, status: 'aguardando', ultimoSync: null } : s));
+                            handleToggleAutoSync(sheet.id);
                           }}
                         >
                           <WifiOff style={{ width: 12, height: 12 }} />Desconectar

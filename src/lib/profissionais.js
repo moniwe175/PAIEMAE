@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
-import { supabase, isSupabaseConfigured } from './supabase';
+import { supabase, isSupabaseConfigured, getCurrentUser } from './supabase';
 
 // ─── Available services catalog ─────────────────────────────
 export const CATALOGO_SERVICOS = [
@@ -73,7 +73,8 @@ async function loadFromSupabase() {
 
 async function upsertToSupabase(prof) {
   if (!isSupabaseConfigured()) return;
-  await supabase.from('profissionais').upsert([prof], { onConflict: 'id' });
+  const user = await getCurrentUser();
+  await supabase.from('profissionais').upsert([{ ...prof, user_id: user?.id }], { onConflict: 'id' });
 }
 
 async function deleteFromSupabase(id) {
@@ -85,7 +86,9 @@ async function seedSupabase() {
   if (!isSupabaseConfigured()) return;
   const { data } = await supabase.from('profissionais').select('id');
   if (data && data.length > 0) return; // already seeded
-  await supabase.from('profissionais').insert(DEFAULT_PROFISSIONAIS);
+  const user = await getCurrentUser();
+  const seed = DEFAULT_PROFISSIONAIS.map(p => ({ ...p, user_id: user?.id }));
+  await supabase.from('profissionais').insert(seed);
 }
 
 // ─── Hook ───────────────────────────────────────────────────
@@ -97,28 +100,13 @@ export function useProfissionais() {
     async function init() {
       await seedSupabase();
       const remote = await loadFromSupabase();
-      if (remote && remote.length > 0) {
+      if (remote) {
         setProfissionais(remote);
-      } else {
-        // fallback: no Supabase configured, use defaults stored in localStorage
-        const raw = localStorage.getItem('erp_profissionais');
-        if (raw) {
-          try { setProfissionais(JSON.parse(raw)); } catch { setProfissionais(DEFAULT_PROFISSIONAIS); }
-        } else {
-          setProfissionais(DEFAULT_PROFISSIONAIS);
-        }
       }
       setLoaded(true);
     }
     init();
   }, []);
-
-  // Persist to localStorage as fallback
-  useEffect(() => {
-    if (loaded) {
-      localStorage.setItem('erp_profissionais', JSON.stringify(profissionais));
-    }
-  }, [profissionais, loaded]);
 
   const addProfissional = useCallback(async (data) => {
     const newProf = {

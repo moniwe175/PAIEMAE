@@ -4,7 +4,6 @@ import {
   Star, Search, Edit3, Trash2, CheckCircle, Pause, Play, Archive, Eye,
   BarChart3, Target, DollarSign, Calendar, Filter, RefreshCw, Mail, Smartphone
 } from 'lucide-react';
-import { isSupabaseConfigured } from '../lib/supabase';
 import { getCurrentUser } from '../lib/supabase';
 import {
   fetchCampaigns, insertCampaign, updateCampaign, deleteCampaign
@@ -35,31 +34,6 @@ const STATUS_CONFIG = {
   pausado:   { label: 'Pausado',   badge: 'badge-warning',  icon: Pause,   color: '#D4956A' },
   concluido: { label: 'Concluído', badge: 'badge-info',     icon: Archive, color: '#7A95B8' },
 };
-
-const STORAGE_KEY = 'paiemae_campaigns';
-
-const SEED_DATA = [
-  { id:'c1', nome:'Promoção Dia das Mães', canal:'WhatsApp', mensagem:'Aproveite nossas promoções especiais para o Dia das Mães!', enviados:48, abertos:35, cliques:12, conversoes:5, status:'ativo', data_inicio:'10/05/2026', data_fim:'15/05/2026', publico_alvo:'Clientes com agendamento em maio', orcamento:500 },
-  { id:'c2', nome:'Oferta Botox Inverno', canal:'Instagram', mensagem:'Botox com 20% de desconto neste inverno.', enviados:0, abertos:1240, cliques:89, conversoes:18, status:'ativo', data_inicio:'08/05/2026', data_fim:'30/06/2026', publico_alvo:'Seguidores Instagram', orcamento:1200 },
-  { id:'c3', nome:'Lembrete de Retorno', canal:'WhatsApp', mensagem:'Está na hora do seu retorno! Agende agora.', enviados:22, abertos:20, cliques:8, conversoes:3, status:'concluido', data_inicio:'01/05/2026', data_fim:'05/05/2026', publico_alvo:'Clientes sem visita há 60 dias', orcamento:0 },
-  { id:'c4', nome:'Captação de Novos Clientes', canal:'Email', mensagem:'Conheça nossa clínica e ganhe 15% na primeira consulta.', enviados:150, abertos:62, cliques:28, conversoes:7, status:'concluido', data_inicio:'22/04/2026', data_fim:'10/05/2026', publico_alvo:'Leads site', orcamento:800 },
-  { id:'c5', nome:'Black Friday Estética', canal:'Email', mensagem:'Black Friday com até 40% de desconto em todos os tratamentos!', enviados:0, abertos:0, cliques:0, conversoes:0, status:'rascunho', data_inicio:'25/11/2026', data_fim:'30/11/2026', publico_alvo:'Base completa de clientes', orcamento:2000 },
-];
-
-// ─── Local Storage Helpers ─────────────────────────────────────
-
-function loadLocal() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) return JSON.parse(raw);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(SEED_DATA));
-    return SEED_DATA;
-  } catch { return SEED_DATA; }
-}
-
-function saveLocal(items) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
-}
 
 // ─── Campaign Modal (Create / Edit) ────────────────────────────
 
@@ -285,73 +259,38 @@ export default function Marketing() {
   const [filtroStatus, setFiltroStatus] = useState('Todos');
   const [filtroCanal, setFiltroCanal] = useState('Todos');
 
-  const useSupabase = isSupabaseConfigured();
-
   // ── Load data ──
   const load = useCallback(async () => {
     setLoading(true);
-    if (useSupabase) {
-      const { data } = await fetchCampaigns();
-      setCampanhas(data || []);
-    } else {
-      setCampanhas(loadLocal());
-    }
+    const { data } = await fetchCampaigns();
+    setCampanhas(data || []);
     setLoading(false);
-  }, [useSupabase]);
+  }, []);
 
   useEffect(() => { load(); }, [load]);
 
   // ── CRUD ──
   const handleSave = async (form) => {
     const isEdit = modal && modal !== 'new';
-    if (useSupabase) {
-      const user = await getCurrentUser();
-      if (isEdit) {
-        const { data } = await updateCampaign(modal.id, form);
-        if (data) setCampanhas(prev => prev.map(c => c.id === modal.id ? data : c));
-      } else {
-        const payload = { ...form, id: `camp_${Date.now()}`, user_id: user?.id };
-        const { data } = await insertCampaign(payload);
-        if (data) setCampanhas(prev => [data, ...prev]);
-      }
+    const user = await getCurrentUser();
+    if (isEdit) {
+      const { data } = await updateCampaign(modal.id, form);
+      if (data) setCampanhas(prev => prev.map(c => c.id === modal.id ? data : c));
     } else {
-      if (isEdit) {
-        setCampanhas(prev => {
-          const next = prev.map(c => c.id === modal.id ? { ...c, ...form } : c);
-          saveLocal(next); return next;
-        });
-      } else {
-        const nova = { ...form, id: `camp_${Date.now()}` };
-        setCampanhas(prev => {
-          const next = [nova, ...prev];
-          saveLocal(next); return next;
-        });
-      }
+      const payload = { ...form, id: `camp_${Date.now()}`, user_id: user?.id };
+      const { data } = await insertCampaign(payload);
+      if (data) setCampanhas(prev => [data, ...prev]);
     }
   };
 
   const handleDelete = async (id) => {
-    if (useSupabase) {
-      await deleteCampaign(id);
-      setCampanhas(prev => prev.filter(c => c.id !== id));
-    } else {
-      setCampanhas(prev => {
-        const next = prev.filter(c => c.id !== id);
-        saveLocal(next); return next;
-      });
-    }
+    await deleteCampaign(id);
+    setCampanhas(prev => prev.filter(c => c.id !== id));
   };
 
   const handleStatusChange = async (campanha, newStatus) => {
-    if (useSupabase) {
-      const { data } = await updateCampaign(campanha.id, { status: newStatus });
-      if (data) setCampanhas(prev => prev.map(c => c.id === campanha.id ? data : c));
-    } else {
-      setCampanhas(prev => {
-        const next = prev.map(c => c.id === campanha.id ? { ...c, status: newStatus } : c);
-        saveLocal(next); return next;
-      });
-    }
+    const { data } = await updateCampaign(campanha.id, { status: newStatus });
+    if (data) setCampanhas(prev => prev.map(c => c.id === campanha.id ? data : c));
   };
 
   // ── Filtering ──

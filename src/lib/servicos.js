@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
-import { supabase, isSupabaseConfigured } from './supabase';
+import { supabase, isSupabaseConfigured, getCurrentUser } from './supabase';
 
 // ─── Available categories ───────────────────────────────────
 export const CATEGORIAS = [
@@ -49,7 +49,8 @@ async function loadFromSupabase() {
 
 async function upsertToSupabase(svc) {
   if (!isSupabaseConfigured()) return;
-  await supabase.from('servicos').upsert([svc], { onConflict: 'id' });
+  const user = await getCurrentUser();
+  await supabase.from('servicos').upsert([{ ...svc, user_id: user?.id }], { onConflict: 'id' });
 }
 
 async function deleteFromSupabase(id) {
@@ -61,7 +62,9 @@ async function seedSupabase() {
   if (!isSupabaseConfigured()) return;
   const { data } = await supabase.from('servicos').select('id');
   if (data && data.length > 0) return; // already seeded
-  await supabase.from('servicos').insert(DEFAULT_SERVICOS);
+  const user = await getCurrentUser();
+  const seed = DEFAULT_SERVICOS.map(s => ({ ...s, user_id: user?.id }));
+  await supabase.from('servicos').insert(seed);
 }
 
 // ─── Hook ───────────────────────────────────────────────────
@@ -73,28 +76,13 @@ export function useServicos() {
     async function init() {
       await seedSupabase();
       const remote = await loadFromSupabase();
-      if (remote && remote.length > 0) {
+      if (remote) {
         setServicos(remote);
-      } else {
-        // fallback: use localStorage or defaults
-        const raw = localStorage.getItem('erp_servicos');
-        if (raw) {
-          try { setServicos(JSON.parse(raw)); } catch { setServicos(DEFAULT_SERVICOS); }
-        } else {
-          setServicos(DEFAULT_SERVICOS);
-        }
       }
       setLoaded(true);
     }
     init();
   }, []);
-
-  // Persist to localStorage as fallback
-  useEffect(() => {
-    if (loaded) {
-      localStorage.setItem('erp_servicos', JSON.stringify(servicos));
-    }
-  }, [servicos, loaded]);
 
   const addServico = useCallback(async (data) => {
     const novo = {

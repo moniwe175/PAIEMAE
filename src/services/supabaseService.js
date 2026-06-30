@@ -441,3 +441,33 @@ export async function deleteAppointment(id) {
   return { data: true, error: null };
 }
 
+// ─── Anamneses ────────────────────────────────────────────────
+
+export async function fetchAnamneses() {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured', []);
+  const { data, error } = await supabase
+    .from('anamneses')
+    .select('*')
+    .order('created_at', { ascending: false });
+  if (error) return handleError(error, []);
+  return { data: data || [], error: null };
+}
+
+export async function upsertAnamnese(anamnese) {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured');
+  const { data, error } = await supabase
+    .from('anamneses')
+    .upsert([anamnese], { onConflict: 'id' })
+    .select()
+    .single();
+  if (error) return handleError(error);
+  return { data, error: null };
+}
+
+export async function deleteAnamnese(id) {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured');
+  const { error } = await supabase.from('anamneses').delete().eq('id', id);
+  if (error) return handleError(error);
+  return { data: true, error: null };
+}
+

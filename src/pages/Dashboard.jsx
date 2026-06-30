@@ -11,6 +11,8 @@ import SheetSyncStatus from '../components/integration/SheetSyncStatus';
 import OKRWeeklySnapshot from '../components/dashboard/OKRWeeklySnapshot';
 import StickyNotesPanel from '../components/dashboard/StickyNotesPanel';
 import { generateAutoNotes } from '../lib/noteAutomation';
+import { fetchStickyNotes, insertStickyNote, updateStickyNote } from '../services/okrService';
+import { getCurrentUser } from '../lib/supabase';
 
 // ─── Sub-components ───────────────────────────────────────────
 function StatCard({ icon: Icon, iconBg, iconColor, badge, badgeClass, value, label, sub }) {
@@ -65,18 +67,19 @@ const SEED_KEY_RESULTS = [
   { id: 'kr6', titulo: 'Estoque critico = 0 itens', metrica: 'count', valor_inicial: 3, valor_atual: 2, valor_meta: 0, status: 'critico', action_hint: 'Repor imediatamente: Botox Allergan e Juvederm Ultra.' },
 ];
 
-function loadStickyNotes() {
-  try { return JSON.parse(localStorage.getItem('erp_sticky_notes') || '[]'); } catch { return []; }
-}
-function saveStickyNotes(notes) {
-  try { localStorage.setItem('erp_sticky_notes', JSON.stringify(notes)); } catch {}
-}
-
 // ─── Dashboard ────────────────────────────────────────────────
 export default function Dashboard() {
   const { transactions, dailySheet } = useSync();
-  const [manualNotes, setManualNotes] = useState(loadStickyNotes);
+  const [manualNotes, setManualNotes] = useState([]);
   const [keyResults] = useState(SEED_KEY_RESULTS);
+
+  useEffect(() => {
+    async function loadNotes() {
+      const { data } = await fetchStickyNotes();
+      if (data) setManualNotes(data);
+    }
+    loadNotes();
+  }, []);
 
   const today = new Date();
   const diaSemana = today.toLocaleDateString('pt-BR', { weekday: 'long' });
@@ -145,21 +148,32 @@ export default function Dashboard() {
   const autoNotes = generateAutoNotes({ stockAlerts, okrs: keyResults, appointments: [] });
   const allNotes = [...autoNotes, ...manualNotes.filter(n => !n.dismissed)];
 
-  const handleDismissNote = (note) => {
+  const handleDismissNote = async (note) => {
     if (note.auto_generated) return;
-    const updated = manualNotes.map(n => n.id === note.id ? { ...n, dismissed: true } : n);
-    setManualNotes(updated);
-    saveStickyNotes(updated);
+    const { error } = await updateStickyNote(note.id, { dismissed: true });
+    if (!error) {
+      setManualNotes(prev => prev.filter(n => n.id !== note.id));
+    }
   };
-  const handleAddNote = (note) => {
-    const updated = [...manualNotes, note];
-    setManualNotes(updated);
-    saveStickyNotes(updated);
+  const handleAddNote = async (note) => {
+    const user = await getCurrentUser();
+    const payload = {
+      ...note,
+      dismissed: false,
+      ordem: manualNotes.length,
+      source: 'dashboard',
+      user_id: user?.id,
+    };
+    const { data, error } = await insertStickyNote(payload);
+    if (!error && data) {
+      setManualNotes(prev => [...prev, data]);
+    }
   };
-  const handleMoveNote = (noteId, newPriority) => {
-    const updated = manualNotes.map(n => n.id === noteId ? { ...n, prioridade: newPriority } : n);
-    setManualNotes(updated);
-    saveStickyNotes(updated);
+  const handleMoveNote = async (noteId, newPriority) => {
+    const { error } = await updateStickyNote(noteId, { prioridade: newPriority });
+    if (!error) {
+      setManualNotes(prev => prev.map(n => n.id === noteId ? { ...n, prioridade: newPriority } : n));
+    }
   };
 
   // Today appointments (placeholder)

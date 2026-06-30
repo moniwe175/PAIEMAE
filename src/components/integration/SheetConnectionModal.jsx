@@ -285,7 +285,7 @@ export default function SheetConnectionModal({ onClose, onConnect }) {
                 }}>
                   <Shield style={{ width: 14, height: 14, color: 'var(--info)', flexShrink: 0, marginTop: 1 }} />
                   <span style={{ fontSize: 11, color: 'var(--info)', lineHeight: 1.5 }}>
-                    Suas credenciais ficam salvas apenas no seu navegador (localStorage) e nunca são enviadas para nossos servidores.
+                    Suas credenciais são salvas no banco de dados Supabase e nunca são compartilhadas com terceiros.
                   </span>
                 </div>
 

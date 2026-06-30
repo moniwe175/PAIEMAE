@@ -1,28 +1,11 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import {
-  ClipboardList, Search, Plus, X, ChevronRight, ChevronLeft, User,
+  ClipboardList, Search, Plus, ChevronRight, ChevronLeft, User,
   Heart, AlertTriangle, Leaf, Target, Printer, Save, CheckCircle,
-  Circle, ArrowLeft, Eye, Edit3, Trash2, Calendar
+  Circle, ArrowLeft, Eye, Edit3, Trash2, Calendar, Loader2
 } from 'lucide-react';
-
-// ─── Storage ──────────────────────────────────────────────────────────────────
-const ANAMNESE_KEY = 'erp_anamnese_v1';
-const PACIENTES_KEY = 'erp_pacientes';
-
-function loadAnamneses() {
-  try { const r = localStorage.getItem(ANAMNESE_KEY); if (r) return JSON.parse(r); } catch {}
-  return {};
-}
-function saveAnamneses(data) { localStorage.setItem(ANAMNESE_KEY, JSON.stringify(data)); }
-
-function loadPacientes() {
-  try { const r = localStorage.getItem(PACIENTES_KEY); if (r) { const p = JSON.parse(r); if (Array.isArray(p)) return p; } } catch {}
-  return [
-    { id: 1, nome: 'Ana Beatriz Souza', telefone: '(11) 98765-4321', avatar: 'A' },
-    { id: 2, nome: 'Carla Mendes Silva', telefone: '(11) 97654-3210', avatar: 'C' },
-    { id: 3, nome: 'Fernanda Lima', telefone: '(11) 96543-2109', avatar: 'F' },
-  ];
-}
+import { fetchClients, fetchAnamneses, upsertAnamnese, deleteAnamnese } from '../services/supabaseService';
+import { getCurrentUser } from '../lib/supabase';
 
 // ─── Empty form ───────────────────────────────────────────────────────────────
 function emptyForm() {
@@ -63,6 +46,49 @@ function emptyForm() {
     preenchidoPor: 'cliente',
     observacoesProfissional: '',
   };
+}
+
+// ─── Supabase mapping ─────────────────────────────────────────────────────────
+function mapClientFromSupabase(client) {
+  return {
+    id: client.id,
+    nome: client.name || '',
+    telefone: client.phone || '',
+    avatar: client.avatar || (client.name ? client.name.charAt(0).toUpperCase() : '?'),
+  };
+}
+
+function mapAnamneseFromSupabase(row) {
+  return {
+    id: row.id,
+    clientId: row.client_id,
+    dataPreenchimento: row.data_preenchimento,
+    preenchidoPor: row.preenchido_por,
+    observacoesProfissional: row.observacoes_profissional,
+    leuTermos: row.leu_termos,
+    ...row.form_data,
+  };
+}
+
+function mapAnamneseToSupabase(ficha, userId) {
+  const {
+    id, clientId, dataPreenchimento, preenchidoPor,
+    observacoesProfissional, leuTermos, ...formData
+  } = ficha;
+  return {
+    ...(id ? { id } : {}),
+    client_id: clientId,
+    data_preenchimento: dataPreenchimento,
+    preenchido_por: preenchidoPor,
+    observacoes_profissional: observacoesProfissional,
+    leu_termos: leuTermos,
+    form_data: formData,
+    ...(userId ? { user_id: userId } : {}),
+  };
+}
+
+function generateId() {
+  return 'anam_' + crypto.randomUUID();
 }
 
 // ─── Checkbox helper ──────────────────────────────────────────────────────────
@@ -564,34 +590,80 @@ function ViewFicha({ paciente, ficha, onEdit, onClose }) {
 
 // ─── MAIN PAGE ─────────────────────────────────────────────────────────────────
 export default function Anamnese() {
-  const [pacientes] = useState(loadPacientes);
-  const [anamneses, setAnamneses] = useState(loadAnamneses);
+  const [pacientes, setPacientes] = useState([]);
+  const [anamneses, setAnamneses] = useState({});
+  const [loading, setLoading] = useState(true);
   const [busca, setBusca] = useState('');
   const [view, setView] = useState('list'); // 'list' | 'form' | 'view'
   const [selectedPaciente, setSelectedPaciente] = useState(null);
   const [isEditing, setIsEditing] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      const [{ data: clientsData }, { data: anamnesesData }] = await Promise.all([
+        fetchClients(),
+        fetchAnamneses(),
+      ]);
+      if (cancelled) return;
+      setPacientes((clientsData || []).map(mapClientFromSupabase));
+      const map = {};
+      (anamnesesData || []).forEach(row => {
+        const ficha = mapAnamneseFromSupabase(row);
+        if (ficha.clientId) map[String(ficha.clientId)] = ficha;
+      });
+      setAnamneses(map);
+      setLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   const filtered = useMemo(() => pacientes.filter(p =>
     p.nome?.toLowerCase().includes(busca.toLowerCase()) ||
     p.telefone?.includes(busca)
   ), [pacientes, busca]);
 
-  const handleSave = (fichaData) => {
-    const key = String(selectedPaciente.id);
-    const updated = { ...anamneses, [key]: fichaData };
-    setAnamneses(updated);
-    saveAnamneses(updated);
+  const handleSave = async (fichaData) => {
+    if (!selectedPaciente) return;
+    const existing = anamneses[String(selectedPaciente.id)];
+    const id = existing?.id || generateId();
+    const payload = mapAnamneseToSupabase(
+      { ...fichaData, id, clientId: selectedPaciente.id },
+      null
+    );
+    const user = await getCurrentUser();
+    if (user?.id) payload.user_id = user.id;
+
+    const { data, error } = await upsertAnamnese(payload);
+    if (error) {
+      alert('Erro ao salvar ficha: ' + (error.message || error));
+      return;
+    }
+    if (data) {
+      const saved = mapAnamneseFromSupabase(data);
+      setAnamneses(prev => ({ ...prev, [String(saved.clientId)]: saved }));
+    }
     setView('view');
     setIsEditing(false);
   };
 
-  const handleDelete = (pacienteId) => {
+  const handleDelete = async (pacienteId) => {
     if (!window.confirm('Deseja realmente excluir a ficha de anamnese deste paciente?')) return;
     const key = String(pacienteId);
-    const updated = { ...anamneses };
-    delete updated[key];
-    setAnamneses(updated);
-    saveAnamneses(updated);
+    const existing = anamneses[key];
+    if (existing?.id) {
+      const { error } = await deleteAnamnese(existing.id);
+      if (error) {
+        alert('Erro ao excluir ficha: ' + (error.message || error));
+        return;
+      }
+    }
+    setAnamneses(prev => {
+      const updated = { ...prev };
+      delete updated[key];
+      return updated;
+    });
   };
 
   const openForm = (p, editing = false) => {
@@ -682,10 +754,14 @@ export default function Anamnese() {
 
       {/* List */}
       <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
-        {filtered.length === 0 && (
+        {loading ? (
+          <div style={{ textAlign: 'center', padding: 40, color: '#9CA3AF', fontSize: 14 }}>
+            <Loader2 style={{ width: 24, height: 24, animation: 'spin 1s linear infinite', margin: '0 auto 8px' }} />
+            Carregando pacientes...
+          </div>
+        ) : filtered.length === 0 ? (
           <div style={{ textAlign: 'center', padding: 40, color: '#9CA3AF', fontSize: 14 }}>Nenhum paciente encontrado.</div>
-        )}
-        {filtered.map(p => {
+        ) : filtered.map(p => {
           const key = String(p.id);
           const temFicha = !!anamneses[key];
           const ficha = anamneses[key];

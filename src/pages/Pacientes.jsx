@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Users, Plus, Search, Phone, Calendar, FileText, Star, XCircle, ChevronRight, Mail, MapPin, Upload, Trash2 } from 'lucide-react';
 import { fetchClients, insertClient, deleteClient } from '../services/supabaseService';
+import { getCurrentUser } from '../lib/supabase';
 
 const defaultPacientes = [
   { id:1, nome:'Ana Beatriz Souza', telefone:'(11) 98765-4321', email:'ana@email.com', cidade:'São Paulo', nascimento:'15/03/1990', ultimaVisita:'10/05/2026', totalSessoes:8, totalGasto:2850, status:'ativo', avatar:'A' },
@@ -77,11 +78,8 @@ export default function Pacientes() {
   const [busca, setBusca] = useState('');
   const [selected, setSelected] = useState(null);
 
-  // Clean up any stale localStorage on component mount
+  // Load fresh data from Supabase on mount
   useEffect(() => {
-    // Remove legacy localStorage entry that may keep deleted records
-    localStorage.removeItem('erp_pacientes');
-    // Load fresh data from Supabase
     async function load() {
       const { data } = await fetchClients();
       if (data) {
@@ -122,6 +120,8 @@ export default function Pacientes() {
   const handleImportCSV = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
+
+    const currentUser = await getCurrentUser();
 
     const reader = new FileReader();
     reader.onload = async (event) => {
@@ -181,7 +181,8 @@ export default function Pacientes() {
           status: 'ativo',
           avatar: nome.charAt(0).toUpperCase(),
           total_spent: 0,
-          points: 0
+          points: 0,
+          user_id: currentUser?.id,
         };
         // Insert into Supabase
         const { data, error } = await insertClient(clientData);
@@ -212,6 +213,7 @@ export default function Pacientes() {
   };
 
   const handleSaveNovoPaciente = async (formData) => {
+    const currentUser = await getCurrentUser();
     const clientData = {
       name: cleanAndTitleCaseName(formData.nome),
       phone: formData.telefone || '(00) 00000-0000',
@@ -220,7 +222,8 @@ export default function Pacientes() {
       status: 'ativo',
       avatar: formData.nome.charAt(0).toUpperCase(),
       total_spent: 0,
-      points: 0
+      points: 0,
+      user_id: currentUser?.id,
     };
 
     const { data, error } = await insertClient(clientData);
@@ -256,8 +259,6 @@ export default function Pacientes() {
     }
     // Remove from state
     setPacientes(prev => prev.filter(p => p.id !== id));
-    // Also clear any legacy localStorage entry to prevent stale data on reload
-    localStorage.removeItem('erp_pacientes');
     setSelected(null);
   };
 

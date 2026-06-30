@@ -5,7 +5,7 @@ import { useSync } from '../contexts/SyncContext';
  * useSheetSync — Auto-connect to a previously configured spreadsheet on mount.
  *
  * Reads the saved syncConfig from SyncContext. If a provider/sheetId is stored
- * in localStorage, it automatically triggers connectSheet + startPolling so the
+ * in Supabase, it automatically triggers connectSheet + startPolling so the
  * app resumes data sync without manual intervention.
  *
  * Usage: call once inside a component that mounts at app root (e.g. SheetAutoSync).

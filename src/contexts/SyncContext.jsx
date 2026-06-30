@@ -28,23 +28,14 @@ const defaultSyncConfig = {
   googleApiKey: '',
 };
 
-function loadFromStorage(key, fallback) {
-  // Desativado localStorage: retorna sempre o fallback
-  return fallback;
-}
-
-function saveToStorage(key, data) {
-  // Desativado localStorage: no-op
-}
-
 export function SyncProvider({ children }) {
-  const [transactions, setTransactions] = useState(() => loadFromStorage('erp_sync_transactions', []));
-  const [expenses, setExpenses] = useState(() => loadFromStorage('erp_sync_expenses', []));
-  const [comissoes, setComissoes] = useState(() => loadFromStorage('erp_sync_comissoes', []));
-  const [cashier, setCashier] = useState(() => loadFromStorage('erp_sync_cashier', defaultCashier));
-  const [splitConfig, setSplitConfig] = useState(() => loadFromStorage('erp_sync_split', defaultSplitConfig));
-  const [syncConfig, setSyncConfig] = useState(() => loadFromStorage('erp_sync_config', defaultSyncConfig));
-  const [syncLogs, setSyncLogs] = useState(() => loadFromStorage('erp_sync_logs', []));
+  const [transactions, setTransactions] = useState([]);
+  const [expenses, setExpenses] = useState([]);
+  const [comissoes, setComissoes] = useState([]);
+  const [cashier, setCashier] = useState(defaultCashier);
+  const [splitConfig, setSplitConfig] = useState(defaultSplitConfig);
+  const [syncConfig, setSyncConfig] = useState(defaultSyncConfig);
+  const [syncLogs, setSyncLogs] = useState([]);
   const [syncStatus, setSyncStatus] = useState('disconnected');
   const [lastSyncAt, setLastSyncAt] = useState(null);
   const [syncedRowCount, setSyncedRowCount] = useState(0);
@@ -52,7 +43,7 @@ export function SyncProvider({ children }) {
   const [supabaseReady, setSupabaseReady] = useState(false);
   const [supabaseConnected, setSupabaseConnected] = useState(false);
   const [connectionError, setConnectionError] = useState(null);
-  const [dailySheet, setDailySheet] = useState(() => loadFromStorage('erp_daily_sheet', null));
+  const [dailySheet, setDailySheet] = useState(null);
 
   const pollTimerRef = useRef(null);
   const countdownTimerRef = useRef(null);
@@ -100,7 +91,7 @@ export function SyncProvider({ children }) {
 
         setSupabaseReady(true);
       } catch (e) {
-        console.warn('[SyncContext] Failed to load from Supabase, using localStorage:', e);
+        console.warn('[SyncContext] Failed to load from Supabase, using empty fallback:', e);
         setSupabaseConnected(false);
         setConnectionError('Falha ao carregar dados do Supabase. Modo somente leitura ativado.');
       }
@@ -116,15 +107,7 @@ export function SyncProvider({ children }) {
     };
   }, []);
 
-  // ─── Persist to localStorage (always) ───────────────────────
-  useEffect(() => { saveToStorage('erp_sync_transactions', transactions); }, [transactions]);
-  useEffect(() => { saveToStorage('erp_sync_expenses', expenses); }, [expenses]);
-  useEffect(() => { saveToStorage('erp_sync_comissoes', comissoes); }, [comissoes]);
-  useEffect(() => { saveToStorage('erp_sync_cashier', cashier); }, [cashier]);
-  useEffect(() => { saveToStorage('erp_sync_split', splitConfig); }, [splitConfig]);
-  useEffect(() => { saveToStorage('erp_sync_config', syncConfig); }, [syncConfig]);
-  useEffect(() => { saveToStorage('erp_sync_logs', syncLogs); }, [syncLogs]);
-  useEffect(() => { saveToStorage('erp_daily_sheet', dailySheet); }, [dailySheet]);
+  // State is persisted to Supabase via the mutation helpers below.
 
   // ─── Sync helpers ───────────────────────────────────────────
   const syncToSupabase = useCallback(async (table, data) => {

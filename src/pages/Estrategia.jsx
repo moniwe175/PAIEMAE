@@ -4,6 +4,7 @@ import {
   CheckCircle2, AlertTriangle, Clock, ArrowRight, XCircle, Plus,
 } from 'lucide-react';
 import { isSupabaseConfigured } from '../lib/supabase';
+import { getCurrentUser } from '../lib/supabase';
 import * as okrService from '../services/okrService';
 
 // ─── Seed Data ──────────────────────────────────────────────
@@ -84,17 +85,6 @@ const SEED_ACOES = [
   { id: 'a2', titulo: 'Agendar 50 consultas', progresso: 25 },
 ];
 
-const LS_CICLOS = 'erp_okr_ciclos_v2';
-const LS_OBJETIVOS = 'erp_objetivos_v2';
-const LS_NOTES = 'erp_strategy_notes';
-
-function loadLocal(key, fallback) {
-  try { const d = localStorage.getItem(key); return d ? JSON.parse(d) : fallback; } catch { return fallback; }
-}
-function saveLocal(key, val) {
-  try { localStorage.setItem(key, JSON.stringify(val)); } catch { /* noop */ }
-}
-
 // ─── Status helpers ─────────────────────────────────────────
 const STATUS_CONFIG = {
   concluido:    { label: 'concluído',    color: '#10B981', bg: '#ECFDF5', icon: CheckCircle2 },
@@ -172,29 +162,51 @@ function NoteModal({ onClose, notes, onAdd, onRemove }) {
   );
 }
 
+// ─── Supabase seed/load helpers ─────────────────────────────
+async function seedSupabase() {
+  if (!isSupabaseConfigured()) return;
+  try {
+    const { data: ciclos } = await okrService.fetchCiclos();
+    if (!ciclos || ciclos.length === 0) {
+      const user = await getCurrentUser();
+      const cicloPayload = { ...SEED_CICLO, user_id: user?.id };
+      await okrService.insertCiclo(cicloPayload);
+      for (const obj of SEED_OBJETIVOS) {
+        await okrService.insertObjetivo({ ...obj, user_id: user?.id });
+      }
+    }
+  } catch (e) {
+    console.warn('[Estrategia] seed error', e);
+  }
+}
+
 // ─── Main Component ─────────────────────────────────────────
 export default function Estrategia() {
-  const [ciclos, setCiclos] = useState(() => loadLocal(LS_CICLOS, [SEED_CICLO]));
-  const [objetivos, setObjetivos] = useState(() => loadLocal(LS_OBJETIVOS, SEED_OBJETIVOS));
-  const [notes, setNotes] = useState(() => loadLocal(LS_NOTES, []));
-  const [activeCicloId, setActiveCicloId] = useState(ciclos[0]?.id || '');
+  const [ciclos, setCiclos] = useState([]);
+  const [objetivos, setObjetivos] = useState([]);
+  const [notes, setNotes] = useState([]);
+  const [activeCicloId, setActiveCicloId] = useState('');
   const [showNoteModal, setShowNoteModal] = useState(false);
   const [loading, setLoading] = useState(false);
-
-  useEffect(() => { saveLocal(LS_CICLOS, ciclos); }, [ciclos]);
-  useEffect(() => { saveLocal(LS_OBJETIVOS, objetivos); }, [objetivos]);
-  useEffect(() => { saveLocal(LS_NOTES, notes); }, [notes]);
 
   const loadFromSupabase = useCallback(async () => {
     if (!isSupabaseConfigured()) return;
     setLoading(true);
     try {
-      const [ciclosRes, objRes] = await Promise.all([
+      await seedSupabase();
+      const [ciclosRes, objRes, notesRes] = await Promise.all([
         okrService.fetchCiclos(),
         okrService.fetchObjetivos(activeCicloId),
+        okrService.fetchStickyNotes(),
       ]);
-      if (ciclosRes.data?.length) setCiclos(ciclosRes.data);
-      if (objRes.data?.length) setObjetivos(objRes.data);
+      if (ciclosRes.data) {
+        setCiclos(ciclosRes.data);
+        if (ciclosRes.data.length > 0 && !activeCicloId) {
+          setActiveCicloId(ciclosRes.data[0].id);
+        }
+      }
+      if (objRes.data) setObjetivos(objRes.data);
+      if (notesRes.data) setNotes(notesRes.data);
     } catch (e) { console.warn('[Estrategia] load error', e); }
     setLoading(false);
   }, [activeCicloId]);
@@ -209,12 +221,35 @@ export default function Estrategia() {
 
   const kpi = SEED_KPI;
 
-  // Projection - average of all progress values
   const allProgress = activeObjetivos.filter(o => o.progresso !== null && o.progresso !== undefined).map(o => o.progresso);
   const projPercent = allProgress.length > 0 ? Math.round(allProgress.reduce((a, b) => a + b, 0) / allProgress.length) : SEED_PROJECAO.percentual;
 
-  const addNote = (texto) => setNotes(prev => [...prev, { id: 'n_' + Date.now(), texto }]);
-  const removeNote = (id) => setNotes(prev => prev.filter(n => n.id !== id));
+  const addNote = async (texto) => {
+    if (!isSupabaseConfigured()) return;
+    const user = await getCurrentUser();
+    const note = {
+      id: 'n_' + Date.now(),
+      texto,
+      prioridade: 'medio',
+      source: 'estrategia',
+      auto_generated: false,
+      dismissed: false,
+      ordem: notes.length,
+      user_id: user?.id,
+    };
+    const { data, error } = await okrService.insertStickyNote(note);
+    if (!error && data) {
+      setNotes(prev => [...prev, data]);
+    }
+  };
+
+  const removeNote = async (id) => {
+    if (!isSupabaseConfigured()) return;
+    const { error } = await okrService.dismissStickyNote(id);
+    if (!error) {
+      setNotes(prev => prev.filter(n => n.id !== id));
+    }
+  };
 
   return (
     <div>

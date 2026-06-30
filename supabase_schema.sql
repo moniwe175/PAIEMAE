@@ -508,3 +508,330 @@ create trigger handle_updated_at_strategic_tasks
   for each row execute function public.handle_updated_at();
 
 create index if not exists idx_strategic_tasks_user_id on public.strategic_tasks(user_id);
+
+-- ─── 12. Clients (Patients) ───────────────────────────────────
+create table if not exists public.clients (
+  id uuid default gen_random_uuid() primary key,
+  name text not null,
+  phone text default '(00) 00000-0000',
+  email text,
+  birthdate text,
+  source text default 'Instagram',
+  total_purchases integer default 0,
+  total_spent numeric(12,2) default 0,
+  points integer default 0,
+  status text default 'ativo',
+  avatar text,
+  user_id uuid references auth.users,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null,
+  updated_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+-- Backfill missing columns on existing clients tables (idempotent migration)
+do $$
+begin
+  if not exists (select 1 from information_schema.columns where table_name = 'clients' and column_name = 'source') then
+    alter table public.clients add column source text default 'Instagram';
+  end if;
+  if not exists (select 1 from information_schema.columns where table_name = 'clients' and column_name = 'total_purchases') then
+    alter table public.clients add column total_purchases integer default 0;
+  end if;
+  if not exists (select 1 from information_schema.columns where table_name = 'clients' and column_name = 'total_spent') then
+    alter table public.clients add column total_spent numeric(12,2) default 0;
+  end if;
+  if not exists (select 1 from information_schema.columns where table_name = 'clients' and column_name = 'points') then
+    alter table public.clients add column points integer default 0;
+  end if;
+  if not exists (select 1 from information_schema.columns where table_name = 'clients' and column_name = 'status') then
+    alter table public.clients add column status text default 'ativo';
+  end if;
+  if not exists (select 1 from information_schema.columns where table_name = 'clients' and column_name = 'avatar') then
+    alter table public.clients add column avatar text;
+  end if;
+  if not exists (select 1 from information_schema.columns where table_name = 'clients' and column_name = 'birthdate') then
+    alter table public.clients add column birthdate text;
+  end if;
+  if not exists (select 1 from information_schema.columns where table_name = 'clients' and column_name = 'user_id') then
+    alter table public.clients add column user_id uuid references auth.users;
+  end if;
+  if not exists (select 1 from information_schema.columns where table_name = 'clients' and column_name = 'updated_at') then
+    alter table public.clients add column updated_at timestamp with time zone default timezone('utc'::text, now()) not null;
+  end if;
+  if not exists (select 1 from information_schema.columns where table_name = 'clients' and column_name = 'created_at') then
+    alter table public.clients add column created_at timestamp with time zone default timezone('utc'::text, now()) not null;
+  end if;
+end;
+$$;
+
+alter table public.clients enable row level security;
+
+create policy "Users can view own clients"
+  on public.clients for select
+  using ( auth.uid() = user_id );
+
+create policy "Users can insert own clients"
+  on public.clients for insert
+  with check ( auth.uid() = user_id );
+
+create policy "Users can update own clients"
+  on public.clients for update
+  using ( auth.uid() = user_id );
+
+create policy "Users can delete own clients"
+  on public.clients for delete
+  using ( auth.uid() = user_id );
+
+create trigger handle_updated_at_clients
+  before update on public.clients
+  for each row execute function public.handle_updated_at();
+
+create index if not exists idx_clients_user_id on public.clients(user_id);
+create index if not exists idx_clients_name on public.clients(name);
+
+-- ─── 13. Appointments ─────────────────────────────────────────
+create table if not exists public.appointments (
+  id uuid default gen_random_uuid() primary key,
+  client_name text not null,
+  client_phone text,
+  procedure text,
+  professional text,
+  appointment_date text not null,
+  appointment_time text not null,
+  status text default 'aguardando_confirmacao',
+  notes text,
+  user_id uuid references auth.users,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null,
+  updated_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+alter table public.appointments enable row level security;
+
+create policy "Users can view own appointments"
+  on public.appointments for select
+  using ( auth.uid() = user_id );
+
+create policy "Users can insert own appointments"
+  on public.appointments for insert
+  with check ( auth.uid() = user_id );
+
+create policy "Users can update own appointments"
+  on public.appointments for update
+  using ( auth.uid() = user_id );
+
+create policy "Users can delete own appointments"
+  on public.appointments for delete
+  using ( auth.uid() = user_id );
+
+create trigger handle_updated_at_appointments
+  before update on public.appointments
+  for each row execute function public.handle_updated_at();
+
+create index if not exists idx_appointments_user_id on public.appointments(user_id);
+create index if not exists idx_appointments_date on public.appointments(appointment_date);
+
+-- ─── 14. Servicos ─────────────────────────────────────────────
+create table if not exists public.servicos (
+  id text primary key,
+  nome text not null,
+  categoria text,
+  duracao integer default 30,
+  preco numeric(12,2) default 0,
+  comissao integer default 0,
+  ativo boolean default true,
+  descricao text,
+  user_id uuid references auth.users,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null,
+  updated_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+alter table public.servicos enable row level security;
+
+create policy "Users can view own servicos"
+  on public.servicos for select
+  using ( auth.uid() = user_id );
+
+create policy "Users can insert own servicos"
+  on public.servicos for insert
+  with check ( auth.uid() = user_id );
+
+create policy "Users can update own servicos"
+  on public.servicos for update
+  using ( auth.uid() = user_id );
+
+create policy "Users can delete own servicos"
+  on public.servicos for delete
+  using ( auth.uid() = user_id );
+
+create trigger handle_updated_at_servicos
+  before update on public.servicos
+  for each row execute function public.handle_updated_at();
+
+create index if not exists idx_servicos_user_id on public.servicos(user_id);
+
+-- ─── 15. Profissionais ────────────────────────────────────────
+create table if not exists public.profissionais (
+  id text primary key,
+  nome text not null,
+  cargo text,
+  cor text,
+  telefone text,
+  email text,
+  comissao integer default 0,
+  servicos jsonb default '[]'::jsonb,
+  user_id uuid references auth.users,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null,
+  updated_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+alter table public.profissionais enable row level security;
+
+create policy "Users can view own profissionais"
+  on public.profissionais for select
+  using ( auth.uid() = user_id );
+
+create policy "Users can insert own profissionais"
+  on public.profissionais for insert
+  with check ( auth.uid() = user_id );
+
+create policy "Users can update own profissionais"
+  on public.profissionais for update
+  using ( auth.uid() = user_id );
+
+create policy "Users can delete own profissionais"
+  on public.profissionais for delete
+  using ( auth.uid() = user_id );
+
+create trigger handle_updated_at_profissionais
+  before update on public.profissionais
+  for each row execute function public.handle_updated_at();
+
+create index if not exists idx_profissionais_user_id on public.profissionais(user_id);
+
+-- ─── 16. Anamneses ────────────────────────────────────────────
+create table if not exists public.anamneses (
+  id text primary key,
+  client_id uuid references public.clients(id) on delete cascade,
+  data_preenchimento text,
+  preenchido_por text default 'cliente',
+  observacoes_profissional text,
+  leu_termos boolean default false,
+  form_data jsonb default '{}'::jsonb,
+  user_id uuid references auth.users,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null,
+  updated_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+alter table public.anamneses enable row level security;
+
+create policy "Users can view own anamneses"
+  on public.anamneses for select
+  using ( auth.uid() = user_id );
+
+create policy "Users can insert own anamneses"
+  on public.anamneses for insert
+  with check ( auth.uid() = user_id );
+
+create policy "Users can update own anamneses"
+  on public.anamneses for update
+  using ( auth.uid() = user_id );
+
+create policy "Users can delete own anamneses"
+  on public.anamneses for delete
+  using ( auth.uid() = user_id );
+
+create trigger handle_updated_at_anamneses
+  before update on public.anamneses
+  for each row execute function public.handle_updated_at();
+
+create index if not exists idx_anamneses_user_id on public.anamneses(user_id);
+create index if not exists idx_anamneses_client_id on public.anamneses(client_id);
+
+-- ─── 17. Pacientes ────────────────────────────────────────────
+create table if not exists public.pacientes (
+  id uuid default gen_random_uuid() primary key,
+  name text not null,
+  phone text default '(00) 00000-0000',
+  email text,
+  birthdate text,
+  cidade text,
+  status text default 'ativo',
+  avatar text,
+  user_id uuid references auth.users,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null,
+  updated_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+alter table public.pacientes enable row level security;
+
+create policy "Users can view own pacientes"
+  on public.pacientes for select
+  using ( auth.uid() = user_id );
+
+create policy "Users can insert own pacientes"
+  on public.pacientes for insert
+  with check ( auth.uid() = user_id );
+
+create policy "Users can update own pacientes"
+  on public.pacientes for update
+  using ( auth.uid() = user_id );
+
+create policy "Users can delete own pacientes"
+  on public.pacientes for delete
+  using ( auth.uid() = user_id );
+
+create trigger handle_updated_at_pacientes
+  before update on public.pacientes
+  for each row execute function public.handle_updated_at();
+
+create index if not exists idx_pacientes_user_id on public.pacientes(user_id);
+create index if not exists idx_pacientes_name on public.pacientes(name);
+
+-- ─── 18. Marketing Engine Settings ────────────────────────────
+create table if not exists public.marketing_engine_settings (
+  id integer primary key,
+  enabled boolean default true,
+  updated_at timestamp with time zone default timezone('utc'::text, now()) not null,
+  updated_by text
+);
+
+-- Allow all authenticated users to read/update the single global toggle.
+alter table public.marketing_engine_settings enable row level security;
+
+create policy "Users can view marketing engine settings"
+  on public.marketing_engine_settings for select
+  to authenticated using (true);
+
+create policy "Users can update marketing engine settings"
+  on public.marketing_engine_settings for update
+  to authenticated using (true) with check (true);
+
+create policy "Users can insert marketing engine settings"
+  on public.marketing_engine_settings for insert
+  to authenticated with check (true);
+
+-- ─── Backfill updated_at for OKR tables ───────────────────────
+do $$
+begin
+  if not exists (
+    select 1 from information_schema.columns
+    where table_name = 'ciclos_okr' and column_name = 'updated_at'
+  ) then
+    alter table public.ciclos_okr add column updated_at timestamp with time zone default timezone('utc'::text, now()) not null;
+  end if;
+
+  if not exists (
+    select 1 from information_schema.columns
+    where table_name = 'objetivos' and column_name = 'updated_at'
+  ) then
+    alter table public.objetivos add column updated_at timestamp with time zone default timezone('utc'::text, now()) not null;
+  end if;
+end;
+$$;
+
+create trigger handle_updated_at_ciclos_okr
+  before update on public.ciclos_okr
+  for each row execute function public.handle_updated_at();
+
+create trigger handle_updated_at_objetivos
+  before update on public.objetivos
+  for each row execute function public.handle_updated_at();

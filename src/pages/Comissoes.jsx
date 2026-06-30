@@ -5,6 +5,7 @@ import {
   Edit3, Trash2, ChevronDown, Calendar, CalendarDays, CalendarRange
 } from 'lucide-react';
 import { useSync } from '../contexts/SyncContext';
+import { useProfissionais } from '../lib/profissionais';
 
 // ─── Helpers ───────────────────────────────────────────────────
 
@@ -224,6 +225,7 @@ export default function Comissoes() {
     comissoes, addComissao, removeComissao, updateComissaoStatus,
     splitConfig, supabaseConnected, connectionError, dailySheet,
   } = useSync();
+  const { profissionais } = useProfissionais();
 
   const [modal, setModal] = useState(false);
   const [deleteId, setDeleteId] = useState(null);
@@ -257,14 +259,6 @@ export default function Comissoes() {
     const uniqueSheet = sheetComissoes.filter(sc => !manualIds.has(sc.id));
     return [...comissoes, ...uniqueSheet];
   }, [comissoes, sheetComissoes]);
-
-  // ─── Professionals from profissionais.js + sheet ────────────
-  const profissionais = useMemo(() => {
-    try {
-      const raw = localStorage.getItem('erp_profissionais');
-      return raw ? JSON.parse(raw) : [];
-    } catch { return []; }
-  }, []);
 
   // ─── Sheet services grouped by professional ──────────────────
   const sheetServicosByProf = useMemo(() => {
