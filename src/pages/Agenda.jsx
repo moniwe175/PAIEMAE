@@ -480,12 +480,34 @@ function BloqueioModal({ onClose, date, profissional: prefillProf, hora: prefill
 // ═══════════════════════════════════════════════════════════════
 // ─── AppointmentDetailModal ───────────────────────────────────
 // ═══════════════════════════════════════════════════════════════
-function AppointmentDetailModal({ apt, profissionais, onClose, onEdit, onDelete, onStatusChange }) {
+function AppointmentDetailModal({ apt, profissionais, onClose, onEdit, onDelete, onDeleteAll, onStatusChange }) {
+  const [showConfirmDeleteAll, setShowConfirmDeleteAll] = useState(false);
   const prof = profissionais.find(p => p.nome === apt.profissional);
   const st = STATUS_CONFIG[apt.status] || STATUS_CONFIG.aguardando_confirmacao;
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10000, backdropFilter: 'blur(4px)', padding: 16 }} onClick={onClose}>
-      <div style={{ background: '#fff', borderRadius: 20, width: '100%', maxWidth: 460, boxShadow: '0 24px 64px rgba(0,0,0,0.2)', overflow: 'hidden' }} onClick={e => e.stopPropagation()}>
+      <div style={{ background: '#fff', borderRadius: 20, width: '100%', maxWidth: 460, boxShadow: '0 24px 64px rgba(0,0,0,0.2)', overflow: 'hidden', position: 'relative' }} onClick={e => e.stopPropagation()}>
+        
+        {showConfirmDeleteAll && (
+          <div style={{ position: 'absolute', inset: 0, background: 'rgba(0, 0, 0, 0.35)', zIndex: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, backdropFilter: 'blur(4px)' }}>
+            <div style={{ background: '#fff', border: '1px solid #FCA5A5', borderRadius: 16, padding: 24, boxShadow: '0 10px 30px rgba(0,0,0,0.1)', textAlign: 'center', maxWidth: 320 }}>
+              <AlertTriangle style={{ width: 44, height: 44, color: '#EF4444', margin: '0 auto 12px' }} />
+              <h3 style={{ fontSize: 18, fontWeight: 700, color: '#1F2937', marginBottom: 8 }}>Excluir Todos</h3>
+              <p style={{ fontSize: 14, color: '#4B5563', marginBottom: 24, lineHeight: 1.4 }}>
+                Deseja realmente excluir TODOS os agendamentos fixos desta pessoa?
+              </p>
+              <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
+                <button onClick={() => setShowConfirmDeleteAll(false)} style={{ flex: 1, padding: '10px 16px', borderRadius: 10, border: '1.5px solid #E5E7EB', background: '#fff', fontSize: 14, fontWeight: 600, cursor: 'pointer', color: '#6B7280' }}>
+                  Voltar
+                </button>
+                <button onClick={() => onDeleteAll(apt)} style={{ flex: 1, padding: '10px 16px', borderRadius: 10, border: 'none', background: '#EF4444', fontSize: 14, fontWeight: 700, cursor: 'pointer', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                  Excluir Todos
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         <div style={{ background: prof ? `linear-gradient(135deg,${prof.cor},${prof.cor}88)` : 'linear-gradient(135deg,#C73B6D,#9B2C50)', padding: '22px 22px 18px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
             <div>
@@ -548,6 +570,11 @@ function AppointmentDetailModal({ apt, profissionais, onClose, onEdit, onDelete,
             <button onClick={() => onDelete(apt.id)} style={{ padding: '8px 14px', borderRadius: 10, border: '1.5px solid #FCA5A5', background: '#FFF5F5', fontSize: 13, fontWeight: 600, cursor: 'pointer', color: '#EF4444', display: 'flex', alignItems: 'center', gap: 5 }}>
               <Trash2 style={{ width: 13, height: 13 }} />Excluir
             </button>
+            {apt.fixo && (
+              <button onClick={() => setShowConfirmDeleteAll(true)} style={{ padding: '8px 14px', borderRadius: 10, border: '1.5px solid #EF4444', background: '#FEF2F2', fontSize: 13, fontWeight: 600, cursor: 'pointer', color: '#DC2626', display: 'flex', alignItems: 'center', gap: 5 }}>
+                <Trash2 style={{ width: 13, height: 13 }} />Excluir Todos
+              </button>
+            )}
             <button onClick={() => onEdit(apt)} style={{ flex: 1, padding: '8px 14px', borderRadius: 10, border: 'none', background: 'linear-gradient(135deg,#C73B6D,#A83158)', fontSize: 13, fontWeight: 700, cursor: 'pointer', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}>
               <Edit3 style={{ width: 13, height: 13 }} />Editar
             </button>
@@ -1167,6 +1194,22 @@ export default function Agenda() {
     setDetailModal({ open: false, apt: null });
   };
 
+  const handleDeleteAllFixo = async (apt) => {
+    const toDelete = agendamentos.filter(a => 
+      a.fixo && 
+      a.paciente === apt.paciente && 
+      a.profissional === apt.profissional && 
+      a.servico === apt.servico && 
+      a.hora === apt.hora
+    );
+    for (const d of toDelete) {
+      await deleteAppointment(d.id);
+    }
+    const ids = new Set(toDelete.map(a => a.id));
+    setAgendamentos(prev => prev.filter(a => !ids.has(a.id)));
+    setDetailModal({ open: false, apt: null });
+  };
+
   const handleStatusChange = async (id, status) => {
     const { data } = await updateAppointment(id, { status });
     if (data) {
@@ -1239,7 +1282,7 @@ export default function Agenda() {
       {detailModal.open && detailModal.apt && (
         <AppointmentDetailModal apt={detailModal.apt} profissionais={profissionais}
           onClose={() => setDetailModal({ open: false, apt: null })}
-          onEdit={openEdit} onDelete={handleDelete} onStatusChange={handleStatusChange} />
+          onEdit={openEdit} onDelete={handleDelete} onDeleteAll={handleDeleteAllFixo} onStatusChange={handleStatusChange} />
       )}
       {bloqueioModal.open && (
         <BloqueioModal onClose={() => setBloqueioModal({ open: false, bloqueio: null, prefillProf: '', prefillHora: '' })}
@@ -1331,7 +1374,15 @@ export default function Agenda() {
                     onClick={() => openNew(p.nome, '')}
                     onMouseEnter={e => e.currentTarget.style.background = '#FDF8F5'}
                     onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-                    <div style={{ width: 36, height: 36, borderRadius: '50%', background: p.cor, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 700, marginBottom: 4, boxShadow: `0 2px 8px ${p.cor}44` }}>{p.nome.charAt(0)}</div>
+                    <div style={{ width: 68, height: 68, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, fontWeight: 700, marginBottom: 6, position: 'relative' }}>
+                      <span style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#9CA3AF', zIndex: 0 }}>{p.nome.charAt(0)}</span>
+                      <img 
+                        src={localStorage.getItem('avatar_' + p.id) || `/${p.nome.trim().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase()}.png`} 
+                        alt={p.nome} 
+                        style={{ width: '100%', height: '100%', objectFit: 'contain', position: 'relative', zIndex: 1, backgroundColor: 'transparent' }} 
+                        onError={(e) => { e.target.style.display = 'none'; e.target.previousSibling.style.color = p.cor; e.target.previousSibling.style.background = p.cor + '22'; e.target.previousSibling.style.borderRadius = '50%'; }} 
+                      />
+                    </div>
                     <div style={{ fontSize: 12, fontWeight: 700, color: '#1F2937' }}>{p.nome}</div>
                     <div style={{ fontSize: 10, color: '#9CA3AF' }}>{p.cargo}</div>
                   </div>

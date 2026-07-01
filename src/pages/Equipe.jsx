@@ -16,6 +16,7 @@ function ProfissionalModal({ onClose, onSave, profissional }) {
     email: profissional?.email || '',
     comissao: profissional?.comissao || 0,
     cor: profissional?.cor || CORES_AVATAR[0],
+    fotoBase64: profissional?.id ? localStorage.getItem('avatar_' + profissional.id) : null,
   });
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
@@ -61,21 +62,39 @@ function ProfissionalModal({ onClose, onSave, profissional }) {
         </div>
 
         <div className="form-group">
-          <label className="form-label">Cor do Avatar</label>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            {CORES_AVATAR.map(c => (
-              <button
-                key={c}
-                onClick={() => set('cor', c)}
-                style={{
-                  width: 32, height: 32, borderRadius: '50%', border: 'none', cursor: 'pointer',
-                  background: c,
-                  outline: form.cor === c ? '3px solid #1F2937' : '2px solid transparent',
-                  outlineOffset: 2,
-                  transition: 'outline 0.15s',
+          <label className="form-label">Foto do Profissional (Opcional)</label>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div style={{ width: 64, height: 64, borderRadius: 8, background: '#F3F4F6', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+              {form.fotoBase64 ? (
+                <img src={form.fotoBase64} alt="Preview" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+              ) : (
+                <span style={{ fontSize: 24, color: '#9CA3AF' }}>{form.nome ? form.nome.charAt(0).toUpperCase() : '?'}</span>
+              )}
+            </div>
+            <div style={{ flex: 1 }}>
+              <input 
+                type="file" 
+                accept="image/*"
+                id="foto-upload"
+                style={{ display: 'none' }}
+                onChange={(e) => {
+                  const file = e.target.files[0];
+                  if (file) {
+                    const reader = new FileReader();
+                    reader.onloadend = () => set('fotoBase64', reader.result);
+                    reader.readAsDataURL(file);
+                  }
                 }}
               />
-            ))}
+              <label htmlFor="foto-upload" className="btn btn-ghost" style={{ cursor: 'pointer', display: 'inline-flex', padding: '6px 12px', background: '#F3F4F6' }}>
+                Escolher Foto
+              </label>
+              {form.fotoBase64 && (
+                <button type="button" className="btn btn-ghost" style={{ color: '#DC2626', padding: '6px 12px', marginLeft: 8 }} onClick={() => set('fotoBase64', null)}>
+                  Remover
+                </button>
+              )}
+            </div>
           </div>
         </div>
 
@@ -213,11 +232,19 @@ export default function Equipe() {
         <ProfissionalModal
           profissional={editModal === 'new' ? null : editModal}
           onClose={() => setEditModal(null)}
-          onSave={(form) => {
+          onSave={async (form) => {
             if (editModal === 'new') {
-              addProfissional(form);
+              const newProf = await addProfissional(form);
+              if (form.fotoBase64 && newProf) {
+                localStorage.setItem('avatar_' + newProf.id, form.fotoBase64);
+              }
             } else {
-              updateProfissional(editModal.id, form);
+              await updateProfissional(editModal.id, form);
+              if (form.fotoBase64) {
+                localStorage.setItem('avatar_' + editModal.id, form.fotoBase64);
+              } else {
+                localStorage.removeItem('avatar_' + editModal.id);
+              }
             }
           }}
         />
@@ -249,12 +276,24 @@ export default function Equipe() {
             {/* Avatar + Name */}
             <div style={{ textAlign: 'center', marginBottom: 16 }}>
               <div style={{
-                width: 56, height: 56, borderRadius: '50%', margin: '0 auto 10px',
-                background: `linear-gradient(135deg, ${prof.cor}, ${prof.cor}66)`,
+                width: 72, height: 72, margin: '0 auto 10px',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
-                fontSize: 20, fontWeight: 700, color: '#fff',
+                fontSize: 24, fontWeight: 700, position: 'relative',
               }}>
-                {prof.nome.charAt(0).toUpperCase()}
+                <span style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#9CA3AF', zIndex: 0 }}>
+                  {prof.nome.charAt(0).toUpperCase()}
+                </span>
+                <img 
+                  src={localStorage.getItem('avatar_' + prof.id) || `/${prof.nome.trim().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase()}.png`} 
+                  alt={prof.nome} 
+                  style={{ width: '100%', height: '100%', objectFit: 'contain', position: 'relative', zIndex: 1, backgroundColor: 'transparent' }} 
+                  onError={(e) => { 
+                    e.target.style.display = 'none'; 
+                    e.target.previousSibling.style.color = prof.cor; 
+                    e.target.previousSibling.style.background = prof.cor + '22'; 
+                    e.target.previousSibling.style.borderRadius = '50%'; 
+                  }} 
+                />
               </div>
               <div style={{ fontWeight: 700, fontSize: 15 }}>{prof.nome}</div>
               <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>{prof.cargo}</div>
