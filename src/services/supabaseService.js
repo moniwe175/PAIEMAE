@@ -471,3 +471,102 @@ export async function deleteAnamnese(id) {
   return { data: true, error: null };
 }
 
+// ─── Inventory (Estoque) ────────────────────────────────────
+
+export async function fetchInventory() {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured', []);
+  const { data, error } = await supabase
+    .from('inventory')
+    .select('*')
+    .order('created_at', { ascending: false });
+  if (error) return handleError(error, []);
+  return { data: data || [], error: null };
+}
+
+export async function insertInventoryItem(item) {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured');
+  const { data, error } = await supabase.from('inventory').insert([item]).select().single();
+  if (error) return handleError(error);
+  return { data, error: null };
+}
+
+export async function updateInventoryItem(id, updates) {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured');
+  const { data, error } = await supabase.from('inventory').update(updates).eq('id', id).select().single();
+  if (error) return handleError(error);
+  return { data, error: null };
+}
+
+export async function deleteInventoryItem(id) {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured');
+  const { error } = await supabase.from('inventory').delete().eq('id', id);
+  if (error) return handleError(error);
+  return { data: true, error: null };
+}
+
+// ─── Packages (Pacotes) ─────────────────────────────────────
+
+export async function fetchPackages() {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured', []);
+  const { data, error } = await supabase
+    .from('packages')
+    .select('*')
+    .order('created_at', { ascending: false });
+  if (error) return handleError(error, []);
+  return { data: data || [], error: null };
+}
+
+export async function insertPackage(pkg) {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured');
+  const { data, error } = await supabase.from('packages').insert([pkg]).select().single();
+  if (error) return handleError(error);
+  return { data, error: null };
+}
+
+export async function updatePackage(id, updates) {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured');
+  const { data, error } = await supabase.from('packages').update(updates).eq('id', id).select().single();
+  if (error) return handleError(error);
+  return { data, error: null };
+}
+
+export async function deletePackage(id) {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured');
+  const { error } = await supabase.from('packages').delete().eq('id', id);
+  if (error) return handleError(error);
+  return { data: true, error: null };
+}
+
+// ─── Kanban Leads ───────────────────────────────────────────
+
+export async function fetchKanbanLeads() {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured', []);
+  const { data, error } = await supabase
+    .from('kanban_leads')
+    .select('*')
+    .order('ordem', { ascending: true });
+  if (error) return handleError(error, []);
+  return { data: data || [], error: null };
+}
+
+export async function insertKanbanLead(lead) {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured');
+  const { data, error } = await supabase.from('kanban_leads').insert([lead]).select().single();
+  if (error) return handleError(error);
+  return { data, error: null };
+}
+
+export async function updateKanbanLead(id, updates) {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured');
+  const { data, error } = await supabase.from('kanban_leads').update(updates).eq('id', id).select().single();
+  if (error) return handleError(error);
+  return { data, error: null };
+}
+
+export async function deleteKanbanLead(id) {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured');
+  const { error } = await supabase.from('kanban_leads').delete().eq('id', id);
+  if (error) return handleError(error);
+  return { data: true, error: null };
+}
+

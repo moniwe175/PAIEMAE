@@ -1,14 +1,11 @@
-import React, { useState } from 'react';
+﻿import React, { useState, useEffect } from 'react';
 import { Package, Plus, Search, AlertTriangle, XCircle, TrendingDown, Trash2, AlertOctagon } from 'lucide-react';
+import { fetchInventory, insertInventoryItem, deleteInventoryItem } from '../services/supabaseService';
+import { getCurrentUser } from '../lib/supabase';
 
-const SEED = [
-  { id:1, nome:'Botox Allergan 100U', categoria:'Toxina Botulínica', estoque:5, minimo:5, preco:480, fornecedor:'Allergan', vencimento:'12/2026', status:'critico' },
-  { id:2, nome:'Juvederm Ultra 1ml', categoria:'Preenchedor', estoque:2, minimo:10, preco:650, fornecedor:'AbbVie', vencimento:'08/2026', status:'critico' },
-  { id:3, nome:'Sculptra 150mg', categoria:'Bioestimulador', estoque:8, minimo:5, preco:1200, fornecedor:'Galderma', vencimento:'03/2027', status:'ok' },
-  { id:4, nome:'Radiesse 1.5ml', categoria:'Preenchedor', estoque:12, minimo:8, preco:890, fornecedor:'Merz', vencimento:'09/2027', status:'ok' },
-  { id:5, nome:'Peeling TCA 30%', categoria:'Peeling', estoque:3, minimo:4, preco:85, fornecedor:'Genérico', vencimento:'06/2026', status:'baixo' },
-  { id:6, nome:'Fio PDO 29G', categoria:'Fio', estoque:50, minimo:20, preco:12, fornecedor:'Koru', vencimento:'01/2028', status:'ok' },
-];
+function genId() {
+  return 'inv_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+}
 
 function calcStatus(estoque, minimo) {
   const e = Number(estoque), m = Number(minimo);
@@ -21,10 +18,10 @@ function ProdutoModal({ onClose, onSave }) {
   const [form, setForm] = useState({ nome:'', categoria:'', estoque:'', minimo:'', preco:'', fornecedor:'', vencimento:'' });
   const set = (k,v) => setForm(f=>({...f,[k]:v}));
   const canSave = form.nome && form.categoria && form.estoque !== '';
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!canSave) return;
     const e = Number(form.estoque), m = Number(form.minimo) || 0, pr = Number(form.preco) || 0;
-    onSave({ id: Date.now(), nome: form.nome, categoria: form.categoria, estoque: e, minimo: m, preco: pr, fornecedor: form.fornecedor, vencimento: form.vencimento, status: calcStatus(e, m) });
+    await onSave({ nome: form.nome, categoria: form.categoria, estoque: e, minimo: m, preco: pr, fornecedor: form.fornecedor, vencimento: form.vencimento, status: calcStatus(e, m) });
     onClose();
   };
   return (
@@ -43,7 +40,7 @@ function ProdutoModal({ onClose, onSave }) {
             <label className="form-label">Categoria</label>
             <select className="form-select" value={form.categoria} onChange={e=>set('categoria',e.target.value)}>
               <option value="">Selecione...</option>
-              {['Toxina Botulínica','Preenchedor','Bioestimulador','Peeling','Fio','Skincare','Outros'].map(c=><option key={c}>{c}</option>)}
+              {['Toxina BotulÃ­nica','Preenchedor','Bioestimulador','Peeling','Fio','Skincare','Outros'].map(c=><option key={c}>{c}</option>)}
             </select>
           </div>
           <div className="form-group">
@@ -55,11 +52,11 @@ function ProdutoModal({ onClose, onSave }) {
             <input className="form-input" type="number" placeholder="0" value={form.estoque} onChange={e=>set('estoque',e.target.value)} />
           </div>
           <div className="form-group">
-            <label className="form-label">Estoque Mínimo</label>
+            <label className="form-label">Estoque MÃ­nimo</label>
             <input className="form-input" type="number" placeholder="0" value={form.minimo} onChange={e=>set('minimo',e.target.value)} />
           </div>
           <div className="form-group">
-            <label className="form-label">Preço de Custo (R$)</label>
+            <label className="form-label">PreÃ§o de Custo (R$)</label>
             <input className="form-input" type="number" placeholder="0,00" value={form.preco} onChange={e=>set('preco',e.target.value)} />
           </div>
           <div className="form-group">
@@ -86,7 +83,7 @@ function DeleteConfirmModal({ produto, onClose, onConfirm }) {
           </div>
           <div>
             <div style={{ fontSize:16, fontWeight:700, color:'var(--text-dark)', marginBottom:2 }}>Excluir Produto</div>
-            <div style={{ fontSize:13, color:'var(--text-muted)' }}>Esta ação não pode ser desfeita.</div>
+            <div style={{ fontSize:13, color:'var(--text-muted)' }}>Esta aÃ§Ã£o nÃ£o pode ser desfeita.</div>
           </div>
         </div>
         <div style={{ background:'#F9FAFB', borderRadius:'var(--radius-md)', padding:'12px 16px', marginBottom:20, fontSize:13, color:'var(--text-light)' }}>
@@ -106,32 +103,55 @@ function DeleteConfirmModal({ produto, onClose, onConfirm }) {
 const STATUS_MAP = {
   ok: { label:'Normal', cls:'badge-success' },
   baixo: { label:'Baixo', cls:'badge-warning' },
-  critico: { label:'Crítico', cls:'badge-danger' },
+  critico: { label:'CrÃ­tico', cls:'badge-danger' },
 };
 
 export default function Inventory() {
   const [modal, setModal] = useState(false);
   const [busca, setBusca] = useState('');
-  const [produtos, setProdutos] = useState(SEED);
+  const [produtos, setProdutos] = useState([]);
   const [deleteTarget, setDeleteTarget] = useState(null);
+
+  useEffect(() => {
+    async function load() {
+      const { data } = await fetchInventory();
+      if (data) {
+        setProdutos(data.map(p => ({
+          ...p,
+          estoque: Number(p.estoque) || 0,
+          minimo: Number(p.minimo) || 0,
+          preco: Number(p.preco) || 0,
+        })));
+      }
+    }
+    load();
+  }, []);
 
   const filtrados = produtos.filter(p =>
     p.nome.toLowerCase().includes(busca.toLowerCase()) ||
-    p.categoria.toLowerCase().includes(busca.toLowerCase())
+    (p.categoria || '').toLowerCase().includes(busca.toLowerCase())
   );
 
   const criticos = produtos.filter(p => p.status === 'critico').length;
   const baixos = produtos.filter(p => p.status === 'baixo').length;
   const valorEstoque = produtos.reduce((s, p) => s + p.estoque * p.preco, 0);
 
-  const handleDelete = () => {
+  const handleDelete = async () => {
     if (!deleteTarget) return;
-    setProdutos(prev => prev.filter(p => p.id !== deleteTarget.id));
+    const { error } = await deleteInventoryItem(deleteTarget.id);
+    if (!error) {
+      setProdutos(prev => prev.filter(p => p.id !== deleteTarget.id));
+    }
     setDeleteTarget(null);
   };
 
-  const handleAdd = (produto) => {
-    setProdutos(prev => [...prev, produto]);
+  const handleAdd = async (produto) => {
+    const user = await getCurrentUser();
+    const item = { id: genId(), ...produto, user_id: user?.id };
+    const { data, error } = await insertInventoryItem(item);
+    if (!error && data) {
+      setProdutos(prev => [...prev, { ...data, estoque: Number(data.estoque) || 0, minimo: Number(data.minimo) || 0, preco: Number(data.preco) || 0 }]);
+    }
   };
 
   return (
@@ -151,7 +171,7 @@ export default function Inventory() {
       <div className="grid-4 section-gap">
         {[
           {label:'Total Produtos',val:produtos.length,cor:'var(--color-primary)',icon:Package},
-          {label:'Estoque Crítico',val:criticos,cor:'var(--danger)',icon:AlertTriangle},
+          {label:'Estoque CrÃ­tico',val:criticos,cor:'var(--danger)',icon:AlertTriangle},
           {label:'Estoque Baixo',val:baixos,cor:'var(--warning)',icon:TrendingDown},
           {label:'Valor em Estoque',val:`R$ ${valorEstoque.toLocaleString('pt-BR',{minimumFractionDigits:2})}`,cor:'var(--success)',icon:Package},
         ].map(({label,val,cor,icon:Icon})=>(
@@ -169,7 +189,7 @@ export default function Inventory() {
         <div style={{background:'var(--danger-bg)',border:'1px solid #f8c4c8',borderRadius:'var(--radius-md)',padding:'12px 16px',marginBottom:20,display:'flex',alignItems:'center',gap:8}}>
           <AlertTriangle style={{width:16,height:16,color:'var(--danger)',flexShrink:0}} />
           <span style={{fontSize:13,color:'var(--danger)',fontWeight:600}}>
-            {criticos} produto(s) com estoque crítico! Realize a reposição imediatamente.
+            {criticos} produto(s) com estoque crÃ­tico! Realize a reposiÃ§Ã£o imediatamente.
           </span>
         </div>
       )}
@@ -184,7 +204,7 @@ export default function Inventory() {
         <div className="table-wrapper">
           <table>
             <thead><tr>
-              <th>Produto</th><th>Categoria</th><th>Fornecedor</th><th>Estoque</th><th>Mínimo</th><th>Custo</th><th>Validade</th><th>Status</th><th style={{width:50}}></th>
+              <th>Produto</th><th>Categoria</th><th>Fornecedor</th><th>Estoque</th><th>MÃ­nimo</th><th>Custo</th><th>Validade</th><th>Status</th><th style={{width:50}}></th>
             </tr></thead>
             <tbody>
               {filtrados.map(p=>(
@@ -200,7 +220,7 @@ export default function Inventory() {
                   <td style={{fontSize:13,color:'var(--text-muted)'}}>{p.minimo}</td>
                   <td style={{fontWeight:600}}>R$ {p.preco.toLocaleString('pt-BR')}</td>
                   <td style={{fontSize:13,color:'var(--text-light)'}}>{p.vencimento}</td>
-                  <td><span className={`badge ${STATUS_MAP[p.status].cls}`}>{STATUS_MAP[p.status].label}</span></td>
+                  <td><span className={`badge ${STATUS_MAP[p.status]?.cls || 'badge-neutral'}`}>{STATUS_MAP[p.status]?.label || p.status}</span></td>
                   <td>
                     <button
                       onClick={() => setDeleteTarget(p)}

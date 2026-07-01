@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
 } from 'recharts';
@@ -12,6 +12,7 @@ import OKRWeeklySnapshot from '../components/dashboard/OKRWeeklySnapshot';
 import StickyNotesPanel from '../components/dashboard/StickyNotesPanel';
 import { generateAutoNotes } from '../lib/noteAutomation';
 import { fetchStickyNotes, insertStickyNote, updateStickyNote } from '../services/okrService';
+import { fetchInventory, fetchAppointments } from '../services/supabaseService';
 import { getCurrentUser } from '../lib/supabase';
 
 // ─── Sub-components ───────────────────────────────────────────
@@ -57,28 +58,47 @@ const CustomTooltip = ({ active, payload, label }) => {
   return null;
 };
 
-// ─── Seed OKR data ──────────────────────────────────────────
-const SEED_KEY_RESULTS = [
-  { id: 'kr1', titulo: 'Faturamento mensal >= R$ 50k', metrica: 'R$', valor_inicial: 30000, valor_atual: 38500, valor_meta: 50000, status: 'alerta', action_hint: 'Intensificar campanhas de upsell e reativar clientes inativos.' },
-  { id: 'kr2', titulo: 'Ticket medio >= R$ 350', metrica: 'R$', valor_inicial: 280, valor_atual: 320, valor_meta: 350, status: 'alerta', action_hint: 'Oferecer pacotes e combos para aumentar o ticket medio.' },
-  { id: 'kr3', titulo: 'Taxa de retorno >= 40%', metrica: '%', valor_inicial: 25, valor_atual: 35, valor_meta: 40, status: 'no_alvo', action_hint: '' },
-  { id: 'kr4', titulo: 'NPS >= 85', metrica: 'count', valor_inicial: 72, valor_atual: 88, valor_meta: 85, status: 'no_alvo', action_hint: '' },
-  { id: 'kr5', titulo: 'No-Show <= 10%', metrica: '%', valor_inicial: 18, valor_atual: 14, valor_meta: 10, status: 'alerta', action_hint: 'Ativar regua Wolf Pack de confirmacao por WhatsApp.' },
-  { id: 'kr6', titulo: 'Estoque critico = 0 itens', metrica: 'count', valor_inicial: 3, valor_atual: 2, valor_meta: 0, status: 'critico', action_hint: 'Repor imediatamente: Botox Allergan e Juvederm Ultra.' },
-];
-
 // ─── Dashboard ────────────────────────────────────────────────
 export default function Dashboard() {
   const { transactions, dailySheet } = useSync();
   const [manualNotes, setManualNotes] = useState([]);
-  const [keyResults] = useState(SEED_KEY_RESULTS);
+  const [keyResults] = useState([]);
+  const [stockAlerts, setStockAlerts] = useState([]);
+  const [todayAppointments, setTodayAppointments] = useState([]);
 
   useEffect(() => {
     async function loadNotes() {
       const { data } = await fetchStickyNotes();
       if (data) setManualNotes(data);
     }
+    async function loadStock() {
+      const { data } = await fetchInventory();
+      if (data) {
+        const alerts = data
+          .map(p => ({ ...p, estoque: Number(p.estoque)||0, minimo: Number(p.minimo)||0 }))
+          .filter(p => p.estoque <= p.minimo)
+          .map(p => ({ nome: p.nome, lote: p.fornecedor || '', estoque: p.estoque, minimo: p.minimo }));
+        setStockAlerts(alerts);
+      }
+    }
+    async function loadAppointments() {
+      const { data } = await fetchAppointments();
+      if (data) {
+        const todayStr = new Date().toISOString().split('T')[0];
+        const todayApts = data
+          .filter(a => a.appointment_date === todayStr)
+          .map(a => ({
+            hora: a.appointment_time || '',
+            paciente: a.client_name || '',
+            servico: a.service_name || '',
+            status: a.status || 'aguardando',
+          }));
+        setTodayAppointments(todayApts);
+      }
+    }
     loadNotes();
+    loadStock();
+    loadAppointments();
   }, []);
 
   const today = new Date();
@@ -138,14 +158,8 @@ export default function Dashboard() {
     return days;
   })();
 
-  // Stock alerts (placeholder - from Inventory page)
-  const stockAlerts = [
-    { nome: 'Botox Allergan 100U', lote: 'Allergan', estoque: 5, minimo: 5 },
-    { nome: 'Juvederm Ultra', lote: 'AbbVie', estoque: 2, minimo: 10 },
-  ];
-
   // Auto-generate notes from system state
-  const autoNotes = generateAutoNotes({ stockAlerts, okrs: keyResults, appointments: [] });
+  const autoNotes = generateAutoNotes({ stockAlerts, okrs: keyResults, appointments: todayAppointments });
   const allNotes = [...autoNotes, ...manualNotes.filter(n => !n.dismissed)];
 
   const handleDismissNote = async (note) => {
@@ -175,13 +189,6 @@ export default function Dashboard() {
       setManualNotes(prev => prev.map(n => n.id === noteId ? { ...n, prioridade: newPriority } : n));
     }
   };
-
-  // Today appointments (placeholder)
-  const todayAppointments = [
-    { hora: '09:00', paciente: 'Fernanda Lima', servico: 'Botox Facial', status: 'confirmado' },
-    { hora: '10:30', paciente: 'Carla Mendes', servico: 'Preenchimento Labial', status: 'aguardando' },
-    { hora: '14:00', paciente: 'Ana Beatriz', servico: 'Harmonização Facial', status: 'confirmado' },
-  ];
 
   // Sync stats
   const syncedTxCount = transactions.filter(t => t.origem === 'planilha').length;

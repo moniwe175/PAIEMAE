@@ -1,13 +1,11 @@
-import React, { useState } from 'react';
+﻿import React, { useState, useEffect } from 'react';
 import { ShoppingBag, Plus, XCircle, DollarSign, Clock, Tag, Trash2, AlertOctagon, Edit3 } from 'lucide-react';
+import { fetchPackages, insertPackage, updatePackage, deletePackage } from '../services/supabaseService';
+import { getCurrentUser } from '../lib/supabase';
 
-const SEED = [
-  { id:1, nome:'Pacote Bronze', servicos:['Botox Facial','Peeling Químico'], sessoes:3, preco:1650, desconto:10, validade:'6 meses', vendidos:8, ativo:true },
-  { id:2, nome:'Pacote Prata', servicos:['Botox Facial','Preenchimento Labial','Peeling Químico'], sessoes:5, preco:2900, desconto:15, validade:'8 meses', vendidos:12, ativo:true },
-  { id:3, nome:'Pacote Ouro', servicos:['Harmonização Facial','Bioestimulador','Botox Facial','Peeling Químico'], sessoes:8, preco:5200, desconto:20, validade:'12 meses', vendidos:5, ativo:true },
-  { id:4, nome:'Pacote Skincare', servicos:['Limpeza de Pele Profunda','Peeling Químico'], sessoes:4, preco:680, desconto:10, validade:'4 meses', vendidos:15, ativo:true },
-  { id:5, nome:'Pacote Rejuvenescimento', servicos:['Fio de PDO','Bioestimulador','Botox Facial'], sessoes:3, preco:4200, desconto:12, validade:'8 meses', vendidos:3, ativo:false },
-];
+function genId() {
+  return 'pkg_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+}
 
 function PacoteModal({ onClose, onSave, pacote }) {
   const isEdit = !!pacote;
@@ -17,10 +15,10 @@ function PacoteModal({ onClose, onSave, pacote }) {
   } : { nome:'', preco:'', desconto:'', validade:'', sessoes:'' });
   const set = (k,v) => setForm(f=>({...f,[k]:v}));
   const canSave = form.nome && form.preco !== '';
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!canSave) return;
     if (isEdit) {
-      onSave({
+      await onSave({
         ...pacote,
         nome: form.nome,
         preco: Number(form.preco) || 0,
@@ -30,8 +28,7 @@ function PacoteModal({ onClose, onSave, pacote }) {
         ativo: form.ativo !== undefined ? form.ativo : pacote.ativo,
       });
     } else {
-      onSave({
-        id: Date.now(),
+      await onSave({
         nome: form.nome,
         preco: Number(form.preco) || 0,
         desconto: Number(form.desconto) || 0,
@@ -57,7 +54,7 @@ function PacoteModal({ onClose, onSave, pacote }) {
         </div>
         <div className="form-grid-2">
           <div className="form-group">
-            <label className="form-label">Preço (R$)</label>
+            <label className="form-label">PreÃ§o (R$)</label>
             <input className="form-input" type="number" placeholder="0,00" value={form.preco} onChange={e=>set('preco',e.target.value)} />
           </div>
           <div className="form-group">
@@ -65,7 +62,7 @@ function PacoteModal({ onClose, onSave, pacote }) {
             <input className="form-input" type="number" placeholder="0" value={form.desconto} onChange={e=>set('desconto',e.target.value)} />
           </div>
           <div className="form-group">
-            <label className="form-label">Nº de Sessões</label>
+            <label className="form-label">NÂº de SessÃµes</label>
             <input className="form-input" type="number" placeholder="0" value={form.sessoes} onChange={e=>set('sessoes',e.target.value)} />
           </div>
           <div className="form-group">
@@ -83,7 +80,7 @@ function PacoteModal({ onClose, onSave, pacote }) {
         )}
         <div style={{display:'flex',gap:8,justifyContent:'flex-end',marginTop:8}}>
           <button className="btn btn-ghost" onClick={onClose}>Cancelar</button>
-          <button className="btn btn-primary" disabled={!canSave} onClick={handleSave} style={{opacity:canSave?1:0.5}}><ShoppingBag />{isEdit ? 'Salvar Alterações' : 'Salvar'}</button>
+          <button className="btn btn-primary" disabled={!canSave} onClick={handleSave} style={{opacity:canSave?1:0.5}}><ShoppingBag />{isEdit ? 'Salvar AlteraÃ§Ãµes' : 'Salvar'}</button>
         </div>
       </div>
     </div>
@@ -100,14 +97,14 @@ function DeleteConfirmModal({ pacote, onClose, onConfirm }) {
           </div>
           <div>
             <div style={{ fontSize:16, fontWeight:700, color:'var(--text-dark)', marginBottom:2 }}>Excluir Pacote</div>
-            <div style={{ fontSize:13, color:'var(--text-muted)' }}>Esta ação não pode ser desfeita.</div>
+            <div style={{ fontSize:13, color:'var(--text-muted)' }}>Esta aÃ§Ã£o nÃ£o pode ser desfeita.</div>
           </div>
         </div>
         <div style={{ background:'#F9FAFB', borderRadius:'var(--radius-md)', padding:'12px 16px', marginBottom:20, fontSize:13, color:'var(--text-light)' }}>
           Tem certeza que deseja excluir <strong style={{ color:'var(--text-dark)' }}>{pacote.nome}</strong>?
           {pacote.vendidos > 0 && (
             <div style={{ marginTop:6, color:'var(--warning)', fontWeight:600 }}>
-              Atenção: {pacote.vendidos} unidade(s) já vendida(s).
+              AtenÃ§Ã£o: {pacote.vendidos} unidade(s) jÃ¡ vendida(s).
             </div>
           )}
         </div>
@@ -125,14 +122,49 @@ function DeleteConfirmModal({ pacote, onClose, onConfirm }) {
 export default function Packages() {
   const [modal, setModal] = useState(false);
   const [editTarget, setEditTarget] = useState(null);
-  const [pacotes, setPacotes] = useState(SEED);
+  const [pacotes, setPacotes] = useState([]);
   const [deleteTarget, setDeleteTarget] = useState(null);
 
-  const handleAdd = (pacote) => setPacotes(prev => [...prev, pacote]);
-  const handleUpdate = (updated) => setPacotes(prev => prev.map(p => p.id === updated.id ? updated : p));
-  const handleDelete = () => {
+  useEffect(() => {
+    async function load() {
+      const { data } = await fetchPackages();
+      if (data) {
+        setPacotes(data.map(p => ({
+          ...p,
+          servicos: p.servicos || [],
+          preco: Number(p.preco) || 0,
+          desconto: Number(p.desconto) || 0,
+          sessoes: Number(p.sessoes) || 1,
+          vendidos: Number(p.vendidos) || 0,
+          ativo: p.ativo !== false,
+        })));
+      }
+    }
+    load();
+  }, []);
+
+  const handleAdd = async (formData) => {
+    const user = await getCurrentUser();
+    const newPkg = { id: genId(), ...formData, user_id: user?.id };
+    const { data, error } = await insertPackage(newPkg);
+    if (!error && data) {
+      setPacotes(prev => [...prev, { ...data, servicos: data.servicos || [], preco: Number(data.preco) || 0, desconto: Number(data.desconto) || 0, sessoes: Number(data.sessoes) || 1, vendidos: Number(data.vendidos) || 0, ativo: data.ativo !== false }]);
+    }
+  };
+
+  const handleUpdate = async (updated) => {
+    const { data, error } = await updatePackage(updated.id, updated);
+    if (!error && data) {
+      setPacotes(prev => prev.map(p => p.id === data.id ? { ...data, servicos: data.servicos || [], preco: Number(data.preco) || 0, desconto: Number(data.desconto) || 0, sessoes: Number(data.sessoes) || 1, vendidos: Number(data.vendidos) || 0, ativo: data.ativo !== false } : p));
+    }
+  };
+
+  const handleDelete = async () => {
     if (!deleteTarget) return;
-    setPacotes(prev => prev.filter(p => p.id !== deleteTarget.id));
+    const { error } = await deletePackage(deleteTarget.id);
+    if (!error) {
+      setPacotes(prev => prev.filter(p => p.id !== deleteTarget.id));
+    }
     setDeleteTarget(null);
   };
 
@@ -184,8 +216,8 @@ export default function Packages() {
             <div className="divider" />
             <div style={{display:'flex',flexDirection:'column',gap:7,marginBottom:12}}>
               <div style={{display:'flex',justifyContent:'space-between',fontSize:12}}>
-                <span style={{display:'flex',alignItems:'center',gap:4,color:'var(--text-muted)'}}><Clock style={{width:12,height:12}}/>Sessões</span>
-                <span style={{fontWeight:600}}>{p.sessoes} sessões</span>
+                <span style={{display:'flex',alignItems:'center',gap:4,color:'var(--text-muted)'}}><Clock style={{width:12,height:12}}/>SessÃµes</span>
+                <span style={{fontWeight:600}}>{p.sessoes} sessÃµes</span>
               </div>
               <div style={{display:'flex',justifyContent:'space-between',fontSize:12}}>
                 <span style={{color:'var(--text-muted)'}}>Validade</span>
@@ -196,12 +228,16 @@ export default function Packages() {
                 <span style={{fontWeight:600,color:'var(--success)'}}>{p.vendidos}</span>
               </div>
             </div>
-            <div style={{fontSize:12,color:'var(--text-muted)',fontWeight:500,marginBottom:8}}>Inclui:</div>
-            <div style={{display:'flex',flexWrap:'wrap',gap:5,marginBottom:14}}>
-              {p.servicos.map(s=>(
-                <span key={s} style={{background:'var(--color-accent-soft)',color:'var(--text-medium)',padding:'3px 8px',borderRadius:99,fontSize:11,fontWeight:500}}>{s}</span>
-              ))}
-            </div>
+            {p.servicos && p.servicos.length > 0 && (
+              <>
+                <div style={{fontSize:12,color:'var(--text-muted)',fontWeight:500,marginBottom:8}}>Inclui:</div>
+                <div style={{display:'flex',flexWrap:'wrap',gap:5,marginBottom:14}}>
+                  {p.servicos.map(s=>(
+                    <span key={s} style={{background:'var(--color-accent-soft)',color:'var(--text-medium)',padding:'3px 8px',borderRadius:99,fontSize:11,fontWeight:500}}>{s}</span>
+                  ))}
+                </div>
+              </>
+            )}
             <div style={{display:'flex',gap:6}}>
               <button className="btn btn-ghost btn-sm" style={{flex:1,display:'flex',alignItems:'center',justifyContent:'center',gap:4}} onClick={()=>setEditTarget(p)}><Edit3 style={{width:12,height:12}}/>Editar</button>
               <button onClick={()=>setDeleteTarget(p)} title="Excluir pacote" style={{ padding:'6px 10px', borderRadius:'var(--radius-md)', border:'1.5px solid #FCA5A5', background:'#FFF5F5', fontSize:12, fontWeight:600, cursor:'pointer', color:'var(--danger)', display:'flex', alignItems:'center', justifyContent:'center', gap:4 }}>
@@ -212,6 +248,16 @@ export default function Packages() {
           </div>
         ))}
       </div>
+
+      {pacotes.length === 0 && (
+        <div style={{textAlign:'center',padding:60,color:'var(--text-muted)'}}>
+          <ShoppingBag style={{width:40,height:40,marginBottom:12,opacity:0.3}} />
+          <p style={{fontSize:14}}>Nenhum pacote cadastrado</p>
+          <button className="btn btn-primary" style={{marginTop:12}} onClick={()=>setModal(true)}>
+            <Plus />Criar primeiro pacote
+          </button>
+        </div>
+      )}
     </div>
   );
 }

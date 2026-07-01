@@ -276,11 +276,18 @@ function QuickClientModal({ onClose, onSave }) {
   const [nome, setNome] = useState('');
   const [telefone, setTelefone] = useState('');
   const [email, setEmail] = useState('');
+  const [dataNascimento, setDataNascimento] = useState('');
   const [erro, setErro] = useState('');
+  const [erroTelefone, setErroTelefone] = useState('');
+  const [erroNascimento, setErroNascimento] = useState('');
 
   const handleSubmit = () => {
-    if (!nome.trim()) { setErro('Nome obrigatório'); return; }
-    onSave({ nome: nome.trim(), telefone, email });
+    let hasError = false;
+    if (!nome.trim()) { setErro('Nome obrigatório'); hasError = true; }
+    if (!telefone.trim()) { setErroTelefone('Telefone obrigatório'); hasError = true; }
+    if (!dataNascimento) { setErroNascimento('Data de nascimento obrigatória'); hasError = true; }
+    if (hasError) return;
+    onSave({ nome: nome.trim(), telefone, email, data_nascimento: dataNascimento });
   };
 
   return (
@@ -300,12 +307,13 @@ function QuickClientModal({ onClose, onSave }) {
         </div>
         {[
           { label: 'Nome completo *', val: nome, set: v => { setNome(v); setErro(''); }, type: 'text', placeholder: 'Ex: Maria da Silva', err: erro },
-          { label: 'Telefone', val: telefone, set: setTelefone, type: 'tel', placeholder: '(11) 99999-9999' },
+          { label: 'Telefone *', val: telefone, set: v => { setTelefone(v); setErroTelefone(''); }, type: 'tel', placeholder: '(11) 99999-9999', err: erroTelefone },
           { label: 'E-mail', val: email, set: setEmail, type: 'email', placeholder: 'email@exemplo.com' },
+          { label: 'Data de Nascimento *', val: dataNascimento, set: v => { setDataNascimento(v); setErroNascimento(''); }, type: 'date', placeholder: '', err: erroNascimento },
         ].map(({ label, val, set, type, placeholder, err }) => (
           <div key={label} style={{ marginBottom: 14 }}>
             <label style={{ fontSize: 12, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 5 }}>{label}</label>
-            <input type={type} placeholder={placeholder} value={val} onChange={e => set(e.target.value)} autoFocus={label.includes('*')}
+            <input type={type} placeholder={placeholder} value={val} onChange={e => set(e.target.value)} autoFocus={label === 'Nome completo *'}
               style={{ width: '100%', padding: '10px 12px', border: `1.5px solid ${err ? '#EF4444' : '#E5E7EB'}`, borderRadius: 10, fontSize: 14, outline: 'none', boxSizing: 'border-box' }} />
             {err && <div style={{ fontSize: 11, color: '#EF4444', marginTop: 3 }}>{err}</div>}
           </div>
@@ -682,8 +690,9 @@ function AgendamentoModal({ onClose, date, profissional: prefillProf, hora: pref
         <QuickClientModal onClose={() => setShowNewClient(false)} onSave={async (c) => {
           const clientData = {
             name: c.nome,
-            phone: c.telefone || '(00) 00000-0000',
+            phone: c.telefone,
             email: c.email || '',
+            birthdate: c.data_nascimento || null,
             status: 'ativo'
           };
           const { data } = await insertClient(clientData);

@@ -9,6 +9,7 @@ function mapFromSupabase(client) {
     nome: client.name || '',
     telefone: client.phone || '(00) 00000-0000',
     email: client.email || '',
+    nascimento: client.birthdate || '',
     origem: client.source || 'Instagram',
     totalCompras: client.total_purchases || 0,
     totalGasto: Number(client.total_spent) || 0,
@@ -22,6 +23,7 @@ function mapToSupabase(client) {
     name: client.nome,
     phone: client.telefone,
     email: client.email,
+    birthdate: client.nascimento || null,
     source: client.origem,
     total_purchases: client.totalCompras || 0,
     total_spent: client.totalGasto || 0,
@@ -36,7 +38,7 @@ export default function Clients() {
   const [saving, setSaving] = useState(false);
   const [busca, setBusca] = useState('');
   const [modal, setModal] = useState(false);
-  const [form, setForm] = useState({ nome: '', telefone: '', email: '', origem: '' });
+  const [form, setForm] = useState({ nome: '', telefone: '', email: '', nascimento: '', origem: '' });
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
@@ -165,11 +167,20 @@ export default function Clients() {
       alert('Por favor, preencha o nome do cliente.');
       return;
     }
+    if (!form.telefone) {
+      alert('Por favor, preencha o telefone do cliente.');
+      return;
+    }
+    if (!form.nascimento) {
+      alert('Por favor, preencha a data de nascimento do cliente.');
+      return;
+    }
     const nome = cleanAndTitleCaseName(form.nome);
     const novo = {
       nome,
-      telefone: form.telefone || '(00) 00000-0000',
+      telefone: form.telefone,
       email: form.email || '',
+      nascimento: form.nascimento,
       origem: form.origem || 'Instagram',
       totalCompras: 0,
       totalGasto: 0,
@@ -186,7 +197,7 @@ export default function Clients() {
       setClientes(prev => [mapFromSupabase(data), ...prev]);
     }
 
-    setForm({ nome: '', telefone: '', email: '', origem: '' });
+    setForm({ nome: '', telefone: '', email: '', nascimento: '', origem: '' });
     setModal(false);
   };
 
@@ -212,16 +223,20 @@ export default function Clients() {
             </div>
             <div className="form-grid-2">
               <div className="form-group" style={{ gridColumn: 'span 2' }}>
-                <label className="form-label">Nome completo</label>
+                <label className="form-label">Nome completo *</label>
                 <input className="form-input" placeholder="Nome do cliente" value={form.nome} onChange={e => set('nome', e.target.value)} />
               </div>
               <div className="form-group">
-                <label className="form-label">Telefone</label>
+                <label className="form-label">Telefone *</label>
                 <input className="form-input" placeholder="(11) 99999-9999" value={form.telefone} onChange={e => set('telefone', e.target.value)} />
               </div>
               <div className="form-group">
                 <label className="form-label">E-mail</label>
                 <input className="form-input" type="email" placeholder="email@exemplo.com" value={form.email} onChange={e => set('email', e.target.value)} />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Data de Nascimento *</label>
+                <input className="form-input" type="date" value={form.nascimento} onChange={e => set('nascimento', e.target.value)} />
               </div>
               <div className="form-group" style={{ gridColumn: 'span 2' }}>
                 <label className="form-label">Origem / Canal</label>

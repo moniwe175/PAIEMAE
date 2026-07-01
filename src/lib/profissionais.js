@@ -25,40 +25,6 @@ export const CATALOGO_SERVICOS = [
 // ─── Colors for avatars ─────────────────────────────────────
 export const CORES_AVATAR = ['#C73B6D', '#8B5CF6', '#D97706', '#0891B2', '#059669', '#DC2626', '#7C3AED', '#EA580C'];
 
-// ─── Default professionals (seed data) ──────────────────────
-const DEFAULT_PROFISSIONAIS = [
-  {
-    id: 'prof_1',
-    nome: 'Bárbara',
-    cargo: 'Esteticista',
-    cor: '#C73B6D',
-    telefone: '(11) 99111-1111',
-    email: 'barbara@clinica.com',
-    comissao: 30,
-    servicos: ['Limpeza de Pele', 'Peeling Químico', 'Botox Facial', 'Design de Sobrancelha', 'Drenagem Linfática'],
-  },
-  {
-    id: 'prof_2',
-    nome: 'Evelyn',
-    cargo: 'Biomédica',
-    cor: '#8B5CF6',
-    telefone: '(11) 99222-2222',
-    email: 'evelyn@clinica.com',
-    comissao: 40,
-    servicos: ['Harmonização Facial', 'Preenchimento Labial', 'Fio de PDO', 'Bioestimulador', 'Botox Facial'],
-  },
-  {
-    id: 'prof_3',
-    nome: 'Bira',
-    cargo: 'Esteticista',
-    cor: '#D97706',
-    telefone: '(11) 99333-3333',
-    email: 'bira@clinica.com',
-    comissao: 25,
-    servicos: ['Depilação a Laser', 'Limpeza de Pele', 'Drenagem Linfática', 'Peeling Químico'],
-  },
-];
-
 function genId() {
   return 'prof_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 }
@@ -82,15 +48,6 @@ async function deleteFromSupabase(id) {
   await supabase.from('profissionais').delete().eq('id', id);
 }
 
-async function seedSupabase() {
-  if (!isSupabaseConfigured()) return;
-  const { data } = await supabase.from('profissionais').select('id');
-  if (data && data.length > 0) return; // already seeded
-  const user = await getCurrentUser();
-  const seed = DEFAULT_PROFISSIONAIS.map(p => ({ ...p, user_id: user?.id }));
-  await supabase.from('profissionais').insert(seed);
-}
-
 // ─── Hook ───────────────────────────────────────────────────
 export function useProfissionais() {
   const [profissionais, setProfissionais] = useState([]);
@@ -98,7 +55,6 @@ export function useProfissionais() {
 
   useEffect(() => {
     async function init() {
-      await seedSupabase();
       const remote = await loadFromSupabase();
       if (remote) {
         setProfissionais(remote);

@@ -835,3 +835,102 @@ create trigger handle_updated_at_ciclos_okr
 create trigger handle_updated_at_objetivos
   before update on public.objetivos
   for each row execute function public.handle_updated_at();
+
+-- ─── 19. Inventory (Estoque) ─────────────────────────────────
+create table if not exists public.inventory (
+  id text primary key,
+  nome text not null,
+  categoria text,
+  estoque integer default 0,
+  minimo integer default 0,
+  preco numeric(12,2) default 0,
+  fornecedor text,
+  vencimento text,
+  status text default 'ok',
+  user_id uuid references auth.users,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null,
+  updated_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+alter table public.inventory enable row level security;
+
+create policy "Users can view own inventory"
+  on public.inventory for select using ( auth.uid() = user_id );
+create policy "Users can insert own inventory"
+  on public.inventory for insert with check ( auth.uid() = user_id );
+create policy "Users can update own inventory"
+  on public.inventory for update using ( auth.uid() = user_id );
+create policy "Users can delete own inventory"
+  on public.inventory for delete using ( auth.uid() = user_id );
+
+create trigger handle_updated_at_inventory
+  before update on public.inventory
+  for each row execute function public.handle_updated_at();
+
+create index if not exists idx_inventory_user_id on public.inventory(user_id);
+
+-- ─── 20. Packages (Pacotes) ──────────────────────────────────
+create table if not exists public.packages (
+  id text primary key,
+  nome text not null,
+  servicos jsonb default '[]'::jsonb,
+  sessoes integer default 1,
+  preco numeric(12,2) default 0,
+  desconto integer default 0,
+  validade text default '6 meses',
+  vendidos integer default 0,
+  ativo boolean default true,
+  user_id uuid references auth.users,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null,
+  updated_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+alter table public.packages enable row level security;
+
+create policy "Users can view own packages"
+  on public.packages for select using ( auth.uid() = user_id );
+create policy "Users can insert own packages"
+  on public.packages for insert with check ( auth.uid() = user_id );
+create policy "Users can update own packages"
+  on public.packages for update using ( auth.uid() = user_id );
+create policy "Users can delete own packages"
+  on public.packages for delete using ( auth.uid() = user_id );
+
+create trigger handle_updated_at_packages
+  before update on public.packages
+  for each row execute function public.handle_updated_at();
+
+create index if not exists idx_packages_user_id on public.packages(user_id);
+
+-- ─── 21. Kanban Leads ────────────────────────────────────────
+create table if not exists public.kanban_leads (
+  id text primary key,
+  nome text not null,
+  servico text,
+  valor numeric(12,2) default 0,
+  coluna text default 'novo',
+  avatar text,
+  telefone text,
+  email text,
+  ordem integer default 0,
+  user_id uuid references auth.users,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null,
+  updated_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+alter table public.kanban_leads enable row level security;
+
+create policy "Users can view own kanban_leads"
+  on public.kanban_leads for select using ( auth.uid() = user_id );
+create policy "Users can insert own kanban_leads"
+  on public.kanban_leads for insert with check ( auth.uid() = user_id );
+create policy "Users can update own kanban_leads"
+  on public.kanban_leads for update using ( auth.uid() = user_id );
+create policy "Users can delete own kanban_leads"
+  on public.kanban_leads for delete using ( auth.uid() = user_id );
+
+create trigger handle_updated_at_kanban_leads
+  before update on public.kanban_leads
+  for each row execute function public.handle_updated_at();
+
+create index if not exists idx_kanban_leads_user_id on public.kanban_leads(user_id);
