@@ -1377,7 +1377,7 @@ export default function Agenda() {
                     <div style={{ width: 68, height: 68, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, fontWeight: 700, marginBottom: 6, position: 'relative' }}>
                       <span style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#9CA3AF', zIndex: 0 }}>{p.nome.charAt(0)}</span>
                       <img 
-                        src={localStorage.getItem('avatar_' + p.id) || `/${p.nome.trim().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase()}.png`} 
+                        src={p.fotoBase64 || `/${p.nome.trim().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase()}.png`} 
                         alt={p.nome} 
                         style={{ width: '100%', height: '100%', objectFit: 'contain', position: 'relative', zIndex: 1, backgroundColor: 'transparent' }} 
                         onError={(e) => { e.target.style.display = 'none'; e.target.previousSibling.style.color = p.cor; e.target.previousSibling.style.background = p.cor + '22'; e.target.previousSibling.style.borderRadius = '50%'; }} 

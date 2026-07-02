@@ -16,7 +16,7 @@ function ProfissionalModal({ onClose, onSave, profissional }) {
     email: profissional?.email || '',
     comissao: profissional?.comissao || 0,
     cor: profissional?.cor || CORES_AVATAR[0],
-    fotoBase64: profissional?.id ? localStorage.getItem('avatar_' + profissional.id) : null,
+    fotoBase64: profissional?.id ? profissional.fotoBase64 : null,
   });
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
@@ -234,17 +234,9 @@ export default function Equipe() {
           onClose={() => setEditModal(null)}
           onSave={async (form) => {
             if (editModal === 'new') {
-              const newProf = await addProfissional(form);
-              if (form.fotoBase64 && newProf) {
-                localStorage.setItem('avatar_' + newProf.id, form.fotoBase64);
-              }
+              await addProfissional(form);
             } else {
               await updateProfissional(editModal.id, form);
-              if (form.fotoBase64) {
-                localStorage.setItem('avatar_' + editModal.id, form.fotoBase64);
-              } else {
-                localStorage.removeItem('avatar_' + editModal.id);
-              }
             }
           }}
         />
@@ -284,7 +276,7 @@ export default function Equipe() {
                   {prof.nome.charAt(0).toUpperCase()}
                 </span>
                 <img 
-                  src={localStorage.getItem('avatar_' + prof.id) || `/${prof.nome.trim().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase()}.png`} 
+                  src={prof.fotoBase64 || `/${prof.nome.trim().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase()}.png`} 
                   alt={prof.nome} 
                   style={{ width: '100%', height: '100%', objectFit: 'contain', position: 'relative', zIndex: 1, backgroundColor: 'transparent' }} 
                   onError={(e) => { 

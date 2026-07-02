@@ -29,12 +29,25 @@ function genId() {
   return 'prof_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 }
 
+// ─── Local state for reactivity across the app ───
+let globalProfissionais = null;
+let listeners = [];
+
+function notifyListeners() {
+  for (const listener of listeners) {
+    listener([...(globalProfissionais || [])]);
+  }
+}
+
 // ─── Supabase helpers ────────────────────────────────────────
-async function loadFromSupabase() {
-  if (!isSupabaseConfigured()) return null;
-  const { data, error } = await supabase.from('profissionais').select('*').order('created_at');
-  if (error || !data) return null;
-  return data.map(r => ({ ...r, servicos: r.servicos || [] }));
+async function loadData() {
+  if (isSupabaseConfigured()) {
+    const { data, error } = await supabase.from('profissionais').select('*').order('created_at');
+    if (!error && data) {
+      return data.map(r => ({ ...r, servicos: r.servicos || [] }));
+    }
+  }
+  return [];
 }
 
 async function upsertToSupabase(prof) {
@@ -50,18 +63,28 @@ async function deleteFromSupabase(id) {
 
 // ─── Hook ───────────────────────────────────────────────────
 export function useProfissionais() {
-  const [profissionais, setProfissionais] = useState([]);
-  const [loaded, setLoaded] = useState(false);
+  const [profissionais, setProfissionais] = useState(globalProfissionais || []);
+  const [loaded, setLoaded] = useState(globalProfissionais !== null);
 
   useEffect(() => {
-    async function init() {
-      const remote = await loadFromSupabase();
-      if (remote) {
-        setProfissionais(remote);
-      }
-      setLoaded(true);
+    let mounted = true;
+    const listener = (data) => {
+      if (mounted) setProfissionais(data);
+    };
+    listeners.push(listener);
+
+    if (globalProfissionais === null) {
+      loadData().then(data => {
+        globalProfissionais = data;
+        notifyListeners();
+        if (mounted) setLoaded(true);
+      });
     }
-    init();
+
+    return () => {
+      mounted = false;
+      listeners = listeners.filter(l => l !== listener);
+    };
   }, []);
 
   const addProfissional = useCallback(async (data) => {
@@ -74,47 +97,65 @@ export function useProfissionais() {
       email: data.email || '',
       comissao: data.comissao || 0,
       servicos: data.servicos || [],
+      fotoBase64: data.fotoBase64 || null,
     };
+    
+    const newList = [...(globalProfissionais || []), newProf];
+    globalProfissionais = newList;
+    notifyListeners();
     await upsertToSupabase(newProf);
-    setProfissionais(prev => [...prev, newProf]);
+    
     return newProf;
   }, []);
 
   const updateProfissional = useCallback(async (id, updates) => {
-    setProfissionais(prev => prev.map(p => {
+    if (!globalProfissionais) return;
+    const newList = globalProfissionais.map(p => {
       if (p.id !== id) return p;
       const updated = { ...p, ...updates };
       upsertToSupabase(updated);
       return updated;
-    }));
+    });
+    globalProfissionais = newList;
+    notifyListeners();
   }, []);
 
   const removeProfissional = useCallback(async (id) => {
+    if (!globalProfissionais) return;
+    const newList = globalProfissionais.filter(p => p.id !== id);
+    globalProfissionais = newList;
+    notifyListeners();
     await deleteFromSupabase(id);
-    setProfissionais(prev => prev.filter(p => p.id !== id));
   }, []);
 
   const addServicoToProfissional = useCallback(async (profId, servico) => {
-    setProfissionais(prev => prev.map(p => {
+    if (!globalProfissionais) return;
+    const newList = globalProfissionais.map(p => {
       if (p.id !== profId) return p;
       if (p.servicos.includes(servico)) return p;
       const updated = { ...p, servicos: [...p.servicos, servico] };
       upsertToSupabase(updated);
       return updated;
-    }));
+    });
+    globalProfissionais = newList;
+    notifyListeners();
   }, []);
 
   const removeServicoFromProfissional = useCallback(async (profId, servico) => {
-    setProfissionais(prev => prev.map(p => {
+    if (!globalProfissionais) return;
+    const newList = globalProfissionais.map(p => {
       if (p.id !== profId) return p;
       const updated = { ...p, servicos: p.servicos.filter(s => s !== servico) };
       upsertToSupabase(updated);
       return updated;
-    }));
+    });
+    globalProfissionais = newList;
+    notifyListeners();
   }, []);
 
   return {
     profissionais,
+    loaded,
     addProfissional,
     updateProfissional,
     removeProfissional,
