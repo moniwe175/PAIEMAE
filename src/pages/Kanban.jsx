@@ -1,13 +1,14 @@
-﻿import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Star, Plus, XCircle, GripVertical, Trash2 } from 'lucide-react';
-import { fetchKanbanLeads, insertKanbanLead, updateKanbanLead, deleteKanbanLead } from '../services/supabaseService';
+import { fetchClients, fetchKanbanLeads, insertKanbanLead, updateKanbanLead, deleteKanbanLead } from '../services/supabaseService';
 import { getCurrentUser } from '../lib/supabase';
 
 const COLUNAS = [
-  { id:'novo', label:'Novo Lead', cor:'var(--info)', corBg:'var(--info-bg)' },
-  { id:'contato', label:'Em Contato', cor:'var(--warning)', corBg:'var(--warning-bg)' },
-  { id:'agendado', label:'Agendado', cor:'var(--color-primary)', corBg:'var(--color-accent-soft)' },
-  { id:'concluido', label:'ConcluÃ­do', cor:'var(--success)', corBg:'var(--success-bg)' },
+  { id:'frio', label:'🧊 Frio', cor:'var(--info)', corBg:'var(--info-bg)' },
+  { id:'morno', label:'🌡️ Morno', cor:'var(--warning)', corBg:'var(--warning-bg)' },
+  { id:'quente', label:'🔥 Quente', cor:'#ef4444', corBg:'#fee2e2' },
+  { id:'convertido', label:'💰 Convertido', cor:'var(--success)', corBg:'var(--success-bg)' },
+  { id:'perdido', label:'❌ Perdido', cor:'var(--text-muted)', corBg:'#f3f4f6' },
 ];
 
 function genId() {
@@ -24,7 +25,7 @@ function LeadModal({ onClose, onSave }) {
       nome: form.nome,
       servico: form.servico,
       valor: Number(form.valor) || 0,
-      col: 'novo',
+      col: 'frio',
       avatar: form.nome.charAt(0).toUpperCase(),
       ordem: Date.now(),
     });
@@ -42,7 +43,7 @@ function LeadModal({ onClose, onSave }) {
           <input className="form-input" placeholder="Nome do lead" value={form.nome} onChange={e=>set('nome',e.target.value)} />
         </div>
         <div className="form-group">
-          <label className="form-label">ServiÃ§o de Interesse</label>
+          <label className="form-label">Serviço de Interesse</label>
           <input className="form-input" placeholder="Ex: Botox Facial" value={form.servico} onChange={e=>set('servico',e.target.value)} />
         </div>
         <div className="form-group">
@@ -62,23 +63,46 @@ export default function Kanban() {
   const [cards, setCards] = useState([]);
   const [dragging, setDragging] = useState(null);
   const [modal, setModal] = useState(false);
+  const [isReadOnly, setIsReadOnly] = useState(false);
 
   useEffect(() => {
     async function load() {
-      const { data } = await fetchKanbanLeads();
-      if (data) {
-        setCards(data.map(c => ({
-          ...c,
-          valor: Number(c.valor) || 0,
-        })));
+      // Temporarily fetching clients to mock the history distribution
+      const { data: clientsData } = await fetchClients();
+      
+      if (clientsData && clientsData.length > 0) {
+        const colIds = ['frio', 'morno', 'quente', 'convertido', 'perdido'];
+        const mappedCards = clientsData.map((c, index) => {
+          const colIndex = index % 5;
+          return {
+            id: c.id || `mock_lead_${index}`,
+            nome: c.name || c.nome || 'Cliente sem nome',
+            servico: c.phone || 'Sem histórico',
+            valor: Number(c.total_spent) || 0,
+            col: colIds[colIndex],
+            avatar: (c.name || c.nome || '?').charAt(0).toUpperCase(),
+            isMock: true
+          };
+        });
+        setCards(mappedCards);
+      } else {
+        // Fallback
+        const { data } = await fetchKanbanLeads();
+        if (data) {
+          setCards(data.map(c => ({ ...c, valor: Number(c.valor) || 0 })));
+        }
       }
     }
     load();
   }, []);
 
   const moveCard = async (cardId, novaCol) => {
+    if (isReadOnly) return;
     setCards(cs => cs.map(c => c.id === cardId ? {...c, col: novaCol} : c));
-    await updateKanbanLead(cardId, { col: novaCol });
+    const card = cards.find(c => c.id === cardId);
+    if (card && !card.isMock) {
+      await updateKanbanLead(cardId, { col: novaCol });
+    }
   };
 
   const handleAddLead = async (leadData) => {
@@ -116,11 +140,17 @@ export default function Kanban() {
 
       <div className="page-header" style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between'}}>
         <div>
-          <div className="page-header-label"><Star />KANBAN</div>
-          <h1 className="page-title">Kanban de Leads</h1>
-          <p className="page-subtitle">GestÃ£o de funil de atendimento</p>
+          <div className="page-header-label"><Star />ESTEIRA DE CLIENTES</div>
+          <h1 className="page-title">Esteira de Clientes</h1>
+          <p className="page-subtitle">Funil de evolução de leads e conversão</p>
         </div>
-        <button className="btn btn-primary" onClick={()=>setModal(true)}><Plus />Novo Lead</button>
+        <div style={{display: 'flex', gap: '12px', alignItems: 'center'}}>
+          <label style={{display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', color: 'var(--text-muted)', cursor: 'pointer'}}>
+            <input type="checkbox" checked={isReadOnly} onChange={e => setIsReadOnly(e.target.checked)} />
+            Modo Equipe (Somente Leitura)
+          </label>
+          {!isReadOnly && <button className="btn btn-primary" onClick={()=>setModal(true)}><Plus />Novo Lead</button>}
+        </div>
       </div>
 
       <div style={{display:'flex',gap:14,overflowX:'auto',paddingBottom:8}}>
@@ -153,9 +183,11 @@ export default function Kanban() {
                     fontSize:11,fontWeight:700
                   }}>{colCards.length}</span>
                 </div>
-                <span style={{fontSize:11,fontWeight:600,color:col.cor}}>
-                  R$ {totalValor.toLocaleString('pt-BR')}
-                </span>
+                {!isReadOnly && (
+                  <span style={{fontSize:11,fontWeight:600,color:col.cor}}>
+                    R$ {totalValor.toLocaleString('pt-BR')}
+                  </span>
+                )}
               </div>
 
               {/* Cards */}
@@ -163,8 +195,8 @@ export default function Kanban() {
                 {colCards.map(card=>(
                   <div
                     key={card.id}
-                    draggable
-                    onDragStart={e=>onDragStart(e,card)}
+                    draggable={!isReadOnly}
+                    onDragStart={e=> !isReadOnly && onDragStart(e,card)}
                     className="card"
                     style={{
                       cursor:'grab',padding:'12px 14px',
@@ -179,24 +211,30 @@ export default function Kanban() {
                         <div style={{fontSize:11,color:'var(--text-muted)'}}>{card.servico}</div>
                       </div>
                       <div style={{display:'flex',gap:2}}>
-                        <button
-                          onClick={() => handleDeleteLead(card.id)}
-                          title="Excluir lead"
-                          style={{ background:'none', border:'none', cursor:'pointer', padding:4, borderRadius:6, display:'flex', alignItems:'center', justifyContent:'center' }}
-                          onMouseEnter={e => e.currentTarget.style.background = '#FEE2E2'}
-                          onMouseLeave={e => e.currentTarget.style.background = 'none'}
-                        >
-                          <Trash2 style={{width:12,height:12,color:'var(--danger)'}} />
-                        </button>
-                        <GripVertical style={{width:14,height:14,color:'var(--text-muted)',flexShrink:0}} />
+                        {!isReadOnly && (
+                          <button
+                            onClick={() => handleDeleteLead(card.id)}
+                            title="Excluir lead"
+                            style={{ background:'none', border:'none', cursor:'pointer', padding:4, borderRadius:6, display:'flex', alignItems:'center', justifyContent:'center' }}
+                            onMouseEnter={e => e.currentTarget.style.background = '#FEE2E2'}
+                            onMouseLeave={e => e.currentTarget.style.background = 'none'}
+                          >
+                            <Trash2 style={{width:12,height:12,color:'var(--danger)'}} />
+                          </button>
+                        )}
+                        {!isReadOnly && <GripVertical style={{width:14,height:14,color:'var(--text-muted)',flexShrink:0}} />}
                       </div>
                     </div>
                     <div style={{display:'flex',alignItems:'center',justifyContent:'space-between'}}>
-                      <span style={{fontSize:13,fontWeight:700,color:'var(--success)'}}>R$ {(card.valor||0).toLocaleString('pt-BR')}</span>
+                      {!isReadOnly ? (
+                        <span style={{fontSize:13,fontWeight:700,color:'var(--success)'}}>R$ {(card.valor||0).toLocaleString('pt-BR')}</span>
+                      ) : (
+                        <span style={{fontSize:13,fontWeight:700,color:'transparent'}}>-</span>
+                      )}
                       <div style={{display:'flex',gap:4}}>
-                        {COLUNAS.filter(c=>c.id!==col.id).slice(0,1).map(nextCol=>(
+                        {!isReadOnly && COLUNAS.filter(c=>c.id!==col.id).slice(0,1).map(nextCol=>(
                           <button key={nextCol.id} className="btn btn-secondary btn-sm" onClick={()=>moveCard(card.id,nextCol.id)} style={{padding:'2px 8px',fontSize:10}}>
-                            â†’
+                            →
                           </button>
                         ))}
                       </div>
