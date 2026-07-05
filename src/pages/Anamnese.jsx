@@ -1,46 +1,104 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import {
   ClipboardList, Search, Plus, ChevronRight, ChevronLeft, User,
   Heart, AlertTriangle, Leaf, Target, Printer, Save, CheckCircle,
-  Circle, ArrowLeft, Eye, Edit3, Trash2, Calendar, Loader2
+  Circle, ArrowLeft, Eye, Edit3, Trash2, Calendar, Loader2,
+  FileText, X, PenLine, RotateCcw
 } from 'lucide-react';
 import { fetchClients, fetchAnamneses, upsertAnamnese, deleteAnamnese } from '../services/supabaseService';
 import { getCurrentUser } from '../lib/supabase';
+import { uploadTermoConsentimento, driveConfigurado, TERMO_PDF_EMBED_URL, TERMO_PDF_VIEW_URL } from '../services/googleDriveService';
 
 // ─── Empty form ───────────────────────────────────────────────────────────────
 function emptyForm() {
   return {
-    // Dados pessoais complementares
-    dataNascimento: '', cpf: '', estadoCivil: '', profissao: '', endereco: '',
-    // Saúde geral
-    gestante: '', amamentando: '', fezCirurgia: '', qualCirurgia: '',
-    usaMarcapasso: '', temDiabetes: '', temHipertensao: '', temCardiopatia: '',
-    temEpilepsia: '', temCoagulopatia: '', temOncologico: '',
+    tipoFicha: '',
+    // ── Dados pessoais complementares ──
+    dataNascimento: '', cpf: '', estadoCivil: '', profissao: '',
+    endereco: '', cidade: '', email: '',
+
+    // ── Condições especiais ──
+    gestante: '', amamentando: '',
+
+    // ── Saúde geral — condições (SIM/NÃO) ──
+    sensibilidadeOlhos: '',
+    alergias: '',
+    alergiaPicadaAbelha: '',
+    problemasCardiacos: '',
+    alteracoesPressao: '',
+    alteracoesVasculares: '',
+    diabetes: '',
+    hernia: '',
+    doencaAutoimune: '',
+    hivHepatite: '',
+    doencaCronica: '',
+    colesterol: '',
+    problemaRenal: '',
+    problemasNeurologicos: '',
+    tumor: '',
+    problemaDePele: '',
+    fiosDeOuroOuPMMA: '',
+    quelioide: '',
+    proteseMetalica: '',
+    alteracoesHormonais: '',
+    problemaTireoide: '',
+    ovarioPolicistico: '',
+    mioma: '',
+    endometriose: '',
+    depressao: '',
+    sindromeDopanico: '',
+    procedimentosDefinitivos: '',
+    // mantidos do form anterior
+    usaMarcapasso: '', temEpilepsia: '', temCoagulopatia: '', temOncologico: '',
+    fezCirurgia: '', qualCirurgia: '',
     outrasDoencas: '',
     // Medicamentos
     usaMedicamentos: '', quaisMedicamentos: '',
-    // Alergias
+    // Alergias específicas
     temAlergia: '', quaisAlergias: '',
     alergiaLatex: false, alergiaIodo: false, alergiaAnestesico: false, alergiaQuelante: false,
-    // Pele
+
+    // ── Pele ──
     tipoPele: '', sensibilidadePele: '', oleosidadePele: '',
     problemasPele: [],
     fototipoCampo: '',
     usaProtetor: '', exposicaoSolar: '',
-    // Histórico estético
+    usaAcidos: '',
+    usaCosmeticos: '', quaisCosmeticos: '',
+
+    // ── Histórico estético ──
     jaFezBotox: false, jaFezPreenchimento: false, jaFezPeeling: false, jaFezLaser: false,
     jaFezMicroagulhamento: false, jaFezLimpezaPele: false, jaFezOutro: false, outroHistorico: '',
+    resultadoTratamentoAnterior: '',
     reacaoAnterior: '', detalhesReacao: '',
-    // Hábitos e estilo de vida
-    fuma: '', frequenciaFuma: '', bebidaAlcoolica: '', frequenciaBebe: '',
+
+    // ── Hábitos clínicos ──
+    emTratamentoMedico: '',
+    possuiPlanoSaude: '',
+    problemaSaudeAtual: '',
+    usouAntibiotico7dias: '',
+    usouRoacutan6meses: '',
+    reacaoAlergicaAnestesia: '',
+    tomouVacina6meses: '',
+    historiFamiliarDoencas: '', qualHistoricoFamiliar: '',
+    usaAnticoncepcional: '', qualAnticoncepcional: '',
+    intestinoRegulado: '',
+    usaSuplemento: '', quaisSuplemento: '',
+
+    // ── Estilo de vida ──
+    fuma: '', frequenciaFuma: '',
+    bebidaAlcoolica: '', frequenciaBebe: '',
     atividade: '', frequenciaAtividade: '',
     alimentacao: '', ingereAgua: '',
     qualidadeSono: '',
-    // Objetivos
+    tomaSol: '',
+
+    // ── Objetivos ──
     objetivosPrincipais: [],
     expectativas: '',
     comoConheceu: '',
-    // Termo e assinatura
+
+    // ── Termo e assinatura ──
     leuTermos: false,
     dataPreenchimento: new Date().toISOString().split('T')[0],
     preenchidoPor: 'cliente',
@@ -178,26 +236,289 @@ const STEPS = [
   { id: 'objetivos', label: 'Objetivos & Termo', icon: CheckCircle },
 ];
 
+// ─── Signature Modal Component ────────────────────────────────────────────────
+function SignatureModal({ pacienteNome, onClose, onConfirm }) {
+  const canvasRef = useRef(null);
+  const [isDrawing, setIsDrawing] = useState(false);
+  const [hasSigned, setHasSigned] = useState(false);
+  const [termoScrolled, setTermoScrolled] = useState(false);
+  const lastPos = useRef({ x: 0, y: 0 });
+
+  const getPos = (e, canvas) => {
+    const rect = canvas.getBoundingClientRect();
+    if (e.touches) {
+      return { x: e.touches[0].clientX - rect.left, y: e.touches[0].clientY - rect.top };
+    }
+    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+  };
+
+  const startDraw = useCallback((e) => {
+    e.preventDefault();
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    setIsDrawing(true);
+    const pos = getPos(e, canvas);
+    lastPos.current = pos;
+    const ctx = canvas.getContext('2d');
+    ctx.beginPath();
+    ctx.moveTo(pos.x, pos.y);
+  }, []);
+
+  const draw = useCallback((e) => {
+    e.preventDefault();
+    if (!isDrawing) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const pos = getPos(e, canvas);
+    ctx.lineWidth = 2.2;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.strokeStyle = '#1a1a2e';
+    ctx.lineTo(pos.x, pos.y);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(pos.x, pos.y);
+    lastPos.current = pos;
+    setHasSigned(true);
+  }, [isDrawing]);
+
+  const stopDraw = useCallback(() => setIsDrawing(false), []);
+
+  const clearCanvas = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    setHasSigned(false);
+  };
+
+  const confirm = () => {
+    if (!hasSigned) return;
+    const canvas = canvasRef.current;
+    const dataUrl = canvas.toDataURL('image/png');
+    onConfirm(dataUrl);
+  };
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 9999,
+      background: 'rgba(15,15,30,0.72)',
+      backdropFilter: 'blur(6px)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      padding: 16,
+    }}>
+      <div style={{
+        background: '#fff', borderRadius: 20, width: '100%', maxWidth: 600,
+        maxHeight: '92vh', display: 'flex', flexDirection: 'column',
+        boxShadow: '0 24px 80px rgba(0,0,0,0.35)',
+        overflow: 'hidden',
+      }}>
+        {/* Header */}
+        <div style={{ padding: '18px 22px', borderBottom: '1px solid #F3F4F6', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{ width: 36, height: 36, borderRadius: 10, background: '#F5F3FF', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <FileText style={{ width: 17, height: 17, color: '#7C3AED' }} />
+            </div>
+            <div>
+              <div style={{ fontSize: 15, fontWeight: 700, color: '#111827' }}>Termo de Consentimento</div>
+              <div style={{ fontSize: 11, color: '#6B7280' }}>Leia, assine e confirme</div>
+            </div>
+          </div>
+          <button onClick={onClose} style={{ background: '#F3F4F6', border: 'none', borderRadius: 8, width: 32, height: 32, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <X style={{ width: 15, height: 15, color: '#6B7280' }} />
+          </button>
+        </div>
+
+        {/* Corpo do Termo — rolável */}
+        <div
+          onScroll={(e) => {
+            const bottom = Math.abs(e.target.scrollHeight - e.target.scrollTop - e.target.clientHeight) < 18;
+            if (bottom) setTermoScrolled(true);
+          }}
+          style={{ flex: 1, overflowY: 'auto', padding: '20px 24px', fontSize: 12.5, color: '#374151', lineHeight: 1.75 }}
+        >
+          <p style={{ marginBottom: 14, color: '#6B7280', fontStyle: 'italic' }}>
+            Paciente: <strong style={{ color: '#111827' }}>{pacienteNome}</strong> — {new Date().toLocaleDateString('pt-BR')}
+          </p>
+
+          <p style={{ marginBottom: 12 }}>
+            Declaro ter sido informado(a) de forma clara e detalhada sobre o procedimento estético a ser realizado, incluindo os produtos, equipamentos e técnicas que serão utilizados. Fui devidamente instruído(a) sobre as indicações, contraindicações, resultados esperados e possíveis riscos inerentes ao procedimento.
+          </p>
+          <p style={{ marginBottom: 12 }}>
+            <strong>1. RESPONSABILIDADES DO PACIENTE</strong><br/>
+            Comprometo-me a seguir estritamente todas as orientações pré e pós-procedimento fornecidas pela profissional responsável, estando ciente de que o não cumprimento dessas recomendações pode interferir diretamente no resultado final ou causar complicações e efeitos adversos.
+          </p>
+          <p style={{ marginBottom: 12 }}>
+            <strong>2. RESULTADOS</strong><br/>
+            Estou ciente de que a estética não é uma ciência exata e que os resultados dependem de características anatômicas, biológicas e dos hábitos de vida individuais. Portanto, não é possível garantir resultados absolutos ou idênticos aos de outros pacientes.
+          </p>
+          <p style={{ marginBottom: 12 }}>
+            <strong>3. INTERCORRÊNCIAS E REAÇÕES</strong><br/>
+            Compreendo que, embora as técnicas utilizadas sejam comprovadamente seguras, procedimentos estéticos estão sujeitos a intercorrências imprevistas, tais como inchaço, vermelhidão, hematomas temporários ou sensibilidade local. Em caso de reações anormais, comprometo-me a entrar em contato imediato com a profissional responsável.
+          </p>
+          <p style={{ marginBottom: 12 }}>
+            <strong>4. VERACIDADE DAS INFORMAÇÕES</strong><br/>
+            Atesto que as informações fornecidas por mim nesta ficha de anamnese são verdadeiras e completas. Não omiti nenhuma doença pré-existente, uso de medicamentos ou histórico de alergias que pudessem contraindicar a realização do tratamento.
+          </p>
+          <p style={{ marginBottom: 20 }}>
+            Por estar de acordo com o exposto acima e não restando dúvidas sobre o procedimento, autorizo a realização do mesmo pela profissional responsável.
+          </p>
+
+          {/* Área de Assinatura */}
+          <div style={{ borderTop: '1px solid #E5E7EB', paddingTop: 16 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 700, color: termoScrolled ? '#374151' : '#9CA3AF' }}>
+                <PenLine style={{ width: 14, height: 14 }} />
+                Assine abaixo com o mouse ou o dedo
+              </div>
+              {hasSigned && (
+                <button onClick={clearCanvas} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: '#EF4444', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600 }}>
+                  <RotateCcw style={{ width: 11, height: 11 }} /> Limpar
+                </button>
+              )}
+            </div>
+            <canvas
+              ref={canvasRef}
+              width={552}
+              height={130}
+              onMouseDown={startDraw}
+              onMouseMove={draw}
+              onMouseUp={stopDraw}
+              onMouseLeave={stopDraw}
+              onTouchStart={startDraw}
+              onTouchMove={draw}
+              onTouchEnd={stopDraw}
+              style={{
+                width: '100%', height: 130, display: 'block',
+                border: `2px dashed ${hasSigned ? '#7C3AED' : termoScrolled ? '#D1D5DB' : '#E5E7EB'}`,
+                borderRadius: 12, cursor: termoScrolled ? 'crosshair' : 'not-allowed',
+                background: termoScrolled ? '#FAFAFA' : '#F9FAFB',
+                touchAction: 'none',
+                transition: 'border-color 0.2s, background 0.2s',
+                pointerEvents: termoScrolled ? 'auto' : 'none',
+              }}
+            />
+            {!termoScrolled && (
+              <p style={{ fontSize: 11, color: '#9CA3AF', marginTop: 6, textAlign: 'center', fontStyle: 'italic' }}>
+                ↑ Role o texto até o final para liberar a assinatura
+              </p>
+            )}
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div style={{ padding: '14px 22px', borderTop: '1px solid #F3F4F6', display: 'flex', gap: 10, flexShrink: 0 }}>
+          <button onClick={onClose} style={{ flex: 1, padding: '11px 0', borderRadius: 12, border: '1.5px solid #E5E7EB', background: '#fff', fontSize: 13, fontWeight: 600, color: '#6B7280', cursor: 'pointer' }}>
+            Cancelar
+          </button>
+          <button
+            onClick={confirm}
+            disabled={!hasSigned}
+            style={{
+              flex: 2, padding: '11px 0', borderRadius: 12, border: 'none', cursor: hasSigned ? 'pointer' : 'not-allowed',
+              background: hasSigned ? 'linear-gradient(135deg, #7C3AED, #5B21B6)' : '#E5E7EB',
+              fontSize: 13, fontWeight: 700,
+              color: hasSigned ? '#fff' : '#9CA3AF',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+              transition: 'all 0.2s',
+              boxShadow: hasSigned ? '0 4px 18px rgba(124,58,237,0.35)' : 'none',
+            }}
+          >
+            <CheckCircle style={{ width: 16, height: 16 }} />
+            Confirmar Assinatura e Fechar
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── MAIN FORM ─────────────────────────────────────────────────────────────────
 function AnamneseForm({ paciente, initial, onSave, onCancel }) {
   const [form, setForm] = useState(() => initial || emptyForm());
   const [step, setStep] = useState(0);
+  const [showPreview, setShowPreview] = useState(false);
+  const [showTermoModal, setShowTermoModal] = useState(false);
+  const [signatureData, setSignatureData] = useState(null); // base64 png
+  const [driveStatus, setDriveStatus] = useState('idle'); // 'idle'|'uploading'|'done'|'error'
+  const [driveLink, setDriveLink] = useState(null);
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
   const toggleArr = (k, v) => setForm(f => {
     const arr = f[k] || [];
     return { ...f, [k]: arr.includes(v) ? arr.filter(x => x !== v) : [...arr, v] };
   });
 
-  const handleSave = () => {
+  const handleConfirmSignature = (dataUrl) => {
+    setSignatureData(dataUrl);
+    set('leuTermos', true);
+    setShowTermoModal(false);
+  };
+
+  const handleSave = async () => {
+    if (!form.leuTermos || !signatureData) return;
     const saved = { ...form, dataPreenchimento: new Date().toISOString().split('T')[0] };
-    onSave(saved);
+    onSave(saved, async () => {
+      // Upload para Google Drive após salvar no Supabase
+      setDriveStatus('uploading');
+      try {
+        const result = await uploadTermoConsentimento({
+          pacienteNome: paciente.nome,
+          signatureDataUrl: signatureData,
+          telefone: paciente.telefone,
+          dataAssinatura: new Date().toLocaleDateString('pt-BR'),
+          objetivos: saved.objetivosPrincipais,
+          expectativas: saved.expectativas,
+          comoConheceu: saved.comoConheceu,
+        });
+        if (result) {
+          setDriveStatus('done');
+          setDriveLink(result.webViewLink);
+        } else {
+          setDriveStatus('idle'); // Drive não configurado, ignora silenciosamente
+        }
+      } catch (err) {
+        console.error('Drive upload error:', err);
+        setDriveStatus('error');
+      }
+    });
   };
 
   const handlePrint = () => window.print();
 
+  // Helper para linha SIM/NÃO compacta usada na aba de saúde
+  const SaudeRow = ({ label, field }) => (
+    <div style={{
+      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+      padding: '8px 12px', borderRadius: 10, border: '1.5px solid #F0EBE6',
+      background: '#FAFAFA', marginBottom: 6,
+    }}>
+      <span style={{ fontSize: 12, color: '#374151', fontWeight: 500, flex: 1 }}>{label}</span>
+      <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+        {['Sim', 'Não'].map(opt => {
+          const sel = form[field] === opt;
+          return (
+            <button key={opt} type="button"
+              onClick={() => setForm(f => ({ ...f, [field]: opt }))}
+              style={{
+                padding: '3px 12px', borderRadius: 20, fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                border: `1.5px solid ${sel ? (opt === 'Sim' ? '#EF4444' : '#059669') : '#E5E7EB'}`,
+                background: sel ? (opt === 'Sim' ? '#FEF2F2' : '#ECFDF5') : '#fff',
+                color: sel ? (opt === 'Sim' ? '#EF4444' : '#059669') : '#9CA3AF',
+                transition: 'all 0.15s',
+              }}>
+              {opt}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+
   const renderStep = () => {
     switch (STEPS[step].id) {
-      // ── Pessoal ───────────────────────────────────────────────────────────
+
+      // ── Pessoal ──────────────────────────────────────────────────────────────
       case 'pessoal':
         return (
           <div>
@@ -209,17 +530,23 @@ function AnamneseForm({ paciente, initial, onSave, onCancel }) {
               <Field label="CPF">
                 <input placeholder="000.000.000-00" value={form.cpf} onChange={e => set('cpf', e.target.value)} style={inputSt} />
               </Field>
+              <Field label="E-mail">
+                <input type="email" placeholder="exemplo@email.com" value={form.email} onChange={e => set('email', e.target.value)} style={inputSt} />
+              </Field>
               <Field label="Estado Civil">
                 <select value={form.estadoCivil} onChange={e => set('estadoCivil', e.target.value)} style={inputSt}>
                   <option value="">Selecione...</option>
                   {['Solteira', 'Casada', 'Divorciada', 'Viúva', 'União Estável', 'Outro'].map(o => <option key={o}>{o}</option>)}
                 </select>
               </Field>
-              <Field label="Profissão">
+              <Field label="Profissão" span={2}>
                 <input placeholder="Ex: Professora" value={form.profissao} onChange={e => set('profissao', e.target.value)} style={inputSt} />
               </Field>
               <Field label="Endereço Completo" span={2}>
-                <input placeholder="Rua, número, bairro, cidade" value={form.endereco} onChange={e => set('endereco', e.target.value)} style={inputSt} />
+                <input placeholder="Rua, número, bairro" value={form.endereco} onChange={e => set('endereco', e.target.value)} style={inputSt} />
+              </Field>
+              <Field label="Cidade">
+                <input placeholder="Ex: São Paulo" value={form.cidade} onChange={e => set('cidade', e.target.value)} style={inputSt} />
               </Field>
             </div>
 
@@ -238,24 +565,64 @@ function AnamneseForm({ paciente, initial, onSave, onCancel }) {
         return (
           <div>
             <SectionHeader icon={Heart} title="Histórico de Saúde" color="#EF4444" bg="#FFF5F5" />
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 16 }}>
-              <RadioGroup label="Já fez cirurgia?" field="fezCirurgia" form={form} setForm={setForm} options={['Sim', 'Não']} />
-              <RadioGroup label="Usa marcapasso?" field="usaMarcapasso" form={form} setForm={setForm} options={['Sim', 'Não']} />
-              <RadioGroup label="Tem diabetes?" field="temDiabetes" form={form} setForm={setForm} options={['Sim', 'Não']} />
-              <RadioGroup label="Hipertensão?" field="temHipertensao" form={form} setForm={setForm} options={['Sim', 'Não']} />
-              <RadioGroup label="Cardiopatia?" field="temCardiopatia" form={form} setForm={setForm} options={['Sim', 'Não']} />
-              <RadioGroup label="Epilepsia?" field="temEpilepsia" form={form} setForm={setForm} options={['Sim', 'Não']} />
-              <RadioGroup label="Coagulopatia?" field="temCoagulopatia" form={form} setForm={setForm} options={['Sim', 'Não']} />
-              <RadioGroup label="Histórico oncológico?" field="temOncologico" form={form} setForm={setForm} options={['Sim', 'Não', 'Em tratamento']} />
+            <p style={{ fontSize: 11, color: '#9CA3AF', marginBottom: 12, fontStyle: 'italic' }}>Assinale SIM ou NÃO para cada condição:</p>
+
+            {/* Coluna 1 e 2 em grid */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 16px' }}>
+              <div>
+                <SaudeRow label="Sensibilidade nos olhos?" field="sensibilidadeOlhos" />
+                <SaudeRow label="Alergias?" field="alergias" />
+                <SaudeRow label="Alergia a picada de abelhas?" field="alergiaPicadaAbelha" />
+                <SaudeRow label="Problemas cardíacos?" field="problemasCardiacos" />
+                <SaudeRow label="Alterações de pressão?" field="alteracoesPressao" />
+                <SaudeRow label="Alterações vasculares?" field="alteracoesVasculares" />
+                <SaudeRow label="Diabetes?" field="diabetes" />
+                <SaudeRow label="Hérnia?" field="hernia" />
+                <SaudeRow label="Doença autoimune?" field="doencaAutoimune" />
+                <SaudeRow label="HIV ou Hepatite?" field="hivHepatite" />
+                <SaudeRow label="Doença crônica?" field="doencaCronica" />
+                <SaudeRow label="Colesterol alterado?" field="colesterol" />
+              </div>
+              <div>
+                <SaudeRow label="Problema renal?" field="problemaRenal" />
+                <SaudeRow label="Problemas neurológicos?" field="problemasNeurologicos" />
+                <SaudeRow label="Tumor?" field="tumor" />
+                <SaudeRow label="Problema de pele?" field="problemaDePele" />
+                <SaudeRow label="Fios de Ouro ou PMMA?" field="fiosDeOuroOuPMMA" />
+                <SaudeRow label="Queloide?" field="quelioide" />
+                <SaudeRow label="Prótese metálica?" field="proteseMetalica" />
+                <SaudeRow label="Alterações hormonais?" field="alteracoesHormonais" />
+                <SaudeRow label="Problemas na tireoide?" field="problemaTireoide" />
+                <SaudeRow label="Ovário policístico?" field="ovarioPolicistico" />
+                <SaudeRow label="Mioma?" field="mioma" />
+                <SaudeRow label="Endometriose?" field="endometriose" />
+              </div>
             </div>
 
+            {/* Segunda linha de condições */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 16px', marginTop: 4 }}>
+              <div>
+                <SaudeRow label="Depressão?" field="depressao" />
+                <SaudeRow label="Síndrome do pânico?" field="sindromeDopanico" />
+              </div>
+              <div>
+                <SaudeRow label="Procedimentos definitivos?" field="procedimentosDefinitivos" />
+                <SaudeRow label="Marcapasso?" field="usaMarcapasso" />
+              </div>
+            </div>
+
+            {/* Cirurgias */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 12, marginBottom: 8 }}>
+              <RadioGroup label="Já fez cirurgia?" field="fezCirurgia" form={form} setForm={setForm} options={['Sim', 'Não']} />
+              <RadioGroup label="Histórico oncológico?" field="temOncologico" form={form} setForm={setForm} options={['Sim', 'Não', 'Em tratamento']} />
+            </div>
             {form.fezCirurgia === 'Sim' && (
-              <Field label="Qual cirurgia?" span={2}>
+              <Field label="Qual cirurgia?">
                 <input placeholder="Descreva a cirurgia e quando foi realizada" value={form.qualCirurgia} onChange={e => set('qualCirurgia', e.target.value)} style={{ ...inputSt, marginBottom: 12 }} />
               </Field>
             )}
 
-            <Field label="Outras doenças ou condições relevantes" span={2}>
+            <Field label="Outras doenças ou condições relevantes">
               <textarea placeholder="Descreva..." value={form.outrasDoencas} onChange={e => set('outrasDoencas', e.target.value)} style={textareaSt} />
             </Field>
 
@@ -267,12 +634,12 @@ function AnamneseForm({ paciente, initial, onSave, onCancel }) {
               </div>
 
               {form.usaMedicamentos === 'Sim' && (
-                <Field label="Quais medicamentos?" span={2}>
+                <Field label="Quais medicamentos?">
                   <textarea placeholder="Liste os medicamentos em uso" value={form.quaisMedicamentos} onChange={e => set('quaisMedicamentos', e.target.value)} style={{ ...textareaSt, marginBottom: 12 }} />
                 </Field>
               )}
               {form.temAlergia === 'Sim' && (
-                <Field label="Quais alergias?" span={2}>
+                <Field label="Quais alergias?">
                   <textarea placeholder="Descreva as alergias conhecidas" value={form.quaisAlergias} onChange={e => set('quaisAlergias', e.target.value)} style={{ ...textareaSt, marginBottom: 12 }} />
                 </Field>
               )}
@@ -299,6 +666,7 @@ function AnamneseForm({ paciente, initial, onSave, onCancel }) {
               <RadioGroup label="Oleosidade" field="oleosidadePele" form={form} setForm={setForm} options={['Baixa', 'Moderada', 'Alta']} />
               <RadioGroup label="Usa protetor solar?" field="usaProtetor" form={form} setForm={setForm} options={['Sempre', 'Às vezes', 'Raramente', 'Nunca']} />
               <RadioGroup label="Exposição solar" field="exposicaoSolar" form={form} setForm={setForm} options={['Pouca', 'Moderada', 'Muita']} />
+              <RadioGroup label="Usa ou já usou ácidos na pele?" field="usaAcidos" form={form} setForm={setForm} options={['Sim', 'Não']} />
             </div>
 
             <Field label="Fotótipo de pele (Fitzpatrick)">
@@ -312,6 +680,16 @@ function AnamneseForm({ paciente, initial, onSave, onCancel }) {
                 <option value="VI">VI — Pele negra, nunca queima</option>
               </select>
             </Field>
+
+            {/* Cosméticos */}
+            <div style={{ marginBottom: 16 }}>
+              <RadioGroup label="Faz uso de cosméticos diariamente?" field="usaCosmeticos" form={form} setForm={setForm} options={['Sim', 'Não']} />
+              {form.usaCosmeticos === 'Sim' && (
+                <Field label="Quais cosméticos?">
+                  <textarea placeholder="Ex: hidratante, sérum, vitamina C..." value={form.quaisCosmeticos} onChange={e => set('quaisCosmeticos', e.target.value)} style={{ ...textareaSt, marginBottom: 8 }} />
+                </Field>
+              )}
+            </div>
 
             <div style={{ fontSize: 11, fontWeight: 700, color: '#6B7280', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 }}>Problemas de pele (marque os que se aplicam)</div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 20 }}>
@@ -336,42 +714,101 @@ function AnamneseForm({ paciente, initial, onSave, onCancel }) {
               <CheckItem label="Outro" checked={form.jaFezOutro} onChange={v => set('jaFezOutro', v)} />
             </div>
             {form.jaFezOutro && (
-              <Field label="Qual procedimento?" span={2}>
+              <Field label="Qual procedimento?">
                 <input placeholder="Descreva o procedimento" value={form.outroHistorico} onChange={e => set('outroHistorico', e.target.value)} style={{ ...inputSt, marginBottom: 12 }} />
               </Field>
             )}
+
+            {/* Resultado de tratamentos anteriores */}
+            {(form.jaFezBotox || form.jaFezPreenchimento || form.jaFezPeeling || form.jaFezLaser || form.jaFezMicroagulhamento || form.jaFezLimpezaPele || form.jaFezOutro) && (
+              <div style={{ marginBottom: 12 }}>
+                <RadioGroup label="Como foram os resultados dos tratamentos anteriores?" field="resultadoTratamentoAnterior" form={form} setForm={setForm} options={['Bons', 'Regulares', 'Ruins']} />
+              </div>
+            )}
+
             <RadioGroup label="Teve alguma reação adversa a procedimento estético?" field="reacaoAnterior" form={form} setForm={setForm} options={['Sim', 'Não']} />
             {form.reacaoAnterior === 'Sim' && (
-              <Field label="Descreva a reação" span={2}>
+              <Field label="Descreva a reação">
                 <textarea placeholder="O que aconteceu?" value={form.detalhesReacao} onChange={e => set('detalhesReacao', e.target.value)} style={textareaSt} />
               </Field>
             )}
           </div>
         );
 
-      // ── Hábitos ───────────────────────────────────────────────────────────
+      // ── Hábitos ──────────────────────────────────────────────────────────
       case 'habitos':
         return (
           <div>
-            <SectionHeader icon={Target} title="Hábitos e Estilo de Vida" color="#D97706" bg="#FFFBEB" />
+            {/* Rotina clínica */}
+            <SectionHeader icon={AlertTriangle} title="Rotina & Saúde Atual" color="#7C3AED" bg="#F5F3FF" />
+            <div style={{ marginBottom: 16 }}>
+              <SaudeRow label="Está em tratamento médico?" field="emTratamentoMedico" />
+              <SaudeRow label="Possui plano de saúde?" field="possuiPlanoSaude" />
+              <SaudeRow label="Tem algum problema de saúde atual?" field="problemaSaudeAtual" />
+              <SaudeRow label="Usou antibiótico ou anti-inflamatório nos últimos 7 dias?" field="usouAntibiotico7dias" />
+              <SaudeRow label="Usou isotretinoína (Roacutan) nos últimos 6 meses?" field="usouRoacutan6meses" />
+              <SaudeRow label="Já teve reação alérgica à anestesia?" field="reacaoAlergicaAnestesia" />
+              <SaudeRow label="Tomou vacina há menos de 6 meses?" field="tomouVacina6meses" />
+              <SaudeRow label="O intestino é regulado?" field="intestinoRegulado" />
+            </div>
+
+            {/* Histórico familiar */}
+            <div style={{ marginBottom: 14 }}>
+              <RadioGroup label="Histórico familiar de doenças?" field="historiFamiliarDoencas" form={form} setForm={setForm} options={['Sim', 'Não']} />
+              {form.historiFamiliarDoencas === 'Sim' && (
+                <Field label="Qual doença familiar?">
+                  <input placeholder="Ex: diabetes, câncer, hipertensão..." value={form.qualHistoricoFamiliar} onChange={e => set('qualHistoricoFamiliar', e.target.value)} style={{ ...inputSt, marginBottom: 8 }} />
+                </Field>
+              )}
+            </div>
+
+            {/* Anticoncepcional */}
+            <div style={{ marginBottom: 14 }}>
+              <RadioGroup label="Faz uso de método anticoncepcional?" field="usaAnticoncepcional" form={form} setForm={setForm} options={['Sim', 'Não']} />
+              {form.usaAnticoncepcional === 'Sim' && (
+                <Field label="Qual método?">
+                  <input placeholder="Ex: pílula, DIU, implante..." value={form.qualAnticoncepcional} onChange={e => set('qualAnticoncepcional', e.target.value)} style={{ ...inputSt, marginBottom: 8 }} />
+                </Field>
+              )}
+            </div>
+
+            {/* Suplementos */}
+            <div style={{ marginBottom: 16 }}>
+              <RadioGroup label="Faz uso de suplementos alimentares?" field="usaSuplemento" form={form} setForm={setForm} options={['Sim', 'Não']} />
+              {form.usaSuplemento === 'Sim' && (
+                <Field label="Quais suplementos?">
+                  <textarea placeholder="Ex: colágeno, vitamina C, ômega 3..." value={form.quaisSuplemento} onChange={e => set('quaisSuplemento', e.target.value)} style={{ ...textareaSt, marginBottom: 8 }} />
+                </Field>
+              )}
+            </div>
+
+            {/* Estilo de vida */}
+            <SectionHeader icon={Target} title="Estilo de Vida" color="#D97706" bg="#FFFBEB" />
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
               <RadioGroup label="Fuma?" field="fuma" form={form} setForm={setForm} options={['Sim', 'Não', 'Ex-fumante']} />
-              {form.fuma === 'Sim' && <RadioGroup label="Com que frequência?" field="frequenciaFuma" form={form} setForm={setForm} options={['Socialmente', 'Todo dia', 'Mais de 10 por dia']} />}
+              {form.fuma === 'Sim' && <RadioGroup label="Com que frequência?" field="frequenciaFuma" form={form} setForm={setForm} options={['Socialmente', 'Todo dia', 'Mais de 10/dia']} />}
               <RadioGroup label="Consome bebida alcoólica?" field="bebidaAlcoolica" form={form} setForm={setForm} options={['Sim', 'Não']} />
               {form.bebidaAlcoolica === 'Sim' && <RadioGroup label="Com que frequência?" field="frequenciaBebe" form={form} setForm={setForm} options={['Raramente', 'Fins de semana', 'Frequentemente']} />}
-              <RadioGroup label="Pratica atividade física?" field="atividade" form={form} setForm={setForm} options={['Sim', 'Não']} />
-              {form.atividade === 'Sim' && <RadioGroup label="Frequência" field="frequenciaAtividade" form={form} setForm={setForm} options={['1-2x/semana', '3-4x/semana', 'Todos os dias']} />}
-              <RadioGroup label="Como é sua alimentação?" field="alimentacao" form={form} setForm={setForm} options={['Saudável', 'Regular', 'Ruim']} />
-              <RadioGroup label="Ingere água suficiente?" field="ingereAgua" form={form} setForm={setForm} options={['Sim', 'Não', 'Às vezes']} />
+              <RadioGroup label="Pratica atividade física?" field="atividade" form={form} setForm={setForm} options={['Não pratico', '1-2x/semana', '3-5x/semana', 'Diariamente']} />
+              <RadioGroup label="Costuma tomar sol?" field="tomaSol" form={form} setForm={setForm} options={['Sim', 'Não', 'Às vezes']} />
+              <RadioGroup label="Consumo de água por dia" field="ingereAgua" form={form} setForm={setForm} options={['Menos de 1L', 'Entre 1 e 2L', 'Mais de 2L']} />
               <RadioGroup label="Qualidade do sono" field="qualidadeSono" form={form} setForm={setForm} options={['Boa', 'Regular', 'Ruim', 'Insônia']} />
+              <RadioGroup
+                label="Como descreveria sua alimentação?"
+                field="alimentacao"
+                form={form}
+                setForm={setForm}
+                options={['Equilibrada e saudável', 'Rica em açúcares/gorduras', 'Restritiva / Dieta específica']}
+              />
             </div>
           </div>
         );
 
-      // ── Objetivos + Termo ──────────────────────────────────────────────────
+      // ── Objetivos + Termo ─────────────────────────────────────────────────
       case 'objetivos':
         return (
           <div>
+            {/* ── Objetivos ── */}
             <SectionHeader icon={Target} title="Objetivos e Expectativas" color="#C73B6D" bg="#FDF4F7" />
             <div style={{ fontSize: 11, fontWeight: 700, color: '#6B7280', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 }}>Principais objetivos (marque os que se aplicam)</div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
@@ -379,29 +816,95 @@ function AnamneseForm({ paciente, initial, onSave, onCancel }) {
                 <CheckItem key={o} label={o} checked={(form.objetivosPrincipais || []).includes(o)} onChange={() => toggleArr('objetivosPrincipais', o)} />
               ))}
             </div>
-            <Field label="Descreva suas expectativas com o tratamento" span={2}>
+            <Field label="Descreva suas expectativas com o tratamento">
               <textarea placeholder="O que você espera alcançar?" value={form.expectativas} onChange={e => set('expectativas', e.target.value)} style={{ ...textareaSt, marginBottom: 14 }} />
             </Field>
-            <Field label="Como nos conheceu?">
-              <select value={form.comoConheceu} onChange={e => set('comoConheceu', e.target.value)} style={{ ...inputSt, marginBottom: 20 }}>
-                <option value="">Selecione...</option>
-                {['Instagram', 'Facebook', 'Google', 'Indicação de amigo/familiar', 'WhatsApp', 'Outdoor / Panfleto', 'Outro'].map(o => <option key={o}>{o}</option>)}
-              </select>
-            </Field>
 
-            <div style={{ background: '#F9FAFB', borderRadius: 12, padding: 16, border: '1px solid #E5E7EB', marginBottom: 16 }}>
-              <div style={{ fontSize: 13, fontWeight: 700, color: '#1F2937', marginBottom: 8 }}>Declaração e Consentimento</div>
-              <p style={{ fontSize: 12, color: '#6B7280', lineHeight: 1.6, marginBottom: 12 }}>
-                Declaro que as informações prestadas nesta ficha são verdadeiras e completas, e que fui devidamente orientada sobre os procedimentos a serem realizados, seus riscos, benefícios e cuidados pós-procedimento. Autorizo a realização dos serviços indicados pela profissional responsável, conforme meu conhecimento e consentimento.
-              </p>
-              <CheckItem
-                label="Li e concordo com os termos acima"
-                checked={form.leuTermos}
-                onChange={v => set('leuTermos', v)}
-              />
+            {/* ── Termo de Consentimento ── */}
+            <div style={{ marginBottom: 14 }}>
+              <SectionHeader icon={FileText} title="Termo de Consentimento" color="#7C3AED" bg="#F5F3FF" />
             </div>
 
-            <Field label="Observações do profissional" span={2}>
+            {!signatureData ? (
+              <div style={{
+                border: '2px dashed #C4B5FD', borderRadius: 16, padding: '28px 24px',
+                textAlign: 'center', background: '#FAFAFF', marginBottom: 20,
+              }}>
+                <div style={{ width: 52, height: 52, borderRadius: 14, background: '#F5F3FF', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 14px' }}>
+                  <FileText style={{ width: 24, height: 24, color: '#7C3AED' }} />
+                </div>
+                <div style={{ fontSize: 15, fontWeight: 700, color: '#1F2937', marginBottom: 6 }}>
+                  Termo de Consentimento Livre e Esclarecido
+                </div>
+                <div style={{ fontSize: 12.5, color: '#6B7280', marginBottom: 20, lineHeight: 1.5, maxWidth: 360, margin: '0 auto 20px' }}>
+                  Clique no botão abaixo para ler o termo na íntegra e assinar digitalmente.
+                </div>
+                <button
+                  onClick={() => setShowTermoModal(true)}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 9,
+                    padding: '12px 28px', borderRadius: 30, border: 'none', cursor: 'pointer',
+                    background: 'linear-gradient(135deg, #7C3AED, #5B21B6)',
+                    color: '#fff', fontSize: 14, fontWeight: 700,
+                    boxShadow: '0 6px 20px rgba(124,58,237,0.35)',
+                    transition: 'transform 0.15s, box-shadow 0.15s',
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = '0 10px 28px rgba(124,58,237,0.45)'; }}
+                  onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = '0 6px 20px rgba(124,58,237,0.35)'; }}
+                >
+                  <PenLine style={{ width: 17, height: 17 }} />
+                  Ler e Assinar o Termo
+                </button>
+              </div>
+            ) : (
+              <div style={{ background: '#F5F3FF', border: '2px solid #C4B5FD', borderRadius: 16, padding: 16, marginBottom: 20 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+                  <CheckCircle style={{ width: 18, height: 18, color: '#7C3AED' }} />
+                  <span style={{ fontSize: 13, fontWeight: 700, color: '#5B21B6' }}>Termo assinado com sucesso!</span>
+                  <button
+                    onClick={() => { setSignatureData(null); set('leuTermos', false); }}
+                    style={{ marginLeft: 'auto', fontSize: 11, color: '#7C3AED', background: 'none', border: '1px solid #C4B5FD', borderRadius: 20, padding: '3px 10px', cursor: 'pointer', fontWeight: 600 }}
+                  >
+                    Reassinar
+                  </button>
+                </div>
+                <div style={{ background: '#fff', borderRadius: 10, padding: 10, border: '1px solid #E5E7EB', marginBottom: 12 }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: '#6B7280', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 }}>Assinatura digital de {paciente.nome}</div>
+                  <img src={signatureData} alt="Assinatura" style={{ maxWidth: '100%', height: 80, objectFit: 'contain', display: 'block' }} />
+                </div>
+                <div style={{ background: '#ECFDF5', border: '1px solid #A7F3D0', borderRadius: 10, padding: '10px 14px' }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: '#166534', marginBottom: 3, textTransform: 'uppercase', letterSpacing: 0.5 }}>✅ Assinatura Digital Registrada</div>
+                  <div style={{ fontSize: 12, color: '#1F2937' }}>
+                    <strong>{paciente.nome}</strong> — confirmou ciência e consentimento em <strong>{new Date().toLocaleDateString('pt-BR')}</strong>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Status do Drive */}
+            {driveStatus === 'uploading' && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', background: '#F0F9FF', border: '1px solid #BAE6FD', borderRadius: 10, marginBottom: 12, fontSize: 12 }}>
+                <Loader2 style={{ width: 14, height: 14, color: '#0284C7', animation: 'spin 1s linear infinite' }} />
+                <span style={{ color: '#0369A1', fontWeight: 600 }}>Salvando termo no Google Drive...</span>
+              </div>
+            )}
+            {driveStatus === 'done' && driveLink && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', background: '#F0FDF4', border: '1px solid #BBF7D0', borderRadius: 10, marginBottom: 12, fontSize: 12 }}>
+                <CheckCircle style={{ width: 14, height: 14, color: '#16A34A' }} />
+                <span style={{ color: '#166534', fontWeight: 600 }}>Termo salvo no Google Drive!</span>
+                <a href={driveLink} target="_blank" rel="noreferrer" style={{ color: '#16A34A', marginLeft: 4 }}>Ver arquivo</a>
+              </div>
+            )}
+            {driveStatus === 'error' && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', background: '#FFF5F5', border: '1px solid #FCA5A5', borderRadius: 10, marginBottom: 12, fontSize: 12 }}>
+                <AlertTriangle style={{ width: 14, height: 14, color: '#EF4444' }} />
+                <span style={{ color: '#DC2626', fontWeight: 600 }}>Erro ao salvar no Drive. O termo foi salvo no sistema normalmente.</span>
+              </div>
+            )}
+
+            {/* Observações */}
+
+            <Field label="Observações do profissional">
               <textarea placeholder="Anotações internas (não visíveis ao cliente)..." value={form.observacoesProfissional} onChange={e => set('observacoesProfissional', e.target.value)} style={textareaSt} />
             </Field>
           </div>
@@ -411,8 +914,44 @@ function AnamneseForm({ paciente, initial, onSave, onCancel }) {
     }
   };
 
+
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      {/* Signature Modal */}
+      {showTermoModal && (
+        <SignatureModal
+          pacienteNome={paciente.nome}
+          onClose={() => setShowTermoModal(false)}
+          onConfirm={handleConfirmSignature}
+        />
+      )}
+      
+      {/* Preview Modal */}
+      {showPreview && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 9999,
+          background: 'rgba(15,15,30,0.72)',
+          backdropFilter: 'blur(6px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          padding: 16,
+        }}>
+          <div style={{
+            background: '#fff', borderRadius: 20, width: '100%', maxWidth: 800,
+            height: '92vh', display: 'flex', flexDirection: 'column',
+            boxShadow: '0 24px 80px rgba(0,0,0,0.35)',
+            overflow: 'hidden', padding: 24,
+          }}>
+            <ViewFicha
+              paciente={paciente}
+              ficha={form}
+              onClose={() => setShowPreview(false)}
+              onConfirmSave={handleSave}
+              isSaving={driveStatus === 'uploading'}
+            />
+          </div>
+        </div>
+      )}
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -476,9 +1015,31 @@ function AnamneseForm({ paciente, initial, onSave, onCancel }) {
           ? <button onClick={() => setStep(s => s + 1)} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '9px 18px', borderRadius: 10, border: 'none', background: 'linear-gradient(135deg,#C73B6D,#9B2C50)', fontSize: 13, fontWeight: 700, cursor: 'pointer', color: '#fff' }}>
             Próximo <ChevronRight style={{ width: 15, height: 15 }} />
           </button>
-          : <button onClick={handleSave} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '9px 18px', borderRadius: 10, border: 'none', background: 'linear-gradient(135deg,#059669,#047857)', fontSize: 13, fontWeight: 700, cursor: 'pointer', color: '#fff' }}>
-            <Save style={{ width: 14, height: 14 }} /> Finalizar e Salvar
-          </button>
+          : (
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+              {!form.leuTermos && (
+                <span style={{ fontSize: 11, color: '#EF4444', fontWeight: 600 }}>
+                  ⚠️ Leia e confirme o termo para continuar
+                </span>
+              )}
+              <button
+                onClick={() => setShowPreview(true)}
+                disabled={!form.leuTermos}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  padding: '9px 18px', borderRadius: 10, border: 'none',
+                  background: form.leuTermos ? 'linear-gradient(135deg,#059669,#047857)' : '#D1D5DB',
+                  fontSize: 13, fontWeight: 700,
+                  cursor: form.leuTermos ? 'pointer' : 'not-allowed',
+                  color: form.leuTermos ? '#fff' : '#9CA3AF',
+                  transition: 'all 0.2s',
+                  boxShadow: form.leuTermos ? '0 4px 14px rgba(5,150,105,0.35)' : 'none',
+                }}
+              >
+                <Eye style={{ width: 15, height: 15 }} /> Visualizar Resumo
+              </button>
+            </div>
+          )
         }
       </div>
     </div>
@@ -486,7 +1047,7 @@ function AnamneseForm({ paciente, initial, onSave, onCancel }) {
 }
 
 // ─── VIEW FICHA ───────────────────────────────────────────────────────────────
-function ViewFicha({ paciente, ficha, onEdit, onClose }) {
+function ViewFicha({ paciente, ficha, onEdit, onClose, onConfirmSave, isSaving }) {
   const Section = ({ title, children }) => (
     <div style={{ marginBottom: 20 }}>
       <div style={{ fontSize: 11, fontWeight: 700, color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8, paddingBottom: 6, borderBottom: '1px solid #F0EBE6' }}>{title}</div>
@@ -495,7 +1056,7 @@ function ViewFicha({ paciente, ficha, onEdit, onClose }) {
   );
   const Row = ({ label, value }) => value ? (
     <div style={{ display: 'flex', gap: 8, fontSize: 13, marginBottom: 6 }}>
-      <span style={{ color: '#9CA3AF', minWidth: 160 }}>{label}:</span>
+      <span style={{ color: '#9CA3AF', minWidth: 200 }}>{label}:</span>
       <span style={{ color: '#1F2937', fontWeight: 500 }}>{Array.isArray(value) ? value.join(', ') : value}</span>
     </div>
   ) : null;
@@ -516,9 +1077,27 @@ function ViewFicha({ paciente, ficha, onEdit, onClose }) {
           <button onClick={() => window.print()} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px', borderRadius: 10, border: '1px solid #E5E7EB', background: '#fff', fontSize: 12, fontWeight: 600, cursor: 'pointer', color: '#374151' }}>
             <Printer style={{ width: 14, height: 14 }} /> Imprimir
           </button>
-          <button onClick={onEdit} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px', borderRadius: 10, border: 'none', background: 'linear-gradient(135deg,#C73B6D,#9B2C50)', fontSize: 12, fontWeight: 700, cursor: 'pointer', color: '#fff' }}>
-            <Edit3 style={{ width: 14, height: 14 }} /> Editar
-          </button>
+          {onConfirmSave ? (
+            <button
+              onClick={onConfirmSave}
+              disabled={isSaving}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px', borderRadius: 10, border: 'none',
+                background: isSaving ? '#D1D5DB' : 'linear-gradient(135deg,#059669,#047857)',
+                fontSize: 12, fontWeight: 700, cursor: isSaving ? 'not-allowed' : 'pointer', color: '#fff',
+                boxShadow: isSaving ? 'none' : '0 3px 10px rgba(5,150,105,0.3)'
+              }}
+            >
+              {isSaving ? <Loader2 style={{ width: 14, height: 14, animation: 'spin 1s linear infinite' }} /> : <Save style={{ width: 14, height: 14 }} />}
+              {isSaving ? 'Salvando...' : 'Salvar Ficha'}
+            </button>
+          ) : (
+            onEdit && (
+              <button onClick={onEdit} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px', borderRadius: 10, border: 'none', background: 'linear-gradient(135deg,#C73B6D,#9B2C50)', fontSize: 12, fontWeight: 700, cursor: 'pointer', color: '#fff' }}>
+                <Edit3 style={{ width: 14, height: 14 }} /> Editar
+              </button>
+            )
+          )}
         </div>
       </div>
 
@@ -526,33 +1105,61 @@ function ViewFicha({ paciente, ficha, onEdit, onClose }) {
         <Section title="Dados Pessoais">
           <Row label="Nascimento" value={ficha.dataNascimento} />
           <Row label="CPF" value={ficha.cpf} />
+          <Row label="E-mail" value={ficha.email} />
           <Row label="Estado Civil" value={ficha.estadoCivil} />
           <Row label="Profissão" value={ficha.profissao} />
           <Row label="Endereço" value={ficha.endereco} />
+          <Row label="Cidade" value={ficha.cidade} />
           <Row label="Gestante" value={ficha.gestante} />
           <Row label="Amamentando" value={ficha.amamentando} />
         </Section>
-        <Section title="Saúde Geral">
-          <Row label="Cirurgia prévia" value={ficha.fezCirurgia === 'Sim' ? `Sim — ${ficha.qualCirurgia}` : ficha.fezCirurgia} />
+
+        <Section title="Histórico de Saúde">
+          <Row label="Sensibilidade nos olhos" value={ficha.sensibilidadeOlhos} />
+          <Row label="Alergias" value={ficha.alergias} />
+          <Row label="Alergia a picada de abelhas" value={ficha.alergiaPicadaAbelha} />
+          <Row label="Problemas cardíacos" value={ficha.problemasCardiacos} />
+          <Row label="Alterações de pressão" value={ficha.alteracoesPressao} />
+          <Row label="Alterações vasculares" value={ficha.alteracoesVasculares} />
+          <Row label="Diabetes" value={ficha.diabetes} />
+          <Row label="Hérnia" value={ficha.hernia} />
+          <Row label="Doença autoimune" value={ficha.doencaAutoimune} />
+          <Row label="HIV ou Hepatite" value={ficha.hivHepatite} />
+          <Row label="Doença crônica" value={ficha.doencaCronica} />
+          <Row label="Colesterol alterado" value={ficha.colesterol} />
+          <Row label="Problema renal" value={ficha.problemaRenal} />
+          <Row label="Problemas neurológicos" value={ficha.problemasNeurologicos} />
+          <Row label="Tumor" value={ficha.tumor} />
+          <Row label="Problema de pele (histórico)" value={ficha.problemaDePele} />
+          <Row label="Fios de Ouro ou PMMA" value={ficha.fiosDeOuroOuPMMA} />
+          <Row label="Queloide" value={ficha.quelioide} />
+          <Row label="Prótese metálica" value={ficha.proteseMetalica} />
+          <Row label="Alterações hormonais" value={ficha.alteracoesHormonais} />
+          <Row label="Problemas na tireoide" value={ficha.problemaTireoide} />
+          <Row label="Ovário policístico" value={ficha.ovarioPolicistico} />
+          <Row label="Mioma" value={ficha.mioma} />
+          <Row label="Endometriose" value={ficha.endometriose} />
+          <Row label="Depressão" value={ficha.depressao} />
+          <Row label="Síndrome do pânico" value={ficha.sindromeDopanico} />
+          <Row label="Procedimentos definitivos" value={ficha.procedimentosDefinitivos} />
           <Row label="Marcapasso" value={ficha.usaMarcapasso} />
-          <Row label="Diabetes" value={ficha.temDiabetes} />
-          <Row label="Hipertensão" value={ficha.temHipertensao} />
-          <Row label="Cardiopatia" value={ficha.temCardiopatia} />
-          <Row label="Epilepsia" value={ficha.temEpilepsia} />
-          <Row label="Coagulopatia" value={ficha.temCoagulopatia} />
+          <Row label="Cirurgia prévia" value={ficha.fezCirurgia === 'Sim' ? `Sim — ${ficha.qualCirurgia}` : ficha.fezCirurgia} />
           <Row label="Histórico oncológico" value={ficha.temOncologico} />
           <Row label="Outras condições" value={ficha.outrasDoencas} />
           <Row label="Medicamentos" value={ficha.usaMedicamentos === 'Sim' ? ficha.quaisMedicamentos : ficha.usaMedicamentos} />
-          <Row label="Alergias" value={ficha.temAlergia === 'Sim' ? ficha.quaisAlergias : ficha.temAlergia} />
+          <Row label="Alergias gerais" value={ficha.temAlergia === 'Sim' ? ficha.quaisAlergias : ficha.temAlergia} />
           {[ficha.alergiaLatex && 'Látex', ficha.alergiaIodo && 'Iodo', ficha.alergiaAnestesico && 'Anestésico', ficha.alergiaQuelante && 'Quelante'].filter(Boolean).length > 0 && (
             <Row label="Alergias específicas" value={[ficha.alergiaLatex && 'Látex', ficha.alergiaIodo && 'Iodo', ficha.alergiaAnestesico && 'Anestésico', ficha.alergiaQuelante && 'Quelante'].filter(Boolean)} />
           )}
         </Section>
+
         <Section title="Pele e Histórico Estético">
           <Row label="Tipo de pele" value={ficha.tipoPele} />
           <Row label="Sensibilidade" value={ficha.sensibilidadePele} />
           <Row label="Fotótipo" value={ficha.fototipoCampo} />
           <Row label="Usa protetor" value={ficha.usaProtetor} />
+          <Row label="Usa ou já usou ácidos" value={ficha.usaAcidos} />
+          <Row label="Usa cosméticos diariamente" value={ficha.usaCosmeticos === 'Sim' ? `Sim — ${ficha.quaisCosmeticos}` : ficha.usaCosmeticos} />
           <Row label="Problemas de pele" value={ficha.problemasPele} />
           <Row label="Procedimentos anteriores" value={[
             ficha.jaFezBotox && 'Botox', ficha.jaFezPreenchimento && 'Preenchimento',
@@ -560,22 +1167,37 @@ function ViewFicha({ paciente, ficha, onEdit, onClose }) {
             ficha.jaFezMicroagulhamento && 'Microagulhamento', ficha.jaFezLimpezaPele && 'Limpeza de Pele',
             ficha.jaFezOutro && ficha.outroHistorico
           ].filter(Boolean)} />
+          <Row label="Resultado dos tratamentos" value={ficha.resultadoTratamentoAnterior} />
           <Row label="Reação adversa" value={ficha.reacaoAnterior === 'Sim' ? `Sim — ${ficha.detalhesReacao}` : ficha.reacaoAnterior} />
         </Section>
-        <Section title="Hábitos">
+
+        <Section title="Rotina & Hábitos">
+          <Row label="Em tratamento médico" value={ficha.emTratamentoMedico} />
+          <Row label="Plano de saúde" value={ficha.possuiPlanoSaude} />
+          <Row label="Problema de saúde atual" value={ficha.problemaSaudeAtual} />
+          <Row label="Antibiótico/anti-inflam. (7 dias)" value={ficha.usouAntibiotico7dias} />
+          <Row label="Roacutan (6 meses)" value={ficha.usouRoacutan6meses} />
+          <Row label="Reação à anestesia" value={ficha.reacaoAlergicaAnestesia} />
+          <Row label="Vacina (6 meses)" value={ficha.tomouVacina6meses} />
+          <Row label="Intestino regulado" value={ficha.intestinoRegulado} />
+          <Row label="Histórico familiar" value={ficha.historiFamiliarDoencas === 'Sim' ? `Sim — ${ficha.qualHistoricoFamiliar}` : ficha.historiFamiliarDoencas} />
+          <Row label="Anticoncepcional" value={ficha.usaAnticoncepcional === 'Sim' ? `Sim — ${ficha.qualAnticoncepcional}` : ficha.usaAnticoncepcional} />
+          <Row label="Suplementos" value={ficha.usaSuplemento === 'Sim' ? `Sim — ${ficha.quaisSuplemento}` : ficha.usaSuplemento} />
           <Row label="Fuma" value={ficha.fuma === 'Sim' ? `Sim — ${ficha.frequenciaFuma}` : ficha.fuma} />
           <Row label="Bebida alcoólica" value={ficha.bebidaAlcoolica === 'Sim' ? `Sim — ${ficha.frequenciaBebe}` : ficha.bebidaAlcoolica} />
-          <Row label="Atividade física" value={ficha.atividade === 'Sim' ? `Sim — ${ficha.frequenciaAtividade}` : ficha.atividade} />
-          <Row label="Alimentação" value={ficha.alimentacao} />
-          <Row label="Ingere água" value={ficha.ingereAgua} />
+          <Row label="Atividade física" value={ficha.atividade} />
+          <Row label="Toma sol" value={ficha.tomaSol} />
+          <Row label="Consumo de água" value={ficha.ingereAgua} />
           <Row label="Qualidade do sono" value={ficha.qualidadeSono} />
+          <Row label="Alimentação" value={ficha.alimentacao} />
         </Section>
+
         <Section title="Objetivos e Expectativas">
           <Row label="Objetivos" value={ficha.objetivosPrincipais} />
           <Row label="Expectativas" value={ficha.expectativas} />
-          <Row label="Como conheceu" value={ficha.comoConheceu} />
           <Row label="Assinou termo" value={ficha.leuTermos ? '✅ Sim' : '❌ Não'} />
         </Section>
+
         {ficha.observacoesProfissional && (
           <Section title="Observações do Profissional">
             <div style={{ fontSize: 13, color: '#374151', background: '#FFFBEB', border: '1px solid #FDE68A', borderRadius: 10, padding: 12 }}>
@@ -597,6 +1219,8 @@ export default function Anamnese() {
   const [view, setView] = useState('list'); // 'list' | 'form' | 'view'
   const [selectedPaciente, setSelectedPaciente] = useState(null);
   const [isEditing, setIsEditing] = useState(false);
+  const [showTypeModal, setShowTypeModal] = useState(null);
+  const [initialTipoFicha, setInitialTipoFicha] = useState('');
 
   useEffect(() => {
     let cancelled = false;
@@ -625,27 +1249,35 @@ export default function Anamnese() {
   ), [pacientes, busca]);
 
   const handleSave = async (fichaData) => {
-    if (!selectedPaciente) return;
-    const existing = anamneses[String(selectedPaciente.id)];
-    const id = existing?.id || generateId();
-    const payload = mapAnamneseToSupabase(
-      { ...fichaData, id, clientId: selectedPaciente.id },
-      null
-    );
-    const user = await getCurrentUser();
-    if (user?.id) payload.user_id = user.id;
+    try {
+      if (!selectedPaciente) return;
+      const existing = anamneses[String(selectedPaciente.id)];
+      const id = existing?.id;
+      const payload = mapAnamneseToSupabase(
+        { ...fichaData, id, clientId: selectedPaciente.id },
+        null
+      );
+      const user = await getCurrentUser();
+      if (user?.id) payload.user_id = user.id;
 
-    const { data, error } = await upsertAnamnese(payload);
-    if (error) {
-      alert('Erro ao salvar ficha: ' + (error.message || error));
-      return;
+      console.log('Saving payload:', payload);
+
+      const { data, error } = await upsertAnamnese(payload);
+      if (error) {
+        console.error('Supabase error:', error);
+        alert('Erro ao salvar ficha: ' + (error.message || error));
+        return;
+      }
+      if (data) {
+        const saved = mapAnamneseFromSupabase(data);
+        setAnamneses(prev => ({ ...prev, [String(saved.clientId)]: saved }));
+      }
+      setView('view');
+      setIsEditing(false);
+    } catch (err) {
+      console.error('Catch error saving:', err);
+      alert('Erro interno ao salvar: ' + err.message);
     }
-    if (data) {
-      const saved = mapAnamneseFromSupabase(data);
-      setAnamneses(prev => ({ ...prev, [String(saved.clientId)]: saved }));
-    }
-    setView('view');
-    setIsEditing(false);
   };
 
   const handleDelete = async (pacienteId) => {
@@ -666,9 +1298,14 @@ export default function Anamnese() {
     });
   };
 
-  const openForm = (p, editing = false) => {
+  const openForm = (p, editing = false, tipoFicha = '') => {
     setSelectedPaciente(p);
     setIsEditing(editing);
+    if (!editing && tipoFicha) {
+      setInitialTipoFicha(tipoFicha);
+    } else {
+      setInitialTipoFicha('');
+    }
     setView('form');
   };
 
@@ -687,7 +1324,7 @@ export default function Anamnese() {
       <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 40px)', gap: 0 }}>
         <AnamneseForm
           paciente={selectedPaciente}
-          initial={isEditing ? ficha : null}
+          initial={isEditing ? ficha : { ...emptyForm(), tipoFicha: initialTipoFicha }}
           onSave={handleSave}
           onCancel={() => setView('list')}
         />
@@ -760,28 +1397,26 @@ export default function Anamnese() {
             Carregando pacientes...
           </div>
         ) : filtered.length === 0 ? (
-          <div style={{ textAlign: 'center', padding: 40, color: '#9CA3AF', fontSize: 14 }}>Nenhum paciente encontrado.</div>
+          <div style={{ textAlign: 'center', padding: 40, color: '#9CA3AF', fontSize: 14 }}>
+            Nenhum paciente encontrado.
+          </div>
         ) : filtered.map(p => {
-          const key = String(p.id);
-          const temFicha = !!anamneses[key];
-          const ficha = anamneses[key];
+          const temFicha = !!anamneses[String(p.id)];
           return (
-            <div key={p.id} style={{ background: '#fff', borderRadius: 14, padding: '14px 18px', border: '1px solid #F0EBE6', boxShadow: '0 1px 4px rgba(0,0,0,0.04)', display: 'flex', alignItems: 'center', gap: 14 }}>
+            <div key={p.id} style={{
+              display: 'flex', alignItems: 'center', gap: 12,
+              background: '#fff', borderRadius: 14, padding: '12px 16px',
+              border: '1px solid #F0EBE6', boxShadow: '0 1px 4px rgba(0,0,0,0.04)',
+            }}>
               {/* Avatar */}
-              <div style={{ width: 42, height: 42, borderRadius: '50%', background: 'linear-gradient(135deg,#C73B6D,#9B2C50)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, fontWeight: 700, flexShrink: 0 }}>
-                {(p.avatar || p.nome?.charAt(0) || '?')}
+              <div style={{ width: 40, height: 40, borderRadius: '50%', background: temFicha ? '#ECFDF5' : '#FDF4F7', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, fontWeight: 700, color: temFicha ? '#059669' : '#C73B6D', flexShrink: 0 }}>
+                {p.avatar}
               </div>
 
               {/* Info */}
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 14, fontWeight: 700, color: '#1F2937' }}>{p.nome}</div>
-                <div style={{ fontSize: 11, color: '#9CA3AF', marginTop: 1 }}>{p.telefone}</div>
-                {temFicha && ficha?.dataPreenchimento && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 3 }}>
-                    <Calendar style={{ width: 10, height: 10, color: '#059669' }} />
-                    <span style={{ fontSize: 10, color: '#059669', fontWeight: 600 }}>Preenchida em {ficha.dataPreenchimento}</span>
-                  </div>
-                )}
+                <div style={{ fontSize: 14, fontWeight: 700, color: '#1F2937', marginBottom: 2 }}>{p.nome}</div>
+                <div style={{ fontSize: 12, color: '#9CA3AF' }}>{p.telefone || '—'}</div>
               </div>
 
               {/* Status badge */}
@@ -814,7 +1449,7 @@ export default function Anamnese() {
                   </>
                 )}
                 <button
-                  onClick={() => openForm(p, temFicha)}
+                  onClick={() => temFicha ? openForm(p, true) : setShowTypeModal(p)}
                   style={{
                     display: 'flex', alignItems: 'center', gap: 5,
                     padding: '7px 14px', borderRadius: 10, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 700,
@@ -829,6 +1464,38 @@ export default function Anamnese() {
           );
         })}
       </div>
+
+      {/* Type Selection Modal */}
+      {showTypeModal && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 999, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ background: '#fff', borderRadius: 16, width: '100%', maxWidth: 400, padding: 24, boxShadow: '0 20px 25px -5px rgba(0,0,0,0.1)' }}>
+            <div style={{ fontSize: 18, fontWeight: 700, color: '#1F2937', marginBottom: 16 }}>Selecione o tipo de Ficha</div>
+            <p style={{ fontSize: 13, color: '#6B7280', marginBottom: 20 }}>Escolha o objetivo principal da ficha de anamnese para este paciente.</p>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {['Ficha Facial', 'Ficha Corporal', 'Ficha Capilar', 'Outros'].map(tipo => (
+                <button
+                  key={tipo}
+                  onClick={() => {
+                    openForm(showTypeModal, false, tipo);
+                    setShowTypeModal(null);
+                  }}
+                  style={{ padding: '14px 16px', borderRadius: 12, border: '1px solid #E5E7EB', background: '#FAFAFA', fontSize: 14, fontWeight: 600, color: '#374151', cursor: 'pointer', textAlign: 'left', display: 'flex', alignItems: 'center', justifyContent: 'space-between', transition: 'all 0.2s' }}
+                  onMouseEnter={e => e.currentTarget.style.borderColor = '#C73B6D'}
+                  onMouseLeave={e => e.currentTarget.style.borderColor = '#E5E7EB'}
+                >
+                  {tipo}
+                  <ChevronRight style={{ width: 16, height: 16, color: '#9CA3AF' }} />
+                </button>
+              ))}
+            </div>
+
+            <button onClick={() => setShowTypeModal(null)} style={{ marginTop: 20, width: '100%', padding: '12px', borderRadius: 12, border: 'none', background: '#F3F4F6', color: '#4B5563', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>
+              Cancelar
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
