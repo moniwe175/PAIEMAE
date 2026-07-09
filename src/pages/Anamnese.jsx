@@ -346,19 +346,19 @@ function SignatureModal({ pacienteNome, onClose, onConfirm }) {
             Declaro ter sido informado(a) de forma clara e detalhada sobre o procedimento estético a ser realizado, incluindo os produtos, equipamentos e técnicas que serão utilizados. Fui devidamente instruído(a) sobre as indicações, contraindicações, resultados esperados e possíveis riscos inerentes ao procedimento.
           </p>
           <p style={{ marginBottom: 12 }}>
-            <strong>1. RESPONSABILIDADES DO PACIENTE</strong><br/>
+            <strong>1. RESPONSABILIDADES DO PACIENTE</strong><br />
             Comprometo-me a seguir estritamente todas as orientações pré e pós-procedimento fornecidas pela profissional responsável, estando ciente de que o não cumprimento dessas recomendações pode interferir diretamente no resultado final ou causar complicações e efeitos adversos.
           </p>
           <p style={{ marginBottom: 12 }}>
-            <strong>2. RESULTADOS</strong><br/>
+            <strong>2. RESULTADOS</strong><br />
             Estou ciente de que a estética não é uma ciência exata e que os resultados dependem de características anatômicas, biológicas e dos hábitos de vida individuais. Portanto, não é possível garantir resultados absolutos ou idênticos aos de outros pacientes.
           </p>
           <p style={{ marginBottom: 12 }}>
-            <strong>3. INTERCORRÊNCIAS E REAÇÕES</strong><br/>
+            <strong>3. INTERCORRÊNCIAS E REAÇÕES</strong><br />
             Compreendo que, embora as técnicas utilizadas sejam comprovadamente seguras, procedimentos estéticos estão sujeitos a intercorrências imprevistas, tais como inchaço, vermelhidão, hematomas temporários ou sensibilidade local. Em caso de reações anormais, comprometo-me a entrar em contato imediato com a profissional responsável.
           </p>
           <p style={{ marginBottom: 12 }}>
-            <strong>4. VERACIDADE DAS INFORMAÇÕES</strong><br/>
+            <strong>4. VERACIDADE DAS INFORMAÇÕES</strong><br />
             Atesto que as informações fornecidas por mim nesta ficha de anamnese são verdadeiras e completas. Não omiti nenhuma doença pré-existente, uso de medicamentos ou histórico de alergias que pudessem contraindicar a realização do tratamento.
           </p>
           <p style={{ marginBottom: 20 }}>
@@ -440,7 +440,7 @@ function AnamneseForm({ paciente, initial, onSave, onCancel }) {
   const [step, setStep] = useState(0);
   const [showPreview, setShowPreview] = useState(false);
   const [showTermoModal, setShowTermoModal] = useState(false);
-  const [signatureData, setSignatureData] = useState(null); // base64 png
+  const [signatureData, setSignatureData] = useState(() => initial?.signatureDataUrl || null); // base64 png
   const [driveStatus, setDriveStatus] = useState('idle'); // 'idle'|'uploading'|'done'|'error'
   const [driveLink, setDriveLink] = useState(null);
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
@@ -451,6 +451,7 @@ function AnamneseForm({ paciente, initial, onSave, onCancel }) {
 
   const handleConfirmSignature = (dataUrl) => {
     setSignatureData(dataUrl);
+    set('signatureDataUrl', dataUrl);
     set('leuTermos', true);
     setShowTermoModal(false);
   };
@@ -862,7 +863,7 @@ function AnamneseForm({ paciente, initial, onSave, onCancel }) {
                   <CheckCircle style={{ width: 18, height: 18, color: '#7C3AED' }} />
                   <span style={{ fontSize: 13, fontWeight: 700, color: '#5B21B6' }}>Termo assinado com sucesso!</span>
                   <button
-                    onClick={() => { setSignatureData(null); set('leuTermos', false); }}
+                    onClick={() => { setSignatureData(null); set('signatureDataUrl', null); set('leuTermos', false); }}
                     style={{ marginLeft: 'auto', fontSize: 11, color: '#7C3AED', background: 'none', border: '1px solid #C4B5FD', borderRadius: 20, padding: '3px 10px', cursor: 'pointer', fontWeight: 600 }}
                   >
                     Reassinar
@@ -926,7 +927,7 @@ function AnamneseForm({ paciente, initial, onSave, onCancel }) {
           onConfirm={handleConfirmSignature}
         />
       )}
-      
+
       {/* Preview Modal */}
       {showPreview && (
         <div style={{
@@ -1196,6 +1197,12 @@ function ViewFicha({ paciente, ficha, onEdit, onClose, onConfirmSave, isSaving }
           <Row label="Objetivos" value={ficha.objetivosPrincipais} />
           <Row label="Expectativas" value={ficha.expectativas} />
           <Row label="Assinou termo" value={ficha.leuTermos ? '✅ Sim' : '❌ Não'} />
+          {ficha.signatureDataUrl && (
+            <div style={{ marginTop: 12 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: '#6B7280', marginBottom: 4, textTransform: 'uppercase' }}>Assinatura do Paciente</div>
+              <img src={ficha.signatureDataUrl} alt="Assinatura" style={{ maxWidth: '100%', height: 80, objectFit: 'contain', display: 'block', borderRadius: 8, border: '1px solid #E5E7EB', padding: 4, background: '#fff' }} />
+            </div>
+          )}
         </Section>
 
         {ficha.observacoesProfissional && (

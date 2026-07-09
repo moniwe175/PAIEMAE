@@ -1,53 +1,39 @@
 """
-main.py
-Orquestrador principal. Inicializa a sessão do WhatsApp (QR Code
-persistente) e agenda a execução periódica do MarketingEngine.
+main.py — Marketing Engine v2
+==============================
+Orquestrador com APScheduler. Roda o ciclo das 19 ferramentas
+a cada N minutos, configurável via variável de ambiente.
+
+Como rodar:
+    python main.py
+
+Como rodar em produção (Railway ou servidor):
+    gunicorn não é necessário — este é um worker background, não HTTP.
+    Configure como "Background Worker" no Railway apontando para este arquivo.
 """
 import logging
 from datetime import datetime
 
 from apscheduler.schedulers.blocking import BlockingScheduler
+from supabase import create_client
 
 from config.settings import settings
-from engine.database import get_client
 from engine.marketing_engine import MarketingEngine
-from engine.whatsapp import WhatsAppConnector
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
 )
 logger = logging.getLogger("main")
 
 
-def print_qr_to_terminal(qr_base64: str):
-    """
-    Chamado apenas se NÃO houver sessão WhatsApp persistida ainda.
-    Em produção, troque por: salvar como PNG e exibir num painel admin,
-    ou enviar para o Telegram/Slack da pessoa responsável pela clínica.
-    """
-    print("\n>>> Escaneie o QR Code abaixo no WhatsApp da clínica <<<\n")
-    print(qr_base64[:80] + "... (base64 truncado para o terminal)")
-
-
-def bootstrap() -> MarketingEngine:
-    db = get_client()
-
-    if settings.DRY_RUN:
-        logger.info(
-            "DRY_RUN ativo — pulando conexão com WhatsApp, "
-            "wppconnect-server não é necessário ainda."
-        )
-        whatsapp = WhatsAppConnector()  # objeto criado, mas sem start_session()
-    else:
-        whatsapp = WhatsAppConnector()
-        whatsapp.start_session(wait_qr_callback=print_qr_to_terminal)
-
-    return MarketingEngine(db_client=db, whatsapp=whatsapp)
-
-
 def main():
-    engine = bootstrap()
+    if not settings.SUPABASE_URL or not settings.SUPABASE_KEY:
+        raise RuntimeError("SUPABASE_URL e SUPABASE_SERVICE_KEY não configurados. Confira o .env")
+
+    db      = create_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
+    engine  = MarketingEngine(db)
 
     scheduler = BlockingScheduler(timezone=settings.TIMEZONE)
     scheduler.add_job(
@@ -55,13 +41,13 @@ def main():
         trigger="interval",
         minutes=settings.SCHEDULER_INTERVAL_MINUTES,
         id="marketing_cycle",
-        next_run_time=datetime.now(),  # roda uma vez imediatamente na subida
+        next_run_time=datetime.now(),  # roda imediatamente ao subir
     )
 
     logger.info(
-        "MarketingEngine no ar. Ciclo a cada %d minuto(s). DRY_RUN=%s",
+        "Marketing Engine v2 iniciado. Ciclo a cada %d min. Supabase: %s",
         settings.SCHEDULER_INTERVAL_MINUTES,
-        settings.DRY_RUN,
+        settings.SUPABASE_URL,
     )
     scheduler.start()
 
