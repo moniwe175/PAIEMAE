@@ -129,7 +129,7 @@ export default function Integration() {
           .from('whatsapp_connection_status')
           .select('*')
           .eq('id', 1)
-          .maybeSingle();
+          .single();
         
         if (error) throw error;
         if (active && data) {
@@ -773,11 +773,10 @@ export default function Integration() {
                       fontSize: 10,
                     }}
                   >
-                    {!waStatus && 'Conectando'}
                     {waStatus?.status === 'connected' && 'Conectado'}
                     {waStatus?.status === 'connecting' && 'Conectando'}
                     {waStatus?.status === 'qr_ready' && 'QR Code Pronto'}
-                    {waStatus?.status === 'disconnected' && 'Desconectado'}
+                    {(!waStatus || waStatus?.status === 'disconnected') && 'Desconectado'}
                     {waStatus?.status === 'error' && 'Erro'}
                   </span>
                 </div>
@@ -796,11 +795,8 @@ export default function Integration() {
 
                 {waStatus?.status === 'connecting' && (
                   <div>
-                    <p style={{ fontSize: 13, color: 'var(--text-medium)', lineHeight: 1.6, margin: '0 0 10px' }}>
+                    <p style={{ fontSize: 13, color: 'var(--text-medium)', lineHeight: 1.6, margin: '0' }}>
                       Conectando...
-                    </p>
-                    <p style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.5, margin: 0 }}>
-                      Tentando estabelecer comunicação com o WhatsApp. Aguarde um instante.
                     </p>
                   </div>
                 )}
@@ -854,7 +850,7 @@ export default function Integration() {
                       Número: {waStatus.phone_number}
                     </p>
                     <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: 0 }}>
-                      Conexão gerenciada pelo worker local. Para desconectar, encerre o worker.
+                      Para desconectar, encerre o worker no computador da clínica.
                     </p>
                   </div>
                 )}
