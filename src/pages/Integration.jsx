@@ -647,44 +647,43 @@ export default function Integration() {
                 {/* Icon */}
                 <div style={{
                   width: 48, height: 48, borderRadius: 12,
-                  background: engineEnabled ? '#2ECC7118' : '#FF9AA218',
+                  background: engineEnabled ? '#2ECC7118' : '#e0e0e0',
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                   flexShrink: 0,
                 }}>
-                  <Zap style={{ width: 22, height: 22, color: engineEnabled ? 'var(--success)' : '#FF9AA2' }} />
+                  <Zap style={{ width: 22, height: 22, color: engineEnabled ? 'var(--success)' : '#7f8c8d' }} />
                 </div>
 
                 {/* Text block */}
                 <div style={{ flex: 1 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
                     <span style={{ fontWeight: 700, fontSize: 15, color: 'var(--text-dark)' }}>
-                      Marketing Automático (WhatsApp)
+                      Motor de Marketing
                     </span>
                     <span
                       className="badge"
                       style={{
-                        background: engineEnabled ? 'var(--success-bg)' : 'var(--danger-bg)',
-                        color: engineEnabled ? 'var(--success)' : 'var(--danger)',
+                        background: engineEnabled ? 'var(--success-bg)' : '#e0e0e0',
+                        color: engineEnabled ? 'var(--success)' : '#7f8c8d',
                         fontSize: 10,
                       }}
                     >
                       {engineEnabled
                         ? <><CheckCircle style={{ width: 10, height: 10 }} />Ativo</>
-                        : <><XCircle style={{ width: 10, height: 10 }} />Desativado</>
+                        : <><XCircle style={{ width: 10, height: 10 }} />Pausado</>
                       }
                     </span>
                   </div>
 
-                  <p style={{ fontSize: 13, color: 'var(--text-medium)', lineHeight: 1.6, margin: '0 0 10px' }}>
-                    Controla o motor Python que roda no Railway. Quando <strong>desativado</strong>,
-                    o ciclo do scheduler pula todas as ferramentas (aniversário, reaquecimento, no-show, etc.)
-                    sem enviar nenhuma mensagem.
-                  </p>
-
-                  <p style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.5, margin: '0 0 14px' }}>
-                    Mudanças entram em vigor no próximo ciclo do motor (a cada 30 minutos),
-                    não interrompe instantaneamente um ciclo já em andamento.
-                  </p>
+                  {engineEnabled ? (
+                    <p style={{ fontSize: 13, color: 'var(--text-medium)', lineHeight: 1.6, margin: '0 0 10px' }}>
+                      O motor está processando as 19 ferramentas automaticamente.
+                    </p>
+                  ) : (
+                    <p style={{ fontSize: 13, color: 'var(--text-medium)', lineHeight: 1.6, margin: '0 0 10px' }}>
+                      O motor está pausado. Inicie o processo main.py no computador da clínica para ativar.
+                    </p>
+                  )}
 
                   {engineUpdatedAt && (
                     <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 12 }}>
@@ -738,16 +737,16 @@ export default function Integration() {
                 width: 48, height: 48, borderRadius: 12,
                 background: 
                   waStatus?.status === 'connected' ? '#2ECC7118' :
-                  waStatus?.status === 'connecting' ? '#3498db18' :
+                  waStatus?.status === 'connecting' ? '#F39C1218' :
                   waStatus?.status === 'qr_ready' ? '#F39C1218' :
-                  '#FF9AA218',
+                  '#e0e0e0',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                 flexShrink: 0,
               }}>
                 {waStatus?.status === 'connected' && <CheckCircle style={{ width: 22, height: 22, color: 'var(--success)' }} />}
-                {waStatus?.status === 'connecting' && <Loader2 style={{ width: 22, height: 22, color: '#3498db', animation: 'spin 1s linear infinite' }} />}
+                {waStatus?.status === 'connecting' && <Loader2 style={{ width: 22, height: 22, color: '#F39C12', animation: 'spin 1s linear infinite' }} />}
                 {waStatus?.status === 'qr_ready' && <Clock style={{ width: 22, height: 22, color: '#F39C12' }} />}
-                {(!waStatus || waStatus?.status === 'disconnected') && <WifiOff style={{ width: 22, height: 22, color: '#FF9AA2' }} />}
+                {(!waStatus || waStatus?.status === 'disconnected') && <WifiOff style={{ width: 22, height: 22, color: '#7f8c8d' }} />}
                 {waStatus?.status === 'error' && <AlertTriangle style={{ width: 22, height: 22, color: '#FF9AA2' }} />}
               </div>
 
@@ -762,20 +761,22 @@ export default function Integration() {
                     style={{
                       background: 
                         waStatus?.status === 'connected' ? 'var(--success-bg)' :
-                        waStatus?.status === 'connecting' ? '#3498db1d' :
+                        waStatus?.status === 'connecting' ? '#F39C121d' :
                         waStatus?.status === 'qr_ready' ? '#F39C121d' :
+                        waStatus?.status === 'error' ? 'var(--danger-bg)' :
                         'var(--danger-bg)',
                       color: 
                         waStatus?.status === 'connected' ? 'var(--success)' :
-                        waStatus?.status === 'connecting' ? '#3498db' :
+                        waStatus?.status === 'connecting' ? '#F39C12' :
                         waStatus?.status === 'qr_ready' ? '#F39C12' :
+                        waStatus?.status === 'error' ? 'var(--danger)' :
                         'var(--danger)',
                       fontSize: 10,
                     }}
                   >
-                    {waStatus?.status === 'connected' && 'Conectado'}
-                    {waStatus?.status === 'connecting' && 'Conectando'}
-                    {waStatus?.status === 'qr_ready' && 'QR Code Pronto'}
+                    {waStatus?.status === 'connected' && 'Conectado ✅'}
+                    {waStatus?.status === 'connecting' && 'Conectando...'}
+                    {waStatus?.status === 'qr_ready' && 'Aguardando escaneamento'}
                     {(!waStatus || waStatus?.status === 'disconnected') && 'Desconectado'}
                     {waStatus?.status === 'error' && 'Erro'}
                   </span>
@@ -787,8 +788,13 @@ export default function Integration() {
                     <p style={{ fontSize: 13, color: 'var(--text-medium)', lineHeight: 1.6, margin: '0 0 10px' }}>
                       WhatsApp desconectado
                     </p>
+                    <div style={{ background: '#f8f9fa', padding: '12px 16px', borderRadius: 6, border: '1px solid #e2e8f0', marginBottom: 10 }}>
+                      <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-dark)', margin: '0 0 6px' }}>
+                        Para conectar: abra o terminal no computador da clínica, entre na pasta worker_whatsapp e execute: npm start
+                      </p>
+                    </div>
                     <p style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.5, margin: 0 }}>
-                      Inicie o worker no computador da clínica para conectar
+                      Após iniciar o worker, o QR Code aparecerá aqui automaticamente.
                     </p>
                   </div>
                 )}
@@ -796,18 +802,18 @@ export default function Integration() {
                 {waStatus?.status === 'connecting' && (
                   <div>
                     <p style={{ fontSize: 13, color: 'var(--text-medium)', lineHeight: 1.6, margin: '0' }}>
-                      Conectando...
+                      Iniciando a conexão com o WhatsApp...
                     </p>
                   </div>
                 )}
 
                 {waStatus?.status === 'qr_ready' && (
                   <div>
-                    <p style={{ fontSize: 13, color: 'var(--text-medium)', fontWeight: 600, margin: '0 0 4px' }}>
-                      Escaneie o QR Code com o WhatsApp da clínica
+                    <p style={{ fontSize: 16, color: 'var(--text-dark)', fontWeight: 700, margin: '0 0 8px' }}>
+                      📱 Escaneie o QR Code agora
                     </p>
-                    <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '0 0 16px' }}>
-                      WhatsApp → Configurações → Aparelhos conectados → Conectar um aparelho
+                    <p style={{ fontSize: 13, color: 'var(--text-medium)', margin: '0 0 16px' }}>
+                      No celular da clínica: WhatsApp → ⋮ → Aparelhos conectados → Conectar um aparelho
                     </p>
                     
                     {/* QR Code Card/Box with border and slightly different background */}
@@ -826,7 +832,7 @@ export default function Integration() {
                         <img 
                           src={waStatus.qr_code_base64} 
                           alt="QR Code WhatsApp" 
-                          style={{ width: 220, height: 220, display: 'block' }} 
+                          style={{ width: 220, height: 220, display: 'block', margin: '16px auto' }} 
                         />
                       ) : (
                         <div style={{ width: 220, height: 220, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -836,30 +842,24 @@ export default function Integration() {
                     </div>
 
                     <p style={{ fontSize: 12, color: '#E6A800', fontWeight: 600, margin: 0 }}>
-                      ⚠️ O QR Code expira em 60 segundos. Se expirar, reinicie o worker.
+                      ⚠️ O QR Code expira em 60 segundos. Se expirar, o worker vai gerar um novo automaticamente.
                     </p>
                   </div>
                 )}
 
                 {waStatus?.status === 'connected' && (
                   <div>
-                    <p style={{ fontSize: 13, color: 'var(--text-medium)', fontWeight: 600, margin: '0 0 6px' }}>
-                      WhatsApp conectado ✅
-                    </p>
                     <p style={{ fontSize: 13, color: 'var(--text-dark)', fontWeight: 700, margin: '0 0 10px' }}>
-                      Número: {waStatus.phone_number}
+                      Número ativo: {waStatus.phone_number}
                     </p>
                     <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: 0 }}>
-                      Para desconectar, encerre o worker no computador da clínica.
+                      Conexão estável. O worker está rodando no computador da clínica.
                     </p>
                   </div>
                 )}
 
                 {waStatus?.status === 'error' && (
                   <div>
-                    <p style={{ fontSize: 13, color: 'var(--text-medium)', fontWeight: 600, margin: '0 0 6px', color: 'var(--danger)' }}>
-                      Erro na conexão
-                    </p>
                     {waStatus.error_message && (
                       <div style={{
                         background: 'var(--danger-bg)', border: '1px solid #FF9AA2',

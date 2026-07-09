@@ -7,9 +7,8 @@ a cada N minutos, configurável via variável de ambiente.
 Como rodar:
     python main.py
 
-Como rodar em produção (Railway ou servidor):
-    gunicorn não é necessário — este é um worker background, não HTTP.
-    Configure como "Background Worker" no Railway apontando para este arquivo.
+Como rodar no computador da clínica:
+    Este script deve ser executado no background (terminal).
 """
 import logging
 from datetime import datetime
