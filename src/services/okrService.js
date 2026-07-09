@@ -1,194 +1,211 @@
-import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { supabase } from '../lib/supabase';
 
-function handleError(error, fallback = null) {
-  console.warn('[OKR Service]', error?.message || error);
-  return { data: fallback, error: error?.message || error };
-}
+// ─── CYCLES ─────────────────────────────────────────────────────────────────
 
-// ─── Ciclos OKR ──────────────────────────────────────────────
-
-export async function fetchCiclos() {
-  if (!isSupabaseConfigured()) return handleError('Supabase not configured', []);
+export async function fetchCycles() {
   const { data, error } = await supabase
-    .from('ciclos_okr')
+    .from('okr_cycles')
     .select('*')
-    .order('data_inicio', { ascending: false });
-  if (error) return handleError(error, []);
-  return { data: data || [], error: null };
+    .order('start_date', { ascending: false });
+  if (error) {
+    console.error('Error fetching okr_cycles:', error);
+    return [];
+  }
+  return data;
 }
 
-export async function insertCiclo(ciclo) {
-  if (!isSupabaseConfigured()) return handleError('Supabase not configured');
-  const { data, error } = await supabase.from('ciclos_okr').insert([ciclo]).select().single();
-  if (error) return handleError(error);
-  return { data, error: null };
-}
-
-export async function updateCiclo(id, updates) {
-  if (!isSupabaseConfigured()) return handleError('Supabase not configured');
-  const { data, error } = await supabase.from('ciclos_okr').update(updates).eq('id', id).select().single();
-  if (error) return handleError(error);
-  return { data, error: null };
-}
-
-export async function deleteCiclo(id) {
-  if (!isSupabaseConfigured()) return handleError('Supabase not configured');
-  const { error } = await supabase.from('ciclos_okr').delete().eq('id', id);
-  if (error) return handleError(error);
-  return { error: null };
-}
-
-// ─── Objetivos ───────────────────────────────────────────────
-
-export async function fetchObjetivos(cicloId) {
-  if (!isSupabaseConfigured()) return handleError('Supabase not configured', []);
-  let query = supabase.from('objetivos').select('*, key_results(*)').order('ordem', { ascending: true });
-  if (cicloId) query = query.eq('ciclo_id', cicloId);
-  const { data, error } = await query;
-  if (error) return handleError(error, []);
-  return { data: data || [], error: null };
-}
-
-export async function insertObjetivo(obj) {
-  if (!isSupabaseConfigured()) return handleError('Supabase not configured');
-  const { data, error } = await supabase.from('objetivos').insert([obj]).select().single();
-  if (error) return handleError(error);
-  return { data, error: null };
-}
-
-export async function updateObjetivo(id, updates) {
-  if (!isSupabaseConfigured()) return handleError('Supabase not configured');
-  const { data, error } = await supabase.from('objetivos').update(updates).eq('id', id).select().single();
-  if (error) return handleError(error);
-  return { data, error: null };
-}
-
-export async function deleteObjetivo(id) {
-  if (!isSupabaseConfigured()) return handleError('Supabase not configured');
-  const { error } = await supabase.from('objetivos').delete().eq('id', id);
-  if (error) return handleError(error);
-  return { error: null };
-}
-
-// ─── Key Results ─────────────────────────────────────────────
-
-export async function fetchKeyResults(objetivoId) {
-  if (!isSupabaseConfigured()) return handleError('Supabase not configured', []);
-  let query = supabase.from('key_results').select('*').order('created_at', { ascending: true });
-  if (objetivoId) query = query.eq('objetivo_id', objetivoId);
-  const { data, error } = await query;
-  if (error) return handleError(error, []);
-  return { data: data || [], error: null };
-}
-
-export async function insertKeyResult(kr) {
-  if (!isSupabaseConfigured()) return handleError('Supabase not configured');
-  const { data, error } = await supabase.from('key_results').insert([kr]).select().single();
-  if (error) return handleError(error);
-  return { data, error: null };
-}
-
-export async function updateKeyResult(id, updates) {
-  if (!isSupabaseConfigured()) return handleError('Supabase not configured');
-  const { data, error } = await supabase.from('key_results').update(updates).eq('id', id).select().single();
-  if (error) return handleError(error);
-  return { data, error: null };
-}
-
-export async function deleteKeyResult(id) {
-  if (!isSupabaseConfigured()) return handleError('Supabase not configured');
-  const { error } = await supabase.from('key_results').delete().eq('id', id);
-  if (error) return handleError(error);
-  return { error: null };
-}
-
-// ─── KR Weekly Snapshots ─────────────────────────────────────
-
-export async function fetchKRSnapshots(krId) {
-  if (!isSupabaseConfigured()) return handleError('Supabase not configured', []);
+export async function fetchActiveCycle() {
   const { data, error } = await supabase
-    .from('kr_weekly_snapshots')
+    .from('okr_cycles')
     .select('*')
-    .eq('kr_id', krId)
-    .order('semana', { ascending: true });
-  if (error) return handleError(error, []);
-  return { data: data || [], error: null };
+    .eq('is_active', true)
+    .single();
+  if (error) {
+    console.error('Error fetching active okr_cycle:', error);
+    return null;
+  }
+  return data;
 }
 
-export async function insertSnapshot(snapshot) {
-  if (!isSupabaseConfigured()) return handleError('Supabase not configured');
-  const { data, error } = await supabase.from('kr_weekly_snapshots').upsert([snapshot]).select().single();
-  if (error) return handleError(error);
-  return { data, error: null };
-}
-
-// ─── Sticky Notes ────────────────────────────────────────────
-
-export async function fetchStickyNotes() {
-  if (!isSupabaseConfigured()) return handleError('Supabase not configured', []);
+export async function createCycle(cycleData) {
   const { data, error } = await supabase
-    .from('sticky_notes')
+    .from('okr_cycles')
+    .insert([cycleData])
+    .select()
+    .single();
+  if (error) {
+    console.error('Error creating okr_cycle:', error);
+    return null;
+  }
+  return data;
+}
+
+// ─── OBJECTIVES, KEY RESULTS & TASKS ────────────────────────────────────────
+
+// Fetch everything nested for a specific cycle
+export async function fetchOkrDataForCycle(cycleId) {
+  if (!cycleId) return [];
+
+  // 1. Fetch objectives
+  const { data: objectives, error: objError } = await supabase
+    .from('okr_objectives')
     .select('*')
-    .eq('dismissed', false)
-    .order('ordem', { ascending: true });
-  if (error) return handleError(error, []);
-  return { data: data || [], error: null };
+    .eq('cycle_id', cycleId)
+    .order('created_at', { ascending: true });
+    
+  if (objError) {
+    console.error('Error fetching okr_objectives:', objError);
+    return [];
+  }
+
+  if (objectives.length === 0) return [];
+
+  const objectiveIds = objectives.map(o => o.id);
+
+  // 2. Fetch Key Results
+  const { data: krs, error: krError } = await supabase
+    .from('okr_key_results')
+    .select('*')
+    .in('objective_id', objectiveIds)
+    .order('created_at', { ascending: true });
+
+  if (krError) {
+    console.error('Error fetching okr_key_results:', krError);
+    return [];
+  }
+
+  const krIds = krs.map(kr => kr.id);
+
+  // 3. Fetch Tasks
+  let tasks = [];
+  if (krIds.length > 0) {
+    const { data: t, error: tError } = await supabase
+      .from('okr_tasks')
+      .select('*')
+      .in('kr_id', krIds)
+      .order('due_day', { ascending: true });
+    if (tError) {
+      console.error('Error fetching okr_tasks:', tError);
+    } else {
+      tasks = t;
+    }
+  }
+
+  // Assemble the tree
+  const tree = objectives.map(obj => {
+    const objKrs = krs.filter(kr => kr.objective_id === obj.id).map(kr => {
+      // Map tasks, ensuring we use 'column' instead of 'status_column' for frontend compatibility
+      const krTasks = tasks.filter(t => t.kr_id === kr.id).map(t => ({
+        ...t,
+        column: t.status_column,
+        dueDay: t.due_day
+      }));
+      return { ...kr, tasks: krTasks };
+    });
+    return { ...obj, keyResults: objKrs };
+  });
+
+  return tree;
 }
 
-export async function insertStickyNote(note) {
-  if (!isSupabaseConfigured()) return handleError('Supabase not configured');
-  const { data, error } = await supabase.from('sticky_notes').insert([note]).select().single();
-  if (error) return handleError(error);
-  return { data, error: null };
-}
+// ─── MUTATIONS ──────────────────────────────────────────────────────────────
 
-export async function updateStickyNote(id, updates) {
-  if (!isSupabaseConfigured()) return handleError('Supabase not configured');
-  const { data, error } = await supabase.from('sticky_notes').update(updates).eq('id', id).select().single();
-  if (error) return handleError(error);
-  return { data, error: null };
-}
-
-export async function dismissStickyNote(id) {
-  if (!isSupabaseConfigured()) return handleError('Supabase not configured');
-  const { error } = await supabase.from('sticky_notes').update({ dismissed: true }).eq('id', id);
-  if (error) return handleError(error);
-  return { error: null };
-}
-
-// ─── Strategic Tasks ─────────────────────────────────────────
-
-export async function fetchStrategicTasks() {
-  if (!isSupabaseConfigured()) return handleError('Supabase not configured', []);
+export async function createObjective(objectiveData) {
   const { data, error } = await supabase
-    .from('strategic_tasks')
-    .select('*')
-    .order('ordem', { ascending: true });
-  if (error) return handleError(error, []);
-  return { data: data || [], error: null };
+    .from('okr_objectives')
+    .insert([objectiveData])
+    .select()
+    .single();
+  if (error) console.error('Error creating objective:', error);
+  return { data, error };
 }
 
-export async function insertStrategicTask(task) {
-  if (!isSupabaseConfigured()) return handleError('Supabase not configured');
-  const { data, error } = await supabase.from('strategic_tasks').insert([task]).select().single();
-  if (error) return handleError(error);
-  return { data, error: null };
+export async function createKeyResult(krData) {
+  const { data, error } = await supabase
+    .from('okr_key_results')
+    .insert([krData])
+    .select()
+    .single();
+  if (error) console.error('Error creating key result:', error);
+  return { data, error };
 }
 
-export async function updateStrategicTask(id, updates) {
-  if (!isSupabaseConfigured()) return handleError('Supabase not configured');
-  const { data, error } = await supabase.from('strategic_tasks').update(updates).eq('id', id).select().single();
-  if (error) return handleError(error);
-  return { data, error: null };
+export async function updateKeyResult(krId, updates) {
+  const { data, error } = await supabase
+    .from('okr_key_results')
+    .update(updates)
+    .eq('id', krId)
+    .select()
+    .single();
+  if (error) console.error('Error updating key result:', error);
+  return { data, error };
 }
 
-export async function moveStrategicTask(id, coluna) {
-  return updateStrategicTask(id, { coluna });
+export async function createTask(taskData) {
+  // Map frontend fields to db fields
+  const dbTask = {
+    kr_id: taskData.kr_id,
+    title: taskData.title,
+    assignee: taskData.assignee,
+    due_day: taskData.dueDay,
+    status_column: taskData.column || 'todo'
+  };
+
+  const { data, error } = await supabase
+    .from('okr_tasks')
+    .insert([dbTask])
+    .select()
+    .single();
+  if (error) console.error('Error creating task:', error);
+  
+  if (data) {
+    return { data: { ...data, column: data.status_column, dueDay: data.due_day }, error };
+  }
+  return { data, error };
 }
 
-export async function deleteStrategicTask(id) {
-  if (!isSupabaseConfigured()) return handleError('Supabase not configured');
-  const { error } = await supabase.from('strategic_tasks').delete().eq('id', id);
-  if (error) return handleError(error);
-  return { error: null };
+export async function updateTask(taskId, updates) {
+  // Map frontend fields to db fields if they exist
+  const dbUpdates = { ...updates };
+  if (dbUpdates.column) {
+    dbUpdates.status_column = dbUpdates.column;
+    delete dbUpdates.column;
+  }
+  if (dbUpdates.dueDay) {
+    dbUpdates.due_day = dbUpdates.dueDay;
+    delete dbUpdates.dueDay;
+  }
+
+  const { data, error } = await supabase
+    .from('okr_tasks')
+    .update(dbUpdates)
+    .eq('id', taskId)
+    .select()
+    .single();
+  if (error) console.error('Error updating task:', error);
+  
+  if (data) {
+    return { data: { ...data, column: data.status_column, dueDay: data.due_day }, error };
+  }
+  return { data, error };
+}
+
+export async function moveTaskColumn(taskId, newColumn) {
+  const { data, error } = await supabase
+    .from('okr_tasks')
+    .update({ status_column: newColumn })
+    .eq('id', taskId)
+    .select()
+    .single();
+  if (error) console.error('Error moving task:', error);
+  return { data, error };
+}
+
+export async function deleteTask(taskId) {
+  const { error } = await supabase
+    .from('okr_tasks')
+    .delete()
+    .eq('id', taskId);
+  if (error) console.error('Error deleting task:', error);
+  return { error };
 }
