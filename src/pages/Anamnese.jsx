@@ -435,14 +435,13 @@ function SignatureModal({ pacienteNome, onClose, onConfirm }) {
 }
 
 // ─── MAIN FORM ─────────────────────────────────────────────────────────────────
-function AnamneseForm({ paciente, initial, onSave, onCancel }) {
+function AnamneseForm({ paciente, initial, onSave, onCancel, driveStatus, driveLink }) {
   const [form, setForm] = useState(() => initial || emptyForm());
   const [step, setStep] = useState(0);
   const [showPreview, setShowPreview] = useState(false);
   const [showTermoModal, setShowTermoModal] = useState(false);
   const [signatureData, setSignatureData] = useState(() => initial?.signatureDataUrl || null); // base64 png
-  const [driveStatus, setDriveStatus] = useState('idle'); // 'idle'|'uploading'|'done'|'error'
-  const [driveLink, setDriveLink] = useState(null);
+  const [isSaving, setIsSaving] = useState(false);
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
   const toggleArr = (k, v) => setForm(f => {
     const arr = f[k] || [];
@@ -456,33 +455,16 @@ function AnamneseForm({ paciente, initial, onSave, onCancel }) {
     setShowTermoModal(false);
   };
 
+  // Envia para o pai: fichaData + signatureData (para o pai orquestrar Supabase + Drive)
   const handleSave = async () => {
     if (!form.leuTermos || !signatureData) return;
-    const saved = { ...form, dataPreenchimento: new Date().toISOString().split('T')[0] };
-    onSave(saved, async () => {
-      // Upload para Google Drive após salvar no Supabase
-      setDriveStatus('uploading');
-      try {
-        const result = await uploadTermoConsentimento({
-          pacienteNome: paciente.nome,
-          signatureDataUrl: signatureData,
-          telefone: paciente.telefone,
-          dataAssinatura: new Date().toLocaleDateString('pt-BR'),
-          objetivos: saved.objetivosPrincipais,
-          expectativas: saved.expectativas,
-          comoConheceu: saved.comoConheceu,
-        });
-        if (result) {
-          setDriveStatus('done');
-          setDriveLink(result.webViewLink);
-        } else {
-          setDriveStatus('idle'); // Drive não configurado, ignora silenciosamente
-        }
-      } catch (err) {
-        console.error('Drive upload error:', err);
-        setDriveStatus('error');
-      }
-    });
+    setIsSaving(true);
+    try {
+      const saved = { ...form, dataPreenchimento: new Date().toISOString().split('T')[0] };
+      await onSave(saved, signatureData);
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const handlePrint = () => window.print();
@@ -882,7 +864,7 @@ function AnamneseForm({ paciente, initial, onSave, onCancel }) {
               </div>
             )}
 
-            {/* Status do Drive */}
+            {/* Status do Drive — recebido via prop do pai */}
             {driveStatus === 'uploading' && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', background: '#F0F9FF', border: '1px solid #BAE6FD', borderRadius: 10, marginBottom: 12, fontSize: 12 }}>
                 <Loader2 style={{ width: 14, height: 14, color: '#0284C7', animation: 'spin 1s linear infinite' }} />
@@ -971,8 +953,13 @@ function AnamneseForm({ paciente, initial, onSave, onCancel }) {
           <button onClick={handlePrint} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px', borderRadius: 10, border: '1px solid #E5E7EB', background: '#fff', fontSize: 12, fontWeight: 600, cursor: 'pointer', color: '#374151' }}>
             <Printer style={{ width: 14, height: 14 }} /> Imprimir
           </button>
-          <button onClick={handleSave} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px', borderRadius: 10, border: 'none', background: 'linear-gradient(135deg,#C73B6D,#9B2C50)', fontSize: 12, fontWeight: 700, cursor: 'pointer', color: '#fff', boxShadow: '0 3px 10px rgba(199,59,109,0.3)' }}>
-            <Save style={{ width: 14, height: 14 }} /> Salvar Ficha
+          <button
+            onClick={handleSave}
+            disabled={isSaving}
+            style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px', borderRadius: 10, border: 'none', background: isSaving ? '#D1D5DB' : 'linear-gradient(135deg,#C73B6D,#9B2C50)', fontSize: 12, fontWeight: 700, cursor: isSaving ? 'not-allowed' : 'pointer', color: '#fff', boxShadow: isSaving ? 'none' : '0 3px 10px rgba(199,59,109,0.3)' }}
+          >
+            {isSaving ? <Loader2 style={{ width: 14, height: 14, animation: 'spin 1s linear infinite' }} /> : <Save style={{ width: 14, height: 14 }} />}
+            {isSaving ? 'Salvando...' : 'Salvar Ficha'}
           </button>
         </div>
       </div>
@@ -1228,7 +1215,11 @@ export default function Anamnese() {
   const [isEditing, setIsEditing] = useState(false);
   const [showTypeModal, setShowTypeModal] = useState(null);
   const [initialTipoFicha, setInitialTipoFicha] = useState('');
+  // Drive upload state — lifted to parent so it survives view transitions
+  const [driveStatus, setDriveStatus] = useState('idle'); // 'idle'|'uploading'|'done'|'error'
+  const [driveLink, setDriveLink] = useState(null);
 
+  // ── Carrega dados do Supabase ao montar (nenhum localStorage/sessionStorage) ──
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -1255,7 +1246,10 @@ export default function Anamnese() {
     p.telefone?.includes(busca)
   ), [pacientes, busca]);
 
-  const handleSave = async (fichaData) => {
+  // handleSave recebe fichaData (form) + signatureData (base64) do AnamneseForm.
+  // Responsabilidade: 1) upsert no Supabase, 2) upload no Drive (assíncrono).
+  // Nenhum dado é gravado em localStorage ou sessionStorage.
+  const handleSave = async (fichaData, signatureData) => {
     try {
       if (!selectedPaciente) return;
       const existing = anamneses[String(selectedPaciente.id)];
@@ -1267,8 +1261,6 @@ export default function Anamnese() {
       const user = await getCurrentUser();
       if (user?.id) payload.user_id = user.id;
 
-      console.log('Saving payload:', payload);
-
       const { data, error } = await upsertAnamnese(payload);
       if (error) {
         console.error('Supabase error:', error);
@@ -1279,8 +1271,35 @@ export default function Anamnese() {
         const saved = mapAnamneseFromSupabase(data);
         setAnamneses(prev => ({ ...prev, [String(saved.clientId)]: saved }));
       }
+
+      // Navega para a view imediatamente após salvar no Supabase
       setView('view');
       setIsEditing(false);
+
+      // Upload no Google Drive em background (não bloqueia a navegação)
+      if (signatureData) {
+        setDriveStatus('uploading');
+        try {
+          const result = await uploadTermoConsentimento({
+            pacienteNome: selectedPaciente.nome,
+            signatureDataUrl: signatureData,
+            telefone: selectedPaciente.telefone,
+            dataAssinatura: new Date().toLocaleDateString('pt-BR'),
+            objetivos: fichaData.objetivosPrincipais,
+            expectativas: fichaData.expectativas,
+            comoConheceu: fichaData.comoConheceu,
+          });
+          if (result) {
+            setDriveStatus('done');
+            setDriveLink(result.webViewLink);
+          } else {
+            setDriveStatus('idle'); // Drive não configurado — ignora silenciosamente
+          }
+        } catch (driveErr) {
+          console.error('Drive upload error:', driveErr);
+          setDriveStatus('error');
+        }
+      }
     } catch (err) {
       console.error('Catch error saving:', err);
       alert('Erro interno ao salvar: ' + err.message);
@@ -1334,6 +1353,8 @@ export default function Anamnese() {
           initial={isEditing ? ficha : { ...emptyForm(), tipoFicha: initialTipoFicha }}
           onSave={handleSave}
           onCancel={() => setView('list')}
+          driveStatus={driveStatus}
+          driveLink={driveLink}
         />
       </div>
     );
