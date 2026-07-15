@@ -374,63 +374,99 @@ function MiniKanban({ krId, tasks, onMoveTask, krStatus }) {
         })}
       </div>
 
-      {/* Add Task Button */}
+      {/* Add Task Block — Inline Horizontal (matches New Objective style) */}
       {isActive && (
-        <button
-          onClick={openNewTask}
-          style={{
-            display: 'inline-flex', alignItems: 'center', gap: 5,
-            marginTop: 10, padding: '5px 0',
-            background: 'none', border: 'none',
-            fontSize: 11, fontWeight: 500, color: 'var(--text-light)',
-            cursor: 'pointer', transition: 'color 0.2s',
-          }}
-          onMouseEnter={e => { e.currentTarget.style.color = 'var(--color-primary)'; }}
-          onMouseLeave={e => { e.currentTarget.style.color = 'var(--text-light)'; }}
-        >
-          <Plus style={{ width: 13, height: 13 }} />
-          Adicionar Tarefa
-        </button>
-      )}
-
-      {/* Add Task Modal */}
-      <OKRModal
-        open={showNewTask}
-        onClose={() => setShowNewTask(false)}
-        title="Adicionar Tarefa"
-      >
-        <label style={labelStyle}>Título</label>
-        <input
-          style={{ ...fieldStyle, marginBottom: 12 }}
-          value={newTaskForm.title}
-          onChange={e => setNewTaskForm(f => ({ ...f, title: e.target.value }))}
-          placeholder="Descreva a tarefa..."
-          autoFocus
-        />
-        <label style={labelStyle}>Responsável</label>
-        <select
-          style={{ ...fieldStyle, marginBottom: 12 }}
-          value={newTaskForm.assignee}
-          onChange={e => setNewTaskForm(f => ({ ...f, assignee: e.target.value }))}
-        >
-          <option value="">Selecione...</option>
-          {assigneeList.map(a => <option key={a} value={a}>{a}</option>)}
-        </select>
-        <label style={labelStyle}>Dia previsto</label>
-        <input
-          type="number" min={1} max={31}
-          style={{ ...fieldStyle, marginBottom: 4 }}
-          value={newTaskForm.dueDay}
-          onChange={e => setNewTaskForm(f => ({ ...f, dueDay: parseInt(e.target.value) || 1 }))}
-        />
-        <div style={btnRow}>
-          <button style={btnSecondary} onClick={() => setShowNewTask(false)}>Cancelar</button>
-          <button style={btnPrimary} onClick={saveNewTask}>
-            <Save style={{ width: 13, height: 13 }} />
-            Salvar
+        !showNewTask ? (
+          <button
+            onClick={openNewTask}
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 5,
+              marginTop: 10, padding: '5px 0',
+              background: 'none', border: 'none',
+              fontSize: 11, fontWeight: 500, color: 'var(--text-light)',
+              cursor: 'pointer', transition: 'color 0.2s',
+            }}
+            onMouseEnter={e => { e.currentTarget.style.color = 'var(--color-primary)'; }}
+            onMouseLeave={e => { e.currentTarget.style.color = 'var(--text-light)'; }}
+          >
+            <Plus style={{ width: 13, height: 13 }} />
+            Adicionar Tarefa
           </button>
-        </div>
-      </OKRModal>
+        ) : (
+          <div style={{
+            marginTop: 12, padding: '16px 18px',
+            background: 'var(--bg-card)',
+            border: '1px solid var(--border-color)',
+            borderRadius: 'var(--radius-sm)',
+            boxShadow: 'var(--shadow-sm)',
+            display: 'flex', flexWrap: 'wrap', alignItems: 'flex-end', gap: 10,
+          }}>
+            {/* Title (Takes up most space) */}
+            <div style={{ flex: '1 1 240px', minWidth: 0 }}>
+              <label style={{ ...labelStyle, marginBottom: 3 }}>Título</label>
+              <input
+                autoFocus
+                style={{ ...fieldStyle, padding: '7px 10px', fontSize: 12 }}
+                placeholder="Descreva a tarefa..."
+                value={newTaskForm.title}
+                onChange={e => setNewTaskForm(f => ({ ...f, title: e.target.value }))}
+              />
+            </div>
+
+            {/* Assignee */}
+            <div style={{ flex: '0 0 130px' }}>
+              <label style={{ ...labelStyle, marginBottom: 3 }}>Responsável</label>
+              <select
+                style={{ ...fieldStyle, padding: '7px 10px', fontSize: 12 }}
+                value={newTaskForm.assignee}
+                onChange={e => setNewTaskForm(f => ({ ...f, assignee: e.target.value }))}
+              >
+                <option value="">Selecione...</option>
+                {assigneeList.map(a => <option key={a} value={a}>{a}</option>)}
+              </select>
+            </div>
+
+            {/* Due day */}
+            <div style={{ flex: '0 0 80px' }}>
+              <label style={{ ...labelStyle, marginBottom: 3 }}>Dia previsto</label>
+              <input
+                type="number" min={1} max={31}
+                style={{ ...fieldStyle, padding: '7px 10px', fontSize: 12 }}
+                value={newTaskForm.dueDay}
+                onChange={e => setNewTaskForm(f => ({ ...f, dueDay: parseInt(e.target.value) || 1 }))}
+              />
+            </div>
+
+            {/* Actions */}
+            <div style={{ display: 'flex', gap: 6, alignItems: 'flex-end' }}>
+              <button
+                onClick={saveNewTask}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 4,
+                  padding: '7px 16px', background: 'var(--color-primary)',
+                  color: '#fff', border: 'none', borderRadius: 'var(--radius-sm)',
+                  fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                  transition: 'background 0.2s',
+                }}
+                onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-primary-light)'; }}
+                onMouseLeave={e => { e.currentTarget.style.background = 'var(--color-primary)'; }}
+              >
+                <Save style={{ width: 11, height: 11 }} /> Salvar
+              </button>
+              <button
+                onClick={() => setShowNewTask(false)}
+                style={{
+                  padding: '7px 10px', background: 'none',
+                  border: 'none', color: 'var(--text-muted)',
+                  fontSize: 11, fontWeight: 500, cursor: 'pointer',
+                }}
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        )
+      )}
 
       {/* Task Edit Modal (kept for editing) */}
       <OKRModal
