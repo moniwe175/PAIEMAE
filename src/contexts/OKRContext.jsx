@@ -55,8 +55,28 @@ export function OKRProvider({ children }) {
       }
       setLoading(true);
       const tree = await fetchOkrDataForCycle(selectedCycle.id);
+      
+      // Auto-fix: if any objective has 0 key results, create a 'Geral' Key Result for it
+      const fixedTree = [];
+      for (const obj of tree) {
+        if (!obj.keyResults || obj.keyResults.length === 0) {
+          const { data: newKR } = await createKeyResult({
+            objective_id: obj.id,
+            name: 'Geral',
+            target: 100,
+            unit: '%'
+          });
+          if (newKR) {
+            obj.keyResults = [{ ...newKR, tasks: [] }];
+          } else {
+            obj.keyResults = [];
+          }
+        }
+        fixedTree.push(obj);
+      }
+
       if (active) {
-        setOkrData(tree);
+        setOkrData(fixedTree);
         setLoading(false);
       }
     };
@@ -195,15 +215,23 @@ export function OKRProvider({ children }) {
       ...objectiveData,
       cycle_id: selectedCycle.id
     };
-    const { data, error } = await createObjective(payload);
-    if (error || !data) return;
+    const { data: newObj, error } = await createObjective(payload);
+    if (error || !newObj) return;
 
-    // Update UI state with new objective and empty key results
-    const newObjective = {
-      ...data,
-      keyResults: []
+    // Auto-create a default 'Geral' Key Result so they can add tasks immediately
+    const { data: newKR } = await createKeyResult({
+      objective_id: newObj.id,
+      name: 'Geral',
+      target: 100,
+      unit: '%'
+    });
+
+    const finalObjective = {
+      ...newObj,
+      keyResults: newKR ? [{ ...newKR, tasks: [] }] : []
     };
-    setOkrData(prev => [...prev, newObjective]);
+
+    setOkrData(prev => [...prev, finalObjective]);
   }, [selectedCycle]);
 
   return (

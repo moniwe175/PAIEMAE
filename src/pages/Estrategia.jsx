@@ -543,6 +543,19 @@ function KeyResultBlock({ objId, kr, expanded, onToggle, onMoveTask }) {
     setEditOpen(false);
   };
 
+  if (kr.name === 'Geral') {
+    return (
+      <div style={{ marginTop: 8 }}>
+        <MiniKanban
+          krId={kr.id}
+          tasks={kr.tasks}
+          onMoveTask={onMoveTask}
+          krStatus={status}
+        />
+      </div>
+    );
+  }
+
   return (
     <div style={{
       background: 'var(--bg-main)',
@@ -766,7 +779,7 @@ function ObjectiveBlock({ objective, onMoveTask, expandedKRs, toggleKR }) {
               key={kr.id}
               objId={objective.id}
               kr={kr}
-              expanded={expandedKRs[kr.id] || false}
+              expanded={kr.name === 'Geral' ? true : (expandedKRs[kr.id] || false)}
               onToggle={() => toggleKR(kr.id)}
               onMoveTask={onMoveTask}
             />
