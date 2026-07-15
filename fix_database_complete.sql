@@ -23,34 +23,6 @@ BEGIN
   END IF;
 END $$;
 
--- Fix client_id type in anamneses if it's still integer
-DO $$
-BEGIN
-  IF EXISTS (
-    SELECT 1 FROM information_schema.columns 
-    WHERE table_name = 'anamneses' AND column_name = 'client_id' AND data_type = 'integer'
-  ) THEN
-    -- Drop existing foreign key constraint
-    ALTER TABLE public.anamneses DROP CONSTRAINT IF EXISTS anamneses_client_id_fkey;
-    
-    -- Create a temporary uuid column
-    ALTER TABLE public.anamneses ADD COLUMN client_id_new uuid;
-    
-    -- Try to migrate data (if client_id matches a client id, copy it, otherwise set to null)
-    UPDATE public.anamneses SET client_id_new = c.id 
-    FROM public.clients c WHERE c.id::text = public.anamneses.client_id::text;
-    
-    -- Drop old column and rename new one
-    ALTER TABLE public.anamneses DROP COLUMN client_id;
-    ALTER TABLE public.anamneses RENAME COLUMN client_id_new TO client_id;
-    
-    -- Add foreign key constraint
-    ALTER TABLE public.anamneses 
-      ADD CONSTRAINT anamneses_client_id_fkey 
-      FOREIGN KEY (client_id) REFERENCES public.clients(id) ON DELETE CASCADE;
-  END IF;
-END $$;
-
 -- Drop existing RLS policies
 DROP POLICY IF EXISTS "Users can view own clients" ON public.clients;
 DROP POLICY IF EXISTS "Users can insert own clients" ON public.clients;
