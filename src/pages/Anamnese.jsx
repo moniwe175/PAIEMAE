@@ -7,7 +7,6 @@ import {
 } from 'lucide-react';
 import { fetchClients, fetchAnamneses, upsertAnamnese, deleteAnamnese } from '../services/supabaseService';
 import { getCurrentUser } from '../lib/supabase';
-import { uploadTermoConsentimento, driveConfigurado, TERMO_PDF_EMBED_URL, TERMO_PDF_VIEW_URL } from '../services/googleDriveService';
 
 // ─── Empty form ───────────────────────────────────────────────────────────────
 function emptyForm() {
@@ -435,7 +434,7 @@ function SignatureModal({ pacienteNome, onClose, onConfirm }) {
 }
 
 // ─── MAIN FORM ─────────────────────────────────────────────────────────────────
-function AnamneseForm({ paciente, initial, onSave, onCancel, driveStatus, driveLink }) {
+function AnamneseForm({ paciente, initial, onSave, onCancel }) {
   const [form, setForm] = useState(() => initial || emptyForm());
   const [step, setStep] = useState(0);
   const [showPreview, setShowPreview] = useState(false);
@@ -864,27 +863,6 @@ function AnamneseForm({ paciente, initial, onSave, onCancel, driveStatus, driveL
               </div>
             )}
 
-            {/* Status do Drive — recebido via prop do pai */}
-            {driveStatus === 'uploading' && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', background: '#F0F9FF', border: '1px solid #BAE6FD', borderRadius: 10, marginBottom: 12, fontSize: 12 }}>
-                <Loader2 style={{ width: 14, height: 14, color: '#0284C7', animation: 'spin 1s linear infinite' }} />
-                <span style={{ color: '#0369A1', fontWeight: 600 }}>Salvando termo no Google Drive...</span>
-              </div>
-            )}
-            {driveStatus === 'done' && driveLink && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', background: '#F0FDF4', border: '1px solid #BBF7D0', borderRadius: 10, marginBottom: 12, fontSize: 12 }}>
-                <CheckCircle style={{ width: 14, height: 14, color: '#16A34A' }} />
-                <span style={{ color: '#166534', fontWeight: 600 }}>Termo salvo no Google Drive!</span>
-                <a href={driveLink} target="_blank" rel="noreferrer" style={{ color: '#16A34A', marginLeft: 4 }}>Ver arquivo</a>
-              </div>
-            )}
-            {driveStatus === 'error' && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', background: '#FFF5F5', border: '1px solid #FCA5A5', borderRadius: 10, marginBottom: 12, fontSize: 12 }}>
-                <AlertTriangle style={{ width: 14, height: 14, color: '#EF4444' }} />
-                <span style={{ color: '#DC2626', fontWeight: 600 }}>Erro ao salvar no Drive. O termo foi salvo no sistema normalmente.</span>
-              </div>
-            )}
-
             {/* Observações */}
 
             <Field label="Observações do profissional">
@@ -930,7 +908,7 @@ function AnamneseForm({ paciente, initial, onSave, onCancel, driveStatus, driveL
               ficha={form}
               onClose={() => setShowPreview(false)}
               onConfirmSave={handleSave}
-              isSaving={driveStatus === 'uploading'}
+              isSaving={isSaving}
             />
           </div>
         </div>
@@ -1215,9 +1193,6 @@ export default function Anamnese() {
   const [isEditing, setIsEditing] = useState(false);
   const [showTypeModal, setShowTypeModal] = useState(null);
   const [initialTipoFicha, setInitialTipoFicha] = useState('');
-  // Drive upload state — lifted to parent so it survives view transitions
-  const [driveStatus, setDriveStatus] = useState('idle'); // 'idle'|'uploading'|'done'|'error'
-  const [driveLink, setDriveLink] = useState(null);
 
   // ── Carrega dados do Supabase ao montar (nenhum localStorage/sessionStorage) ──
   useEffect(() => {
@@ -1247,7 +1222,7 @@ export default function Anamnese() {
   ), [pacientes, busca]);
 
   // handleSave recebe fichaData (form) + signatureData (base64) do AnamneseForm.
-  // Responsabilidade: 1) upsert no Supabase, 2) upload no Drive (assíncrono).
+  // Responsabilidade: upsert no Supabase.
   // Nenhum dado é gravado em localStorage ou sessionStorage.
   const handleSave = async (fichaData, signatureData) => {
     try {
@@ -1261,7 +1236,7 @@ export default function Anamnese() {
       const existing = anamneses[String(selectedPaciente.id)];
       const id = existing?.id;
       const payload = mapAnamneseToSupabase(
-        { ...fichaData, id, clientId: selectedPaciente.id },
+        { ...fichaData, id, clientId: selectedPaciente.id, signatureDataUrl: signatureData },
         user.id
       );
 
@@ -1279,31 +1254,6 @@ export default function Anamnese() {
       // Navega para a view imediatamente após salvar no Supabase
       setView('view');
       setIsEditing(false);
-
-      // Upload no Google Drive em background (não bloqueia a navegação)
-      if (signatureData) {
-        setDriveStatus('uploading');
-        try {
-          const result = await uploadTermoConsentimento({
-            pacienteNome: selectedPaciente.nome,
-            signatureDataUrl: signatureData,
-            telefone: selectedPaciente.telefone,
-            dataAssinatura: new Date().toLocaleDateString('pt-BR'),
-            objetivos: fichaData.objetivosPrincipais,
-            expectativas: fichaData.expectativas,
-            comoConheceu: fichaData.comoConheceu,
-          });
-          if (result) {
-            setDriveStatus('done');
-            setDriveLink(result.webViewLink);
-          } else {
-            setDriveStatus('idle'); // Drive não configurado — ignora silenciosamente
-          }
-        } catch (driveErr) {
-          console.error('Drive upload error:', driveErr);
-          setDriveStatus('error');
-        }
-      }
     } catch (err) {
       console.error('Catch error saving:', err);
       alert('Erro interno ao salvar: ' + err.message);
@@ -1357,8 +1307,6 @@ export default function Anamnese() {
           initial={isEditing ? ficha : { ...emptyForm(), tipoFicha: initialTipoFicha }}
           onSave={handleSave}
           onCancel={() => setView('list')}
-          driveStatus={driveStatus}
-          driveLink={driveLink}
         />
       </div>
     );
