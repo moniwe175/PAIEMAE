@@ -681,10 +681,6 @@ function ObjectiveBlock({ objective, onMoveTask, expandedKRs, toggleKR }) {
   // Delete modal
   const [deleteOpen, setDeleteOpen] = useState(false);
 
-  // Inline new KR form
-  const [showNewKR, setShowNewKR] = useState(false);
-  const [krForm, setKrForm] = useState({ name: '', valorAtual: 0, valorMeta: 0, unit: '' });
-
   const openEdit = () => {
     setEditForm({ objective: objective.objective, owner: objective.owner });
     setEditOpen(true);
@@ -694,19 +690,6 @@ function ObjectiveBlock({ objective, onMoveTask, expandedKRs, toggleKR }) {
     if (!editForm.objective.trim()) return;
     updateObjective(objective.id, editForm);
     setEditOpen(false);
-  };
-
-  const saveNewKR = () => {
-    if (!krForm.name.trim()) return;
-    addKeyResult(objective.id, {
-      name: krForm.name,
-      target: Number(krForm.valorMeta) || 0,
-      valorAtual: Number(krForm.valorAtual) || 0,
-      unit: krForm.unit,
-    });
-    setKrForm({ name: '', valorAtual: 0, valorMeta: 0, unit: '' });
-    setShowNewKR(false);
-    setExpanded(true);
   };
 
   return (
@@ -788,139 +771,6 @@ function ObjectiveBlock({ objective, onMoveTask, expandedKRs, toggleKR }) {
               onMoveTask={onMoveTask}
             />
           ))}
-
-          {/* Add KR — Inline ghost card */}
-          {isActive && (
-            !showNewKR ? (
-              <button
-                onClick={() => setShowNewKR(true)}
-                style={{
-                  display: 'inline-flex', alignItems: 'center', gap: 5,
-                  marginTop: 10, padding: '5px 0',
-                  background: 'none', border: 'none',
-                  fontSize: 11, fontWeight: 500, color: 'var(--text-light)',
-                  cursor: 'pointer', transition: 'color 0.2s',
-                }}
-                onMouseEnter={e => { e.currentTarget.style.color = 'var(--color-primary)'; }}
-                onMouseLeave={e => { e.currentTarget.style.color = 'var(--text-light)'; }}
-              >
-                <Plus style={{ width: 13, height: 13 }} />
-                Adicionar indicador de sucesso
-              </button>
-            ) : (
-              <div style={{ marginTop: 8 }}>
-                {/* Ghost card — mirrors KeyResultBlock design */}
-                <div style={{
-                  background: 'var(--bg-main)',
-                  borderRadius: 'var(--radius-sm)',
-                  border: '1px solid var(--border-color)',
-                  borderLeft: '3px solid var(--color-accent)',
-                  padding: '14px 16px',
-                  marginBottom: 8,
-                }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    {/* Placeholder chevron */}
-                    <ChevronRight style={{ width: 14, height: 14, color: 'var(--border-color)', flexShrink: 0 }} />
-
-                    {/* Title input — invisible, underline only */}
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <input
-                        autoFocus
-                        style={{
-                          width: '100%', background: 'transparent',
-                          border: 'none', borderBottom: '1.5px solid var(--border-color)',
-                          padding: '4px 0', fontSize: 12, fontWeight: 600,
-                          color: 'var(--text-dark)', outline: 'none',
-                          transition: 'border-color 0.2s',
-                        }}
-                        onFocus={e => { e.currentTarget.style.borderBottomColor = 'var(--color-primary)'; }}
-                        onBlur={e => { e.currentTarget.style.borderBottomColor = 'var(--border-color)'; }}
-                        placeholder="O que vamos medir? (Ex: Fechar novos pacotes premium)"
-                        value={krForm.name}
-                        onChange={e => setKrForm(f => ({ ...f, name: e.target.value }))}
-                      />
-                    </div>
-
-                    {/* Numeric pair: [Atual] / [Alvo] */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 3, flexShrink: 0 }}>
-                      <input
-                        type="number"
-                        style={{
-                          width: 54, textAlign: 'center',
-                          background: 'var(--bg-card)',
-                          border: '1px solid var(--border-color)',
-                          borderRadius: 5, padding: '5px 2px',
-                          fontSize: 12, fontWeight: 600,
-                          color: 'var(--text-dark)', outline: 'none',
-                          transition: 'border-color 0.2s',
-                        }}
-                        onFocus={e => { e.currentTarget.style.borderColor = 'var(--color-primary)'; }}
-                        onBlur={e => { e.currentTarget.style.borderColor = 'var(--border-color)'; }}
-                        value={krForm.valorAtual}
-                        onChange={e => setKrForm(f => ({ ...f, valorAtual: e.target.value }))}
-                      />
-                      <span style={{ color: 'var(--text-muted)', fontSize: 13, fontWeight: 300 }}>/</span>
-                      <input
-                        type="number"
-                        style={{
-                          width: 64, textAlign: 'center',
-                          background: 'var(--bg-card)',
-                          border: '1px solid var(--border-color)',
-                          borderRadius: 5, padding: '5px 2px',
-                          fontSize: 12, fontWeight: 700,
-                          color: 'var(--color-primary)', outline: 'none',
-                          transition: 'border-color 0.2s',
-                        }}
-                        onFocus={e => { e.currentTarget.style.borderColor = 'var(--color-primary)'; }}
-                        onBlur={e => { e.currentTarget.style.borderColor = 'var(--border-color)'; }}
-                        placeholder="Ex: 15"
-                        value={krForm.valorMeta}
-                        onChange={e => setKrForm(f => ({ ...f, valorMeta: e.target.value }))}
-                      />
-                    </div>
-                  </div>
-
-                  {/* Ghost progress bar — empty, decorative */}
-                  <div style={{
-                    marginTop: 10, width: '100%', height: 5,
-                    background: 'var(--border-color)', borderRadius: 99,
-                    opacity: 0.3,
-                  }} />
-                </div>
-
-                {/* Action buttons — right-aligned */}
-                <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', padding: '0 2px' }}>
-                  <button
-                    onClick={() => setShowNewKR(false)}
-                    style={{
-                      padding: '6px 14px', background: 'none',
-                      border: 'none', color: 'var(--text-muted)',
-                      fontSize: 11, fontWeight: 500, cursor: 'pointer',
-                      transition: 'color 0.2s',
-                    }}
-                    onMouseEnter={e => { e.currentTarget.style.color = 'var(--text-dark)'; }}
-                    onMouseLeave={e => { e.currentTarget.style.color = 'var(--text-muted)'; }}
-                  >
-                    Cancelar
-                  </button>
-                  <button
-                    onClick={saveNewKR}
-                    style={{
-                      display: 'flex', alignItems: 'center', gap: 5,
-                      padding: '6px 16px', background: 'var(--color-primary)',
-                      color: '#fff', border: 'none', borderRadius: 'var(--radius-sm)',
-                      fontSize: 11, fontWeight: 600, cursor: 'pointer',
-                      transition: 'background 0.2s',
-                    }}
-                    onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-primary-light)'; }}
-                    onMouseLeave={e => { e.currentTarget.style.background = 'var(--color-primary)'; }}
-                  >
-                    <Save style={{ width: 11, height: 11 }} /> Salvar
-                  </button>
-                </div>
-              </div>
-            )
-          )}
         </div>
       )}
 
