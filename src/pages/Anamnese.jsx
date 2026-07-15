@@ -1185,7 +1185,7 @@ function ViewFicha({ paciente, ficha, onEdit, onClose, onConfirmSave, isSaving }
 // ─── MAIN PAGE ─────────────────────────────────────────────────────────────────
 export default function Anamnese() {
   const [pacientes, setPacientes] = useState([]);
-  const [anamneses, setAnamneses] = useState({});
+  const [anamneses, setAnamneses] = useState({}); // { clientId: { tipoFicha: fichaData } }
   const [loading, setLoading] = useState(true);
   const [busca, setBusca] = useState('');
   const [view, setView] = useState('list'); // 'list' | 'form' | 'view'
@@ -1208,7 +1208,11 @@ export default function Anamnese() {
       const map = {};
       (anamnesesData || []).forEach(row => {
         const ficha = mapAnamneseFromSupabase(row);
-        if (ficha.clientId) map[String(ficha.clientId)] = ficha;
+        if (ficha.clientId && ficha.tipoFicha) {
+          const key = String(ficha.clientId);
+          if (!map[key]) map[key] = {};
+          map[key][ficha.tipoFicha] = ficha;
+        }
       });
       setAnamneses(map);
       setLoading(false);
@@ -1233,7 +1237,9 @@ export default function Anamnese() {
         return;
       }
       
-      const existing = anamneses[String(selectedPaciente.id)];
+      const key = String(selectedPaciente.id);
+      const tipoFicha = fichaData.tipoFicha;
+      const existing = anamneses[key]?.[tipoFicha];
       const id = existing?.id;
       const payload = mapAnamneseToSupabase(
         { ...fichaData, id, clientId: selectedPaciente.id, signatureDataUrl: signatureData },
@@ -1248,7 +1254,10 @@ export default function Anamnese() {
       }
       if (data) {
         const saved = mapAnamneseFromSupabase(data);
-        setAnamneses(prev => ({ ...prev, [String(saved.clientId)]: saved }));
+        setAnamneses(prev => ({
+          ...prev,
+          [key]: { ...prev[key], [tipoFicha]: saved }
+        }));
       }
 
       // Navega para a view imediatamente após salvar no Supabase
@@ -1260,10 +1269,10 @@ export default function Anamnese() {
     }
   };
 
-  const handleDelete = async (pacienteId) => {
-    if (!window.confirm('Deseja realmente excluir a ficha de anamnese deste paciente?')) return;
+  const handleDelete = async (pacienteId, tipoFicha) => {
+    if (!window.confirm('Deseja realmente excluir esta ficha de anamnese?')) return;
     const key = String(pacienteId);
-    const existing = anamneses[key];
+    const existing = anamneses[key]?.[tipoFicha];
     if (existing?.id) {
       const { error } = await deleteAnamnese(existing.id);
       if (error) {
@@ -1273,7 +1282,15 @@ export default function Anamnese() {
     }
     setAnamneses(prev => {
       const updated = { ...prev };
-      delete updated[key];
+      if (updated[key]) {
+        const clientFichas = { ...updated[key] };
+        delete clientFichas[tipoFicha];
+        if (Object.keys(clientFichas).length === 0) {
+          delete updated[key];
+        } else {
+          updated[key] = clientFichas;
+        }
+      }
       return updated;
     });
   };
@@ -1281,16 +1298,13 @@ export default function Anamnese() {
   const openForm = (p, editing = false, tipoFicha = '') => {
     setSelectedPaciente(p);
     setIsEditing(editing);
-    if (!editing && tipoFicha) {
-      setInitialTipoFicha(tipoFicha);
-    } else {
-      setInitialTipoFicha('');
-    }
+    setInitialTipoFicha(tipoFicha);
     setView('form');
   };
 
-  const openView = (p) => {
+  const openView = (p, tipoFicha) => {
     setSelectedPaciente(p);
+    setInitialTipoFicha(tipoFicha);
     setView('view');
   };
 
@@ -1299,7 +1313,8 @@ export default function Anamnese() {
   const semFicha = total - comFicha;
 
   if (view === 'form' && selectedPaciente) {
-    const ficha = anamneses[String(selectedPaciente.id)];
+    const key = String(selectedPaciente.id);
+    const ficha = anamneses[key]?.[initialTipoFicha];
     return (
       <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 40px)', gap: 0 }}>
         <AnamneseForm
@@ -1313,14 +1328,15 @@ export default function Anamnese() {
   }
 
   if (view === 'view' && selectedPaciente) {
-    const ficha = anamneses[String(selectedPaciente.id)];
+    const key = String(selectedPaciente.id);
+    const ficha = anamneses[key]?.[initialTipoFicha];
     if (!ficha) { setView('list'); return null; }
     return (
       <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 40px)', gap: 0 }}>
         <ViewFicha
           paciente={selectedPaciente}
           ficha={ficha}
-          onEdit={() => openForm(selectedPaciente, true)}
+          onEdit={() => openForm(selectedPaciente, true, initialTipoFicha)}
           onClose={() => setView('list')}
         />
       </div>
@@ -1381,15 +1397,21 @@ export default function Anamnese() {
             Nenhum paciente encontrado.
           </div>
         ) : filtered.map(p => {
-          const temFicha = !!anamneses[String(p.id)];
+          const key = String(p.id);
+          const fichas = anamneses[key] || {};
+          const tiposPossiveis = ['Ficha Facial', 'Ficha Corporal', 'Ficha Capilar', 'Outros'];
+          const tiposPreenchidos = Object.keys(fichas);
+          const tiposFaltantes = tiposPossiveis.filter(t => !tiposPreenchidos.includes(t));
+          const temAlgumaFicha = tiposPreenchidos.length > 0;
+          
           return (
             <div key={p.id} style={{
-              display: 'flex', alignItems: 'center', gap: 12,
+              display: 'flex', alignItems: 'flex-start', gap: 12,
               background: '#fff', borderRadius: 14, padding: '12px 16px',
               border: '1px solid #F0EBE6', boxShadow: '0 1px 4px rgba(0,0,0,0.04)',
             }}>
               {/* Avatar */}
-              <div style={{ width: 40, height: 40, borderRadius: '50%', background: temFicha ? '#ECFDF5' : '#FDF4F7', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, fontWeight: 700, color: temFicha ? '#059669' : '#C73B6D', flexShrink: 0 }}>
+              <div style={{ width: 40, height: 40, borderRadius: '50%', background: temAlgumaFicha ? '#ECFDF5' : '#FDF4F7', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, fontWeight: 700, color: temAlgumaFicha ? '#059669' : '#C73B6D', flexShrink: 0 }}>
                 {p.avatar}
               </div>
 
@@ -1397,48 +1419,51 @@ export default function Anamnese() {
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 14, fontWeight: 700, color: '#1F2937', marginBottom: 2 }}>{p.nome}</div>
                 <div style={{ fontSize: 12, color: '#9CA3AF' }}>{p.telefone || '—'}</div>
-              </div>
-
-              {/* Status badge */}
-              <div style={{ flexShrink: 0 }}>
-                {temFicha
-                  ? <div style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '3px 10px', borderRadius: 20, background: '#ECFDF5', border: '1px solid #A7F3D0' }}>
-                    <CheckCircle style={{ width: 11, height: 11, color: '#059669' }} />
-                    <span style={{ fontSize: 11, fontWeight: 700, color: '#059669' }}>Ficha completa</span>
+                
+                {/* Fichas preenchidas */}
+                {tiposPreenchidos.length > 0 && (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 8 }}>
+                    {tiposPreenchidos.map(tipo => (
+                      <div key={tipo} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '2px 8px', borderRadius: 12, background: '#ECFDF5', border: '1px solid #A7F3D0' }}>
+                        <CheckCircle style={{ width: 9, height: 9, color: '#059669' }} />
+                        <span style={{ fontSize: 10, fontWeight: 600, color: '#059669' }}>{tipo}</span>
+                      </div>
+                    ))}
                   </div>
-                  : <div style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '3px 10px', borderRadius: 20, background: '#FFFBEB', border: '1px solid #FDE68A' }}>
-                    <AlertTriangle style={{ width: 11, height: 11, color: '#D97706' }} />
-                    <span style={{ fontSize: 11, fontWeight: 700, color: '#D97706' }}>Sem ficha</span>
-                  </div>
-                }
+                )}
               </div>
 
               {/* Actions */}
-              <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
-                {temFicha && (
-                  <>
-                    <button onClick={() => openView(p)} title="Visualizar ficha" style={{ width: 34, height: 34, borderRadius: 10, border: '1px solid #E5E7EB', background: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                      <Eye style={{ width: 14, height: 14, color: '#6B7280' }} />
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'flex-end', flexShrink: 0 }}>
+                {/* Ações por ficha */}
+                {tiposPreenchidos.map(tipo => (
+                  <div key={tipo} style={{ display: 'flex', gap: 4 }}>
+                    <button onClick={() => openView(p, tipo)} title={`Visualizar ${tipo}`} style={{ width: 28, height: 28, borderRadius: 8, border: '1px solid #E5E7EB', background: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <Eye style={{ width: 12, height: 12, color: '#6B7280' }} />
                     </button>
-                    <button onClick={() => openForm(p, true)} title="Editar ficha" style={{ width: 34, height: 34, borderRadius: 10, border: '1px solid #E5E7EB', background: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                      <Edit3 style={{ width: 14, height: 14, color: '#6B7280' }} />
+                    <button onClick={() => openForm(p, true, tipo)} title={`Editar ${tipo}`} style={{ width: 28, height: 28, borderRadius: 8, border: '1px solid #E5E7EB', background: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <Edit3 style={{ width: 12, height: 12, color: '#6B7280' }} />
                     </button>
-                    <button onClick={() => handleDelete(p.id)} title="Excluir ficha" style={{ width: 34, height: 34, borderRadius: 10, border: '1px solid #FCA5A5', background: '#FFF5F5', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                      <Trash2 style={{ width: 14, height: 14, color: '#EF4444' }} />
+                    <button onClick={() => handleDelete(p.id, tipo)} title={`Excluir ${tipo}`} style={{ width: 28, height: 28, borderRadius: 8, border: '1px solid #FCA5A5', background: '#FFF5F5', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <Trash2 style={{ width: 12, height: 12, color: '#EF4444' }} />
                     </button>
-                  </>
+                  </div>
+                ))}
+                
+                {/* Botão adicionar outras fichas */}
+                {tiposFaltantes.length > 0 && (
+                  <button
+                    onClick={() => setShowTypeModal(p)}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 5,
+                      padding: '6px 12px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 11, fontWeight: 600,
+                      background: 'linear-gradient(135deg,#C73B6D,#9B2C50)',
+                      color: '#fff',
+                      boxShadow: '0 2px 6px rgba(199,59,109,0.25)',
+                    }}>
+                    <Plus style={{ width: 11, height: 11 }} />Adicionar fichas
+                  </button>
                 )}
-                <button
-                  onClick={() => temFicha ? openForm(p, true) : setShowTypeModal(p)}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 5,
-                    padding: '7px 14px', borderRadius: 10, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 700,
-                    background: temFicha ? '#F3F4F6' : 'linear-gradient(135deg,#C73B6D,#9B2C50)',
-                    color: temFicha ? '#374151' : '#fff',
-                    boxShadow: temFicha ? 'none' : '0 2px 8px rgba(199,59,109,0.3)',
-                  }}>
-                  {temFicha ? <><Edit3 style={{ width: 12, height: 12 }} />Editar</> : <><Plus style={{ width: 12, height: 12 }} />Preencher</>}
-                </button>
               </div>
             </div>
           );
@@ -1453,21 +1478,29 @@ export default function Anamnese() {
             <p style={{ fontSize: 13, color: '#6B7280', marginBottom: 20 }}>Escolha o objetivo principal da ficha de anamnese para este paciente.</p>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {['Ficha Facial', 'Ficha Corporal', 'Ficha Capilar', 'Outros'].map(tipo => (
-                <button
-                  key={tipo}
-                  onClick={() => {
-                    openForm(showTypeModal, false, tipo);
-                    setShowTypeModal(null);
-                  }}
-                  style={{ padding: '14px 16px', borderRadius: 12, border: '1px solid #E5E7EB', background: '#FAFAFA', fontSize: 14, fontWeight: 600, color: '#374151', cursor: 'pointer', textAlign: 'left', display: 'flex', alignItems: 'center', justifyContent: 'space-between', transition: 'all 0.2s' }}
-                  onMouseEnter={e => e.currentTarget.style.borderColor = '#C73B6D'}
-                  onMouseLeave={e => e.currentTarget.style.borderColor = '#E5E7EB'}
-                >
-                  {tipo}
-                  <ChevronRight style={{ width: 16, height: 16, color: '#9CA3AF' }} />
-                </button>
-              ))}
+              {(() => {
+                const key = String(showTypeModal.id);
+                const fichas = anamneses[key] || {};
+                const tiposPossiveis = ['Ficha Facial', 'Ficha Corporal', 'Ficha Capilar', 'Outros'];
+                const tiposPreenchidos = Object.keys(fichas);
+                const tiposDisponiveis = tiposPossiveis.filter(t => !tiposPreenchidos.includes(t));
+                
+                return tiposDisponiveis.map(tipo => (
+                  <button
+                    key={tipo}
+                    onClick={() => {
+                      openForm(showTypeModal, false, tipo);
+                      setShowTypeModal(null);
+                    }}
+                    style={{ padding: '14px 16px', borderRadius: 12, border: '1px solid #E5E7EB', background: '#FAFAFA', fontSize: 14, fontWeight: 600, color: '#374151', cursor: 'pointer', textAlign: 'left', display: 'flex', alignItems: 'center', justifyContent: 'space-between', transition: 'all 0.2s' }}
+                    onMouseEnter={e => e.currentTarget.style.borderColor = '#C73B6D'}
+                    onMouseLeave={e => e.currentTarget.style.borderColor = '#E5E7EB'}
+                  >
+                    {tipo}
+                    <ChevronRight style={{ width: 16, height: 16, color: '#9CA3AF' }} />
+                  </button>
+                ));
+              })()}
             </div>
 
             <button onClick={() => setShowTypeModal(null)} style={{ marginTop: 20, width: '100%', padding: '12px', borderRadius: 12, border: 'none', background: '#F3F4F6', color: '#4B5563', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>
