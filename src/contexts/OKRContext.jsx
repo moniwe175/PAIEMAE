@@ -189,6 +189,23 @@ export function OKRProvider({ children }) {
     }
   }, [selectedCycle]);
 
+  const addObjective = useCallback(async (objectiveData) => {
+    if (!selectedCycle) return;
+    const payload = {
+      ...objectiveData,
+      cycle_id: selectedCycle.id
+    };
+    const { data, error } = await createObjective(payload);
+    if (error || !data) return;
+
+    // Update UI state with new objective and empty key results
+    const newObjective = {
+      ...data,
+      keyResults: []
+    };
+    setOkrData(prev => [...prev, newObjective]);
+  }, [selectedCycle]);
+
   return (
     <OKRContext.Provider value={{
       okrData,
@@ -207,6 +224,7 @@ export function OKRProvider({ children }) {
       updateKeyResult,
       updateObjective,
       deleteObjective,
+      addObjective,
     }}>
       {children}
     </OKRContext.Provider>

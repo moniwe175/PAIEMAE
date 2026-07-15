@@ -1135,6 +1135,7 @@ export default function Estrategia() {
   const { 
     okrData, loading, cycles, selectedCycle, setSelectedCycle, 
     moveTask, addTask, updateTask, deleteTask, addKeyResult, updateKeyResult, 
+    updateObjective, deleteObjective, addObjective,
     currentDay, totalDays, currentMonth 
   } = useOKR();
   const { profissionais } = useProfissionais();
