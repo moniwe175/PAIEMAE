@@ -245,223 +245,192 @@ function MiniKanban({ krId, tasks, onMoveTask, krStatus }) {
     setDeleteConfirmId(null);
   };
 
-  const hasTasks = tasks && tasks.length > 0;
-
   return (
     <>
-      {hasTasks && (
-        <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-          {COLUMNS.map(col => {
-            const colTasks = tasks.filter(t => t.column === col.id);
-            return (
-              <div
-                key={col.id}
-                onDragOver={handleDragOver}
-                onDrop={(e) => handleDrop(e, col.id)}
-                style={{ flex: 1, minWidth: 0 }}
-              >
-                {/* Column Header */}
-                <div style={{
-                  background: col.bg,
-                  borderRadius: 'var(--radius-sm)',
-                  padding: '6px 10px',
-                  marginBottom: 6,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  border: `1px solid ${col.id === 'done' ? 'var(--success)' : col.id === 'doing' ? 'var(--info)' : 'var(--border-color)'}`,
-                  borderTopWidth: 2,
+      <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+        {COLUMNS.map(col => {
+          const colTasks = tasks.filter(t => t.column === col.id);
+          return (
+            <div
+              key={col.id}
+              onDragOver={handleDragOver}
+              onDrop={(e) => handleDrop(e, col.id)}
+              style={{ flex: 1, minWidth: 0 }}
+            >
+              {/* Column Header */}
+              <div style={{
+                background: col.bg,
+                borderRadius: 'var(--radius-sm)',
+                padding: '6px 10px',
+                marginBottom: 6,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                border: `1px solid ${col.id === 'done' ? 'var(--success)' : col.id === 'doing' ? 'var(--info)' : 'var(--border-color)'}`,
+                borderTopWidth: 2,
+              }}>
+                <span style={{ fontSize: 10, fontWeight: 700, color: col.color, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                  {col.label}
+                </span>
+                <span style={{
+                  background: col.color,
+                  color: '#fff',
+                  borderRadius: 99,
+                  width: 18, height: 18,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: 10, fontWeight: 700
                 }}>
-                  <span style={{ fontSize: 10, fontWeight: 700, color: col.color, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                    {col.label}
-                  </span>
-                  <span style={{
-                    background: col.color,
-                    color: '#fff',
-                    borderRadius: 99,
-                    width: 18, height: 18,
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontSize: 10, fontWeight: 700
-                  }}>
-                    {colTasks.length}
-                  </span>
-                </div>
+                  {colTasks.length}
+                </span>
+              </div>
 
-                {/* Tasks */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minHeight: 60 }}>
-                  {colTasks.map(task => {
-                    const dueInfo = getDueDateIndicator(task.dueDay, currentDay);
-                    return (
-                      <div
-                        key={task.id}
-                        draggable
-                        onDragStart={(e) => handleDragStart(e, task.id)}
-                        onDragEnd={handleDragEnd}
-                        style={{
-                          background: 'var(--bg-card)',
-                          border: '1px solid var(--border-color)',
-                          borderLeft: `3px solid ${krStatus.color}`,
-                          borderRadius: 'var(--radius-sm)',
-                          padding: '8px 10px',
-                          cursor: 'grab',
-                          opacity: draggingId === task.id ? 0.4 : 1,
-                          transition: 'opacity 0.15s, box-shadow 0.15s',
-                          fontSize: 11,
-                          position: 'relative',
-                        }}
-                      >
-                        {/* Action buttons */}
-                        {isActive && (
+              {/* Tasks */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minHeight: 60 }}>
+                {colTasks.map(task => {
+                  const dueInfo = getDueDateIndicator(task.dueDay, currentDay);
+                  return (
+                    <div
+                      key={task.id}
+                      draggable
+                      onDragStart={(e) => handleDragStart(e, task.id)}
+                      onDragEnd={handleDragEnd}
+                      style={{
+                        background: 'var(--bg-card)',
+                        border: '1px solid var(--border-color)',
+                        borderLeft: `3px solid ${krStatus.color}`,
+                        borderRadius: 'var(--radius-sm)',
+                        padding: '8px 10px',
+                        cursor: 'grab',
+                        opacity: draggingId === task.id ? 0.4 : 1,
+                        transition: 'opacity 0.15s, box-shadow 0.15s',
+                        fontSize: 11,
+                        position: 'relative',
+                      }}
+                    >
+                      {/* Action buttons */}
+                      {isActive && (
+                        <div style={{
+                          position: 'absolute', top: 4, right: 4,
+                          display: 'flex', gap: 1, opacity: 0.7,
+                        }}>
+                          <ActionBtn icon={Pencil} onClick={() => openEditTask(task)} color="var(--text-muted)" title="Editar tarefa" size={10} />
+                          {deleteConfirmId === task.id ? (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); confirmDeleteTask(task.id); }}
+                              style={{ background: 'var(--danger)', color: '#fff', border: 'none', borderRadius: 3, fontSize: 8, padding: '2px 5px', cursor: 'pointer', fontWeight: 700 }}
+                            >
+                              Sim
+                            </button>
+                          ) : (
+                            <ActionBtn icon={Trash2} onClick={() => setDeleteConfirmId(task.id)} color="var(--danger)" title="Excluir tarefa" size={10} />
+                          )}
+                        </div>
+                      )}
+
+                      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 4 }}>
+                        <GripVertical style={{ width: 10, height: 10, color: 'var(--text-muted)', flexShrink: 0, marginTop: 2 }} />
+                        <div style={{ flex: 1, minWidth: 0, paddingRight: 24 }}>
                           <div style={{
-                            position: 'absolute', top: 4, right: 4,
-                            display: 'flex', gap: 1, opacity: 0.7,
+                            fontWeight: 500,
+                            color: col.id === 'done' ? 'var(--text-light)' : 'var(--text-dark)',
+                            textDecoration: col.id === 'done' ? 'line-through' : 'none',
+                            lineHeight: 1.3,
+                            fontSize: 11,
                           }}>
-                            <ActionBtn icon={Pencil} onClick={() => openEditTask(task)} color="var(--text-muted)" title="Editar tarefa" size={10} />
-                            {deleteConfirmId === task.id ? (
-                              <button
-                                onClick={(e) => { e.stopPropagation(); confirmDeleteTask(task.id); }}
-                                style={{ background: 'var(--danger)', color: '#fff', border: 'none', borderRadius: 3, fontSize: 8, padding: '2px 5px', cursor: 'pointer', fontWeight: 700 }}
-                              >
-                                Sim
-                              </button>
-                            ) : (
-                              <ActionBtn icon={Trash2} onClick={() => setDeleteConfirmId(task.id)} color="var(--danger)" title="Excluir tarefa" size={10} />
-                            )}
+                            {col.id === 'done' && <span style={{ marginRight: 3 }}>✓</span>}
+                            {task.title}
                           </div>
-                        )}
-
-                        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 4 }}>
-                          <GripVertical style={{ width: 10, height: 10, color: 'var(--text-muted)', flexShrink: 0, marginTop: 2 }} />
-                          <div style={{ flex: 1, minWidth: 0, paddingRight: 24 }}>
-                            <div style={{
-                              fontWeight: 500,
-                              color: col.id === 'done' ? 'var(--text-light)' : 'var(--text-dark)',
-                              textDecoration: col.id === 'done' ? 'line-through' : 'none',
-                              lineHeight: 1.3,
-                              fontSize: 11,
-                            }}>
-                              {col.id === 'done' && <span style={{ marginRight: 3 }}>✓</span>}
-                              {task.title}
-                            </div>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
-                              {task.assignee && (
-                                <span style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 500 }}>
-                                  {task.assignee}
-                                </span>
-                              )}
-                              <span style={{ fontSize: 9, color: dueInfo.color, fontWeight: 600, marginLeft: 'auto' }}>
-                                <Calendar style={{ width: 8, height: 8, display: 'inline', verticalAlign: 'middle', marginRight: 2 }} />
-                                {dueInfo.label}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
+                            {task.assignee && (
+                              <span style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 500 }}>
+                                {task.assignee}
                               </span>
-                            </div>
+                            )}
+                            <span style={{ fontSize: 9, color: dueInfo.color, fontWeight: 600, marginLeft: 'auto' }}>
+                              <Calendar style={{ width: 8, height: 8, display: 'inline', verticalAlign: 'middle', marginRight: 2 }} />
+                              {dueInfo.label}
+                            </span>
                           </div>
                         </div>
                       </div>
-                    );
-                  })}
-                  {colTasks.length === 0 && (
-                    <div style={{
-                      border: '1px dashed var(--border-color)',
-                      borderRadius: 'var(--radius-sm)',
-                      padding: '12px 8px',
-                      textAlign: 'center',
-                      color: 'var(--text-muted)',
-                      fontSize: 10,
-                    }}>
-                      Arraste aqui
                     </div>
-                  )}
-                </div>
+                  );
+                })}
+                {colTasks.length === 0 && (
+                  <div style={{
+                    border: '1px dashed var(--border-color)',
+                    borderRadius: 'var(--radius-sm)',
+                    padding: '12px 8px',
+                    textAlign: 'center',
+                    color: 'var(--text-muted)',
+                    fontSize: 10,
+                  }}>
+                    Arraste aqui
+                  </div>
+                )}
               </div>
-            );
-          })}
-        </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Add Task Button */}
+      {isActive && (
+        <button
+          onClick={openNewTask}
+          style={{
+            display: 'inline-flex', alignItems: 'center', gap: 5,
+            marginTop: 10, padding: '5px 0',
+            background: 'none', border: 'none',
+            fontSize: 11, fontWeight: 500, color: 'var(--text-light)',
+            cursor: 'pointer', transition: 'color 0.2s',
+          }}
+          onMouseEnter={e => { e.currentTarget.style.color = 'var(--color-primary)'; }}
+          onMouseLeave={e => { e.currentTarget.style.color = 'var(--text-light)'; }}
+        >
+          <Plus style={{ width: 13, height: 13 }} />
+          Adicionar Tarefa
+        </button>
       )}
 
-      {/* Add Task — Inline */}
-      {isActive && (
-        !showNewTask ? (
-          <button
-            onClick={openNewTask}
-            style={{
-              display: 'inline-flex', alignItems: 'center', gap: 5,
-              marginTop: 10, padding: '5px 0',
-              background: 'none', border: 'none',
-              fontSize: 11, fontWeight: 500, color: 'var(--text-light)',
-              cursor: 'pointer', transition: 'color 0.2s',
-            }}
-            onMouseEnter={e => { e.currentTarget.style.color = 'var(--color-primary)'; }}
-            onMouseLeave={e => { e.currentTarget.style.color = 'var(--text-light)'; }}
-          >
-            <Plus style={{ width: 13, height: 13 }} />
-            Adicionar Tarefa
+      {/* Add Task Modal */}
+      <OKRModal
+        open={showNewTask}
+        onClose={() => setShowNewTask(false)}
+        title="Adicionar Tarefa"
+      >
+        <label style={labelStyle}>Título</label>
+        <input
+          style={{ ...fieldStyle, marginBottom: 12 }}
+          value={newTaskForm.title}
+          onChange={e => setNewTaskForm(f => ({ ...f, title: e.target.value }))}
+          placeholder="Descreva a tarefa..."
+          autoFocus
+        />
+        <label style={labelStyle}>Responsável</label>
+        <select
+          style={{ ...fieldStyle, marginBottom: 12 }}
+          value={newTaskForm.assignee}
+          onChange={e => setNewTaskForm(f => ({ ...f, assignee: e.target.value }))}
+        >
+          <option value="">Selecione...</option>
+          {assigneeList.map(a => <option key={a} value={a}>{a}</option>)}
+        </select>
+        <label style={labelStyle}>Dia previsto</label>
+        <input
+          type="number" min={1} max={31}
+          style={{ ...fieldStyle, marginBottom: 4 }}
+          value={newTaskForm.dueDay}
+          onChange={e => setNewTaskForm(f => ({ ...f, dueDay: parseInt(e.target.value) || 1 }))}
+        />
+        <div style={btnRow}>
+          <button style={btnSecondary} onClick={() => setShowNewTask(false)}>Cancelar</button>
+          <button style={btnPrimary} onClick={saveNewTask}>
+            <Save style={{ width: 13, height: 13 }} />
+            Salvar
           </button>
-        ) : (
-          <div style={{
-            marginTop: 10, padding: '12px 14px',
-            background: 'var(--bg-card)',
-            border: '1px solid var(--border-color)',
-            borderRadius: 'var(--radius-sm)',
-            display: 'flex', flexWrap: 'wrap', alignItems: 'flex-end', gap: 8,
-          }}>
-            <div style={{ flex: '1 1 160px', minWidth: 0 }}>
-              <label style={{ ...labelStyle, marginBottom: 3 }}>Título</label>
-              <input
-                autoFocus
-                style={{ ...fieldStyle, padding: '6px 10px', fontSize: 12 }}
-                placeholder="Descreva a tarefa..."
-                value={newTaskForm.title}
-                onChange={e => setNewTaskForm(f => ({ ...f, title: e.target.value }))}
-              />
-            </div>
-            <div style={{ flex: '0 0 110px' }}>
-              <label style={{ ...labelStyle, marginBottom: 3 }}>Responsável</label>
-              <select
-                style={{ ...fieldStyle, padding: '6px 10px', fontSize: 12 }}
-                value={newTaskForm.assignee}
-                onChange={e => setNewTaskForm(f => ({ ...f, assignee: e.target.value }))}
-              >
-                {assigneeList.map(a => <option key={a} value={a}>{a}</option>)}
-              </select>
-            </div>
-            <div style={{ flex: '0 0 70px' }}>
-              <label style={{ ...labelStyle, marginBottom: 3 }}>Dia</label>
-              <input
-                type="number" min={1} max={31}
-                style={{ ...fieldStyle, padding: '6px 10px', fontSize: 12 }}
-                value={newTaskForm.dueDay}
-                onChange={e => setNewTaskForm(f => ({ ...f, dueDay: parseInt(e.target.value) || 1 }))}
-              />
-            </div>
-            <div style={{ display: 'flex', gap: 6, alignItems: 'flex-end' }}>
-              <button
-                onClick={saveNewTask}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 4,
-                  padding: '6px 14px', background: 'var(--color-primary)',
-                  color: '#fff', border: 'none', borderRadius: 'var(--radius-sm)',
-                  fontSize: 11, fontWeight: 600, cursor: 'pointer',
-                  transition: 'background 0.2s',
-                }}
-                onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-primary-light)'; }}
-                onMouseLeave={e => { e.currentTarget.style.background = 'var(--color-primary)'; }}
-              >
-                <Save style={{ width: 11, height: 11 }} /> Salvar
-              </button>
-              <button
-                onClick={() => setShowNewTask(false)}
-                style={{
-                  padding: '6px 10px', background: 'none',
-                  border: 'none', color: 'var(--text-muted)',
-                  fontSize: 11, fontWeight: 500, cursor: 'pointer',
-                }}
-              >
-                Cancelar
-              </button>
-            </div>
-          </div>
-        )
-      )}
+        </div>
+      </OKRModal>
 
       {/* Task Edit Modal (kept for editing) */}
       <OKRModal
