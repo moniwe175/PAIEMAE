@@ -1208,10 +1208,11 @@ export default function Anamnese() {
       const map = {};
       (anamnesesData || []).forEach(row => {
         const ficha = mapAnamneseFromSupabase(row);
-        if (ficha.clientId && ficha.tipoFicha) {
+        if (ficha.clientId) {
           const key = String(ficha.clientId);
+          const tipoFicha = ficha.tipoFicha || 'Outros'; // Fallback para fichas antigas sem tipo
           if (!map[key]) map[key] = {};
-          map[key][ficha.tipoFicha] = ficha;
+          map[key][tipoFicha] = ficha;
         }
       });
       setAnamneses(map);
