@@ -5,6 +5,7 @@ import {
   Pencil, Trash2, X, Save
 } from 'lucide-react';
 import { useOKR } from '../contexts/OKRContext';
+import { useProfissionais } from '../lib/profissionais';
 import './estrategia-styles.css';
 
 // ─── COLUMN DEFINITIONS ─────────────────────────────────────────────────────────
@@ -14,7 +15,7 @@ const COLUMNS = [
   { id: 'done', label: 'Concluído', color: 'var(--success)', bg: 'var(--success-bg)' },
 ];
 
-const ASSIGNEES = ['Evelyn', 'Gabriela', 'Barbara'];
+// Removed static ASSIGNEES array - loading dynamically from useProfissionais()
 
 // ─── HELPERS ────────────────────────────────────────────────────────────────────
 
@@ -161,6 +162,8 @@ function ActionBtn({ icon: Icon, onClick, color, title, size = 13 }) {
 // ─── MINI KANBAN COMPONENT ──────────────────────────────────────────────────────
 function MiniKanban({ krId, tasks, onMoveTask, krStatus }) {
   const { currentDay, addTask, updateTask, deleteTask, selectedCycle } = useOKR();
+  const { profissionais } = useProfissionais();
+  const assigneeList = profissionais.length > 0 ? profissionais.map(p => p.nome) : ['Evelyn', 'Bárbara', 'Bira'];
   const isActive = selectedCycle?.is_active !== false;
   
   const [draggingId, setDraggingId] = useState(null);
@@ -414,7 +417,7 @@ function MiniKanban({ krId, tasks, onMoveTask, krStatus }) {
                 value={newTaskForm.assignee}
                 onChange={e => setNewTaskForm(f => ({ ...f, assignee: e.target.value }))}
               >
-                {ASSIGNEES.map(a => <option key={a} value={a}>{a}</option>)}
+                {assigneeList.map(a => <option key={a} value={a}>{a}</option>)}
               </select>
             </div>
             <div style={{ flex: '0 0 70px' }}>
@@ -476,7 +479,7 @@ function MiniKanban({ krId, tasks, onMoveTask, krStatus }) {
           onChange={e => setTaskForm(f => ({ ...f, assignee: e.target.value }))}
         >
           <option value="">Selecione...</option>
-          {ASSIGNEES.map(a => <option key={a} value={a}>{a}</option>)}
+          {assigneeList.map(a => <option key={a} value={a}>{a}</option>)}
         </select>
         <label style={labelStyle}>Dia previsto</label>
         <input
@@ -656,6 +659,8 @@ function KeyResultBlock({ objId, kr, expanded, onToggle, onMoveTask }) {
 // ─── OBJECTIVE BLOCK ────────────────────────────────────────────────────────────
 function ObjectiveBlock({ objective, onMoveTask, expandedKRs, toggleKR }) {
   const { currentDay, totalDays, updateObjective, deleteObjective, addKeyResult, selectedCycle } = useOKR();
+  const { profissionais } = useProfissionais();
+  const assigneeList = profissionais.length > 0 ? profissionais.map(p => p.nome) : ['Evelyn', 'Bárbara', 'Bira'];
   const isActive = selectedCycle?.is_active !== false;
   const [expanded, setExpanded] = useState(false);
   const expectedProgress = isActive ? getExpectedProgress(currentDay, totalDays) : 100;
@@ -926,7 +931,7 @@ function ObjectiveBlock({ objective, onMoveTask, expandedKRs, toggleKR }) {
         <label style={labelStyle}>Dono (Responsável)</label>
         <select style={{ ...fieldStyle, marginBottom: 4 }} value={editForm.owner} onChange={e => setEditForm(f => ({ ...f, owner: e.target.value }))}>
           <option value="">Selecione...</option>
-          {ASSIGNEES.map(a => <option key={a} value={a}>{a}</option>)}
+          {assigneeList.map(a => <option key={a} value={a}>{a}</option>)}
         </select>
         <div style={btnRow}>
           <button style={btnSecondary} onClick={() => setEditOpen(false)}>Cancelar</button>
@@ -1132,6 +1137,8 @@ export default function Estrategia() {
     moveTask, addTask, updateTask, deleteTask, addKeyResult, updateKeyResult, 
     currentDay, totalDays, currentMonth 
   } = useOKR();
+  const { profissionais } = useProfissionais();
+  const assigneeList = profissionais.length > 0 ? profissionais.map(p => p.nome) : ['Evelyn', 'Bárbara', 'Bira'];
   const [expandedKRs, setExpandedKRs] = useState({});
 
   // Inline new Objective form
@@ -1344,7 +1351,7 @@ export default function Estrategia() {
                   onChange={e => setObjForm(f => ({ ...f, owner: e.target.value }))}
                 >
                   <option value="">Selecione...</option>
-                  {ASSIGNEES.map(a => <option key={a} value={a}>{a}</option>)}
+                  {assigneeList.map(a => <option key={a} value={a}>{a}</option>)}
                 </select>
               </div>
               <div style={{ display: 'flex', gap: 6, alignItems: 'flex-end' }}>
