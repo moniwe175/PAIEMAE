@@ -11,7 +11,7 @@ import SheetSyncStatus from '../components/integration/SheetSyncStatus';
 import OKRWeeklySnapshot from '../components/dashboard/OKRWeeklySnapshot';
 import StickyNotesPanel from '../components/dashboard/StickyNotesPanel';
 import { generateAutoNotes } from '../lib/noteAutomation';
-import { fetchStickyNotes, insertStickyNote, updateStickyNote } from '../services/okrService';
+import { fetchStickyNotes, insertStickyNote, updateStickyNote, fetchActiveOKRTasks } from '../services/okrService';
 import { fetchInventory, fetchAppointments } from '../services/supabaseService';
 import { getCurrentUser } from '../lib/supabase';
 
@@ -62,7 +62,8 @@ const CustomTooltip = ({ active, payload, label }) => {
 export default function Dashboard() {
   const { transactions, dailySheet } = useSync();
   const [manualNotes, setManualNotes] = useState([]);
-  const [keyResults] = useState([]);
+  const [okrTasks, setOkrTasks] = useState([]);
+  const [okrCycle, setOkrCycle] = useState(null);
   const [stockAlerts, setStockAlerts] = useState([]);
   const [todayAppointments, setTodayAppointments] = useState([]);
 
@@ -96,9 +97,15 @@ export default function Dashboard() {
         setTodayAppointments(todayApts);
       }
     }
+    async function loadOKRTasks() {
+      const { data, cycle } = await fetchActiveOKRTasks();
+      setOkrTasks(data || []);
+      setOkrCycle(cycle || null);
+    }
     loadNotes();
     loadStock();
     loadAppointments();
+    loadOKRTasks();
   }, []);
 
   const today = new Date();
@@ -159,7 +166,7 @@ export default function Dashboard() {
   })();
 
   // Auto-generate notes from system state
-  const autoNotes = generateAutoNotes({ stockAlerts, okrs: keyResults, appointments: todayAppointments });
+  const autoNotes = generateAutoNotes({ stockAlerts, okrs: [], appointments: todayAppointments, okrTasks, okrCycle });
   const allNotes = [...autoNotes, ...manualNotes.filter(n => !n.dismissed)];
 
   const handleDismissNote = async (note) => {
@@ -254,7 +261,7 @@ export default function Dashboard() {
 
       {/* OKR Weekly Snapshot */}
       <div className="section-gap">
-        <OKRWeeklySnapshot keyResults={keyResults} onKRClick={kr => document.getElementById('sticky-notes-panel')?.scrollIntoView({ behavior: 'smooth' })} />
+        <OKRWeeklySnapshot keyResults={[]} onKRClick={kr => document.getElementById('sticky-notes-panel')?.scrollIntoView({ behavior: 'smooth' })} />
       </div>
 
       {/* Revenue Chart + Stock Alerts */}

@@ -37,17 +37,36 @@ function StickyNote({ note, onDismiss, onDragStart, index }) {
         {note.source && (
           <span style={{ fontSize: 9, fontWeight: 600, color: '#9CA3AF', textTransform: 'uppercase', background: '#F3F4F6', padding: '1px 6px', borderRadius: 99 }}>{note.source}</span>
         )}
-        <button
-          onClick={e => { e.stopPropagation(); onDismiss(note); }}
-          style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 2, borderRadius: 4, display: 'flex', alignItems: 'center' }}
-          title="Dispensar nota"
-        >
-          <X style={{ width: 12, height: 12, color: '#9CA3AF' }} />
-        </button>
+        {/* OKR task notes: show date / "Atrasada" instead of X */}
+        {note.okrTask ? (
+          note.isOverdue ? (
+            <span style={{
+              fontSize: 9, fontWeight: 800, color: '#fff',
+              background: '#EF4444', padding: '2px 7px', borderRadius: 99,
+              letterSpacing: 0.3,
+            }}>Atrasada</span>
+          ) : note.dueDateStr ? (
+            <span style={{
+              fontSize: 9, fontWeight: 700, color: '#6B7280',
+              background: '#F3F4F6', padding: '2px 7px', borderRadius: 99,
+              letterSpacing: 0.3,
+            }}>até {note.dueDateStr}</span>
+          ) : null
+        ) : (
+          /* All other notes (stock + manual): keep the X button */
+          <button
+            onClick={e => { e.stopPropagation(); onDismiss(note); }}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 2, borderRadius: 4, display: 'flex', alignItems: 'center' }}
+            title="Dispensar nota"
+          >
+            <X style={{ width: 12, height: 12, color: '#9CA3AF' }} />
+          </button>
+        )}
       </div>
     </div>
   );
 }
+
 
 function AddNoteInline({ laneId, onSave, onCancel }) {
   const [text, setText] = useState('');

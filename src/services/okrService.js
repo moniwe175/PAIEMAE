@@ -1,5 +1,96 @@
 import { supabase } from '../lib/supabase';
 
+// ─── STICKY NOTES (Dashboard manual notes) ──────────────────────────────────
+
+export async function fetchStickyNotes() {
+  const { data, error } = await supabase
+    .from('sticky_notes')
+    .select('*')
+    .eq('dismissed', false)
+    .order('ordem', { ascending: true });
+  if (error) console.error('Error fetching sticky_notes:', error);
+  return { data, error };
+}
+
+export async function insertStickyNote(note) {
+  const { data, error } = await supabase
+    .from('sticky_notes')
+    .insert([note])
+    .select()
+    .single();
+  if (error) console.error('Error inserting sticky_note:', error);
+  return { data, error };
+}
+
+export async function updateStickyNote(id, updates) {
+  const { data, error } = await supabase
+    .from('sticky_notes')
+    .update(updates)
+    .eq('id', id)
+    .select()
+    .single();
+  if (error) console.error('Error updating sticky_note:', error);
+  return { data, error };
+}
+
+export async function deleteStickyNote(id) {
+  const { error } = await supabase
+    .from('sticky_notes')
+    .delete()
+    .eq('id', id);
+  if (error) console.error('Error deleting sticky_note:', error);
+  return { error };
+}
+
+// ─── FETCH ACTIVE OKR TASKS FOR DASHBOARD ────────────────────────────────────
+// Returns all non-done tasks from the currently active cycle,
+// with enough context to generate priority sticky notes.
+export async function fetchActiveOKRTasks() {
+  // 1. Find the active cycle
+  const { data: cycle, error: cycleError } = await supabase
+    .from('okr_cycles')
+    .select('id, name, start_date, end_date')
+    .eq('is_active', true)
+    .single();
+  if (cycleError || !cycle) return { data: [], cycle: null };
+
+  // 2. Fetch objectives in that cycle
+  const { data: objectives, error: objError } = await supabase
+    .from('okr_objectives')
+    .select('id')
+    .eq('cycle_id', cycle.id);
+  if (objError || !objectives?.length) return { data: [], cycle };
+
+  const objectiveIds = objectives.map(o => o.id);
+
+  // 3. Fetch key results
+  const { data: krs, error: krError } = await supabase
+    .from('okr_key_results')
+    .select('id, name')
+    .in('objective_id', objectiveIds);
+  if (krError || !krs?.length) return { data: [], cycle };
+
+  const krIds = krs.map(kr => kr.id);
+  const krMap = Object.fromEntries(krs.map(kr => [kr.id, kr]));
+
+  // 4. Fetch non-done tasks
+  const { data: tasks, error: taskError } = await supabase
+    .from('okr_tasks')
+    .select('id, title, assignee, due_day, status_column, kr_id')
+    .in('kr_id', krIds)
+    .neq('status_column', 'done');
+  if (taskError) return { data: [], cycle };
+
+  // Enrich tasks with KR name
+  const enriched = (tasks || []).map(t => ({
+    ...t,
+    dueDay: t.due_day,
+    krName: krMap[t.kr_id]?.name || '',
+  }));
+
+  return { data: enriched, cycle };
+}
+
 // ─── CYCLES ─────────────────────────────────────────────────────────────────
 
 export async function fetchCycles() {
