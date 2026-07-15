@@ -211,6 +211,26 @@ export async function createObjective(objectiveData) {
   return { data, error };
 }
 
+export async function updateObjective(objectiveId, updates) {
+  const { data, error } = await supabase
+    .from('okr_objectives')
+    .update({ ...updates, updated_at: new Date().toISOString() })
+    .eq('id', objectiveId)
+    .select()
+    .single();
+  if (error) console.error('Error updating objective:', error);
+  return { data, error };
+}
+
+export async function deleteObjective(objectiveId) {
+  const { error } = await supabase
+    .from('okr_objectives')
+    .delete()
+    .eq('id', objectiveId);
+  if (error) console.error('Error deleting objective:', error);
+  return { error };
+}
+
 export async function createKeyResult(krData) {
   const { data, error } = await supabase
     .from('okr_key_results')

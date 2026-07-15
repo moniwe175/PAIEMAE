@@ -3,6 +3,8 @@ import {
   fetchCycles, 
   fetchOkrDataForCycle, 
   createObjective, 
+  updateObjective as apiUpdateObjective,
+  deleteObjective as apiDeleteObjective,
   createKeyResult, 
   createTask as apiCreateTask, 
   updateTask as apiUpdateTask, 
@@ -155,6 +157,38 @@ export function OKRProvider({ children }) {
     ));
   }, []);
 
+  // ── Objective Operations ─────────────────────────────────────
+  const updateObjective = useCallback(async (objId, updates) => {
+    // Optimistic UI update first
+    setOkrData(prev => prev.map(obj =>
+      obj.id === objId ? { ...obj, ...updates } : obj
+    ));
+    // Persist to Supabase
+    const { error } = await apiUpdateObjective(objId, updates);
+    if (error) {
+      console.error('Failed to save objective, reloading...', error);
+      // On error, reload from DB to restore correct state
+      if (selectedCycle) {
+        const tree = await fetchOkrDataForCycle(selectedCycle.id);
+        setOkrData(tree);
+      }
+    }
+  }, [selectedCycle]);
+
+  const deleteObjective = useCallback(async (objId) => {
+    // Optimistic UI update
+    setOkrData(prev => prev.filter(obj => obj.id !== objId));
+    // Persist to Supabase
+    const { error } = await apiDeleteObjective(objId);
+    if (error) {
+      console.error('Failed to delete objective, reloading...', error);
+      if (selectedCycle) {
+        const tree = await fetchOkrDataForCycle(selectedCycle.id);
+        setOkrData(tree);
+      }
+    }
+  }, [selectedCycle]);
+
   return (
     <OKRContext.Provider value={{
       okrData,
@@ -170,7 +204,9 @@ export function OKRProvider({ children }) {
       updateTask,
       deleteTask,
       addKeyResult,
-      updateKeyResult
+      updateKeyResult,
+      updateObjective,
+      deleteObjective,
     }}>
       {children}
     </OKRContext.Provider>
