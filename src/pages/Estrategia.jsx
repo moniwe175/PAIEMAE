@@ -245,134 +245,138 @@ function MiniKanban({ krId, tasks, onMoveTask, krStatus }) {
     setDeleteConfirmId(null);
   };
 
+  const hasTasks = tasks && tasks.length > 0;
+
   return (
     <>
-      <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-        {COLUMNS.map(col => {
-          const colTasks = tasks.filter(t => t.column === col.id);
-          return (
-            <div
-              key={col.id}
-              onDragOver={handleDragOver}
-              onDrop={(e) => handleDrop(e, col.id)}
-              style={{ flex: 1, minWidth: 0 }}
-            >
-              {/* Column Header */}
-              <div style={{
-                background: col.bg,
-                borderRadius: 'var(--radius-sm)',
-                padding: '6px 10px',
-                marginBottom: 6,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                border: `1px solid ${col.id === 'done' ? 'var(--success)' : col.id === 'doing' ? 'var(--info)' : 'var(--border-color)'}`,
-                borderTopWidth: 2,
-              }}>
-                <span style={{ fontSize: 10, fontWeight: 700, color: col.color, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                  {col.label}
-                </span>
-                <span style={{
-                  background: col.color,
-                  color: '#fff',
-                  borderRadius: 99,
-                  width: 18, height: 18,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: 10, fontWeight: 700
+      {hasTasks && (
+        <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+          {COLUMNS.map(col => {
+            const colTasks = tasks.filter(t => t.column === col.id);
+            return (
+              <div
+                key={col.id}
+                onDragOver={handleDragOver}
+                onDrop={(e) => handleDrop(e, col.id)}
+                style={{ flex: 1, minWidth: 0 }}
+              >
+                {/* Column Header */}
+                <div style={{
+                  background: col.bg,
+                  borderRadius: 'var(--radius-sm)',
+                  padding: '6px 10px',
+                  marginBottom: 6,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  border: `1px solid ${col.id === 'done' ? 'var(--success)' : col.id === 'doing' ? 'var(--info)' : 'var(--border-color)'}`,
+                  borderTopWidth: 2,
                 }}>
-                  {colTasks.length}
-                </span>
-              </div>
+                  <span style={{ fontSize: 10, fontWeight: 700, color: col.color, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                    {col.label}
+                  </span>
+                  <span style={{
+                    background: col.color,
+                    color: '#fff',
+                    borderRadius: 99,
+                    width: 18, height: 18,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: 10, fontWeight: 700
+                  }}>
+                    {colTasks.length}
+                  </span>
+                </div>
 
-              {/* Tasks */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minHeight: 60 }}>
-                {colTasks.map(task => {
-                  const dueInfo = getDueDateIndicator(task.dueDay, currentDay);
-                  return (
-                    <div
-                      key={task.id}
-                      draggable
-                      onDragStart={(e) => handleDragStart(e, task.id)}
-                      onDragEnd={handleDragEnd}
-                      style={{
-                        background: 'var(--bg-card)',
-                        border: '1px solid var(--border-color)',
-                        borderLeft: `3px solid ${krStatus.color}`,
-                        borderRadius: 'var(--radius-sm)',
-                        padding: '8px 10px',
-                        cursor: 'grab',
-                        opacity: draggingId === task.id ? 0.4 : 1,
-                        transition: 'opacity 0.15s, box-shadow 0.15s',
-                        fontSize: 11,
-                        position: 'relative',
-                      }}
-                    >
-                      {/* Action buttons */}
-                      {isActive && (
-                        <div style={{
-                          position: 'absolute', top: 4, right: 4,
-                          display: 'flex', gap: 1, opacity: 0.7,
-                        }}>
-                          <ActionBtn icon={Pencil} onClick={() => openEditTask(task)} color="var(--text-muted)" title="Editar tarefa" size={10} />
-                          {deleteConfirmId === task.id ? (
-                            <button
-                              onClick={(e) => { e.stopPropagation(); confirmDeleteTask(task.id); }}
-                              style={{ background: 'var(--danger)', color: '#fff', border: 'none', borderRadius: 3, fontSize: 8, padding: '2px 5px', cursor: 'pointer', fontWeight: 700 }}
-                            >
-                              Sim
-                            </button>
-                          ) : (
-                            <ActionBtn icon={Trash2} onClick={() => setDeleteConfirmId(task.id)} color="var(--danger)" title="Excluir tarefa" size={10} />
-                          )}
-                        </div>
-                      )}
-
-                      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 4 }}>
-                        <GripVertical style={{ width: 10, height: 10, color: 'var(--text-muted)', flexShrink: 0, marginTop: 2 }} />
-                        <div style={{ flex: 1, minWidth: 0, paddingRight: 24 }}>
+                {/* Tasks */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minHeight: 60 }}>
+                  {colTasks.map(task => {
+                    const dueInfo = getDueDateIndicator(task.dueDay, currentDay);
+                    return (
+                      <div
+                        key={task.id}
+                        draggable
+                        onDragStart={(e) => handleDragStart(e, task.id)}
+                        onDragEnd={handleDragEnd}
+                        style={{
+                          background: 'var(--bg-card)',
+                          border: '1px solid var(--border-color)',
+                          borderLeft: `3px solid ${krStatus.color}`,
+                          borderRadius: 'var(--radius-sm)',
+                          padding: '8px 10px',
+                          cursor: 'grab',
+                          opacity: draggingId === task.id ? 0.4 : 1,
+                          transition: 'opacity 0.15s, box-shadow 0.15s',
+                          fontSize: 11,
+                          position: 'relative',
+                        }}
+                      >
+                        {/* Action buttons */}
+                        {isActive && (
                           <div style={{
-                            fontWeight: 500,
-                            color: col.id === 'done' ? 'var(--text-light)' : 'var(--text-dark)',
-                            textDecoration: col.id === 'done' ? 'line-through' : 'none',
-                            lineHeight: 1.3,
-                            fontSize: 11,
+                            position: 'absolute', top: 4, right: 4,
+                            display: 'flex', gap: 1, opacity: 0.7,
                           }}>
-                            {col.id === 'done' && <span style={{ marginRight: 3 }}>✓</span>}
-                            {task.title}
-                          </div>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
-                            {task.assignee && (
-                              <span style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 500 }}>
-                                {task.assignee}
-                              </span>
+                            <ActionBtn icon={Pencil} onClick={() => openEditTask(task)} color="var(--text-muted)" title="Editar tarefa" size={10} />
+                            {deleteConfirmId === task.id ? (
+                              <button
+                                onClick={(e) => { e.stopPropagation(); confirmDeleteTask(task.id); }}
+                                style={{ background: 'var(--danger)', color: '#fff', border: 'none', borderRadius: 3, fontSize: 8, padding: '2px 5px', cursor: 'pointer', fontWeight: 700 }}
+                              >
+                                Sim
+                              </button>
+                            ) : (
+                              <ActionBtn icon={Trash2} onClick={() => setDeleteConfirmId(task.id)} color="var(--danger)" title="Excluir tarefa" size={10} />
                             )}
-                            <span style={{ fontSize: 9, color: dueInfo.color, fontWeight: 600, marginLeft: 'auto' }}>
-                              <Calendar style={{ width: 8, height: 8, display: 'inline', verticalAlign: 'middle', marginRight: 2 }} />
-                              {dueInfo.label}
-                            </span>
+                          </div>
+                        )}
+
+                        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 4 }}>
+                          <GripVertical style={{ width: 10, height: 10, color: 'var(--text-muted)', flexShrink: 0, marginTop: 2 }} />
+                          <div style={{ flex: 1, minWidth: 0, paddingRight: 24 }}>
+                            <div style={{
+                              fontWeight: 500,
+                              color: col.id === 'done' ? 'var(--text-light)' : 'var(--text-dark)',
+                              textDecoration: col.id === 'done' ? 'line-through' : 'none',
+                              lineHeight: 1.3,
+                              fontSize: 11,
+                            }}>
+                              {col.id === 'done' && <span style={{ marginRight: 3 }}>✓</span>}
+                              {task.title}
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
+                              {task.assignee && (
+                                <span style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 500 }}>
+                                  {task.assignee}
+                                </span>
+                              )}
+                              <span style={{ fontSize: 9, color: dueInfo.color, fontWeight: 600, marginLeft: 'auto' }}>
+                                <Calendar style={{ width: 8, height: 8, display: 'inline', verticalAlign: 'middle', marginRight: 2 }} />
+                                {dueInfo.label}
+                              </span>
+                            </div>
                           </div>
                         </div>
                       </div>
+                    );
+                  })}
+                  {colTasks.length === 0 && (
+                    <div style={{
+                      border: '1px dashed var(--border-color)',
+                      borderRadius: 'var(--radius-sm)',
+                      padding: '12px 8px',
+                      textAlign: 'center',
+                      color: 'var(--text-muted)',
+                      fontSize: 10,
+                    }}>
+                      Arraste aqui
                     </div>
-                  );
-                })}
-                {colTasks.length === 0 && (
-                  <div style={{
-                    border: '1px dashed var(--border-color)',
-                    borderRadius: 'var(--radius-sm)',
-                    padding: '12px 8px',
-                    textAlign: 'center',
-                    color: 'var(--text-muted)',
-                    fontSize: 10,
-                  }}>
-                    Arraste aqui
-                  </div>
-                )}
+                  )}
+                </div>
               </div>
-            </div>
-          );
-        })}
-      </div>
+            );
+          })}
+        </div>
+      )}
 
       {/* Add Task — Inline */}
       {isActive && (
