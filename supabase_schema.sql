@@ -710,7 +710,7 @@ create index if not exists idx_profissionais_user_id on public.profissionais(use
 -- ─── 16. Anamneses ────────────────────────────────────────────
 create table if not exists public.anamneses (
   id text primary key,
-  client_id integer references public.clients(id) on delete cascade,
+  client_id uuid references public.clients(id) on delete cascade,
   data_preenchimento text,
   preenchido_por text default 'cliente',
   observacoes_profissional text,

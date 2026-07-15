@@ -1252,14 +1252,18 @@ export default function Anamnese() {
   const handleSave = async (fichaData, signatureData) => {
     try {
       if (!selectedPaciente) return;
+      const user = await getCurrentUser();
+      if (!user?.id) {
+        alert('Erro: usuário não autenticado. Faça login novamente.');
+        return;
+      }
+      
       const existing = anamneses[String(selectedPaciente.id)];
       const id = existing?.id;
       const payload = mapAnamneseToSupabase(
         { ...fichaData, id, clientId: selectedPaciente.id },
-        null
+        user.id
       );
-      const user = await getCurrentUser();
-      if (user?.id) payload.user_id = user.id;
 
       const { data, error } = await upsertAnamnese(payload);
       if (error) {
