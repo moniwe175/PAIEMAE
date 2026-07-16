@@ -678,6 +678,7 @@ create table if not exists public.profissionais (
   email text,
   comissao integer default 0,
   servicos jsonb default '[]'::jsonb,
+  foto_base64 text,
   user_id uuid references auth.users,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null,
   updated_at timestamp with time zone default timezone('utc'::text, now()) not null
@@ -706,6 +707,15 @@ create trigger handle_updated_at_profissionais
   for each row execute function public.handle_updated_at();
 
 create index if not exists idx_profissionais_user_id on public.profissionais(user_id);
+
+-- Backfill missing foto_base64 column on existing profissionais table (idempotent migration)
+do $$
+begin
+  if not exists (select 1 from information_schema.columns where table_name = 'profissionais' and column_name = 'foto_base64') then
+    alter table public.profissionais add column foto_base64 text;
+  end if;
+end;
+$$;
 
 -- ─── 16. Anamneses ────────────────────────────────────────────
 create table if not exists public.anamneses (

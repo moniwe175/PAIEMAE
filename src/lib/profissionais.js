@@ -44,7 +44,11 @@ async function loadData() {
   if (isSupabaseConfigured()) {
     const { data, error } = await supabase.from('profissionais').select('*').order('created_at');
     if (!error && data) {
-      return data.map(r => ({ ...r, servicos: r.servicos || [] }));
+      return data.map(r => ({ 
+        ...r, 
+        servicos: r.servicos || [],
+        fotoBase64: r.foto_base64 || null // Map snake_case to camelCase
+      }));
     }
   }
   return [];
@@ -53,7 +57,14 @@ async function loadData() {
 async function upsertToSupabase(prof) {
   if (!isSupabaseConfigured()) return;
   const user = await getCurrentUser();
-  await supabase.from('profissionais').upsert([{ ...prof, user_id: user?.id }], { onConflict: 'id' });
+  // Map camelCase to snake_case for Supabase
+  const dbProf = {
+    ...prof,
+    foto_base64: prof.fotoBase64 || null,
+    user_id: user?.id
+  };
+  delete dbProf.fotoBase64; // Remove camelCase version
+  await supabase.from('profissionais').upsert([dbProf], { onConflict: 'id' });
 }
 
 async function deleteFromSupabase(id) {
