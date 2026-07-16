@@ -691,10 +691,11 @@ function ObjectiveBlock({ objective, onMoveTask, expandedKRs, toggleKR }) {
     objective.keyResults.reduce((sum, kr) => sum + getKRProgress(kr.tasks), 0) / (objective.keyResults.length || 1)
   );
   const overallStatus = getKRStatus(avgProgress, expectedProgress);
-  const criticalKRs = objective.keyResults.filter(kr => {
-    const p = getKRProgress(kr.tasks);
-    return p < expectedProgress * 0.7;
-  });
+  
+  // Count overdue tasks (tasks not completed whose due day is less than the current day of the cycle)
+  const overdueTasks = (objective.keyResults || [])
+    .flatMap(kr => kr.tasks || [])
+    .filter(t => t && t.column !== 'done' && t.dueDay < currentDay);
 
   // Edit modal
   const [editOpen, setEditOpen] = useState(false);
