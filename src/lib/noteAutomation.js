@@ -9,9 +9,10 @@ function genAutoId(source, key) {
 // e.g. due_day=15 + cycle.start_date='2026-07-01' => Date(2026, 6, 15)
 function dueDayToDate(dueDay, cycleStartDate) {
   if (!dueDay || !cycleStartDate) return null;
-  const ref = new Date(cycleStartDate);
-  const result = new Date(ref.getFullYear(), ref.getMonth(), dueDay);
-  console.log('[DEBUG dueDayToDate] dueDay:', dueDay, 'cycleStartDate:', cycleStartDate, 'ref:', ref.toISOString(), 'result:', result.toISOString());
+  // Parse the date string to avoid timezone issues
+  const [year, month, day] = cycleStartDate.split('-').map(Number);
+  const result = new Date(year, month - 1, dueDay); // month is 0-indexed in JS
+  console.log('[DEBUG dueDayToDate] dueDay:', dueDay, 'cycleStartDate:', cycleStartDate, 'year:', year, 'month:', month, 'result:', result.toISOString());
   return result;
 }
 
