@@ -10,7 +10,9 @@ function genAutoId(source, key) {
 function dueDayToDate(dueDay, cycleStartDate) {
   if (!dueDay || !cycleStartDate) return null;
   const ref = new Date(cycleStartDate);
-  return new Date(ref.getFullYear(), ref.getMonth(), dueDay);
+  const result = new Date(ref.getFullYear(), ref.getMonth(), dueDay);
+  console.log('[DEBUG dueDayToDate] dueDay:', dueDay, 'cycleStartDate:', cycleStartDate, 'ref:', ref.toISOString(), 'result:', result.toISOString());
+  return result;
 }
 
 // Returns 'urgente' | 'medio' | 'pouca' based on days remaining.
