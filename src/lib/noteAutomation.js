@@ -12,7 +12,6 @@ function dueDayToDate(dueDay, cycleStartDate) {
   // Parse the date string to avoid timezone issues
   const [year, month, day] = cycleStartDate.split('-').map(Number);
   const result = new Date(year, month - 1, dueDay); // month is 0-indexed in JS
-  console.log('[DEBUG dueDayToDate] dueDay:', dueDay, 'cycleStartDate:', cycleStartDate, 'year:', year, 'month:', month, 'result:', result.toISOString());
   return result;
 }
 
@@ -65,7 +64,6 @@ export function generateAutoNotes({ stockAlerts = [], okrs = [], appointments = 
   // These replace the old kr.status-based notes. Each non-done task becomes a note.
   okrTasks.forEach(task => {
     const dueDate = dueDayToDate(task.dueDay, okrCycle?.start_date);
-    console.log('[DEBUG OKR] Task:', task.title, '| dueDay:', task.dueDay, '| cycleStartDate:', okrCycle?.start_date, '| dueDate:', dueDate?.toISOString());
     const prioridade = classifyPriority(dueDate, today);
     const formattedDate = formatDateBR(dueDate);
 
@@ -73,8 +71,6 @@ export function generateAutoNotes({ stockAlerts = [], okrs = [], appointments = 
     const msPerDay = 1000 * 60 * 60 * 24;
     const todayMidnight = new Date(today.getFullYear(), today.getMonth(), today.getDate());
     const dueMidnight = dueDate ? new Date(dueDate.getFullYear(), dueDate.getMonth(), dueDate.getDate()) : null;
-
-    console.log('[DEBUG OKR] today:', today.toISOString(), '| todayMidnight:', todayMidnight.toISOString(), '| dueMidnight:', dueMidnight?.toISOString(), '| isOverdue:', dueMidnight ? dueMidnight < todayMidnight : false, '| prioridade:', prioridade);
 
     notes.push({
       id: genAutoId('okrtask', task.id),
@@ -87,6 +83,7 @@ export function generateAutoNotes({ stockAlerts = [], okrs = [], appointments = 
       dueDateStr: formattedDate, // "15/07" formatted string
       isOverdue: dueMidnight ? dueMidnight < todayMidnight : false,
       okrTask: true,      // flag so Dashboard can distinguish from stock notes
+      assignee: task.assignee, // Add assignee for display
     });
   });
 

@@ -33,6 +33,11 @@ function StickyNote({ note, onDismiss, onDragStart, index }) {
         </div>
       )}
       <div style={{ fontSize: 12, fontWeight: 500, color: '#1F2937', lineHeight: 1.4, marginBottom: 6 }}>{note.texto}</div>
+      {note.assignee && (
+        <div style={{ fontSize: 10, fontWeight: 600, color: '#6B7280', marginBottom: 4 }}>
+          {note.assignee}
+        </div>
+      )}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         {note.source && (
           <span style={{ fontSize: 9, fontWeight: 600, color: '#9CA3AF', textTransform: 'uppercase', background: '#F3F4F6', padding: '1px 6px', borderRadius: 99 }}>{note.source}</span>
