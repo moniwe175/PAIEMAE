@@ -212,7 +212,7 @@ function MiniKanban({ krId, tasks, onMoveTask, krStatus }) {
 
   const openNewTask = () => {
     if (!isActive) return;
-    setNewTaskForm({ title: '', assignee: ASSIGNEES[0], dueDay: currentDay + 5 });
+    setNewTaskForm({ title: '', assignee: assigneeList[0] || '', dueDay: currentDay + 5 });
     setShowNewTask(true);
   };
 
@@ -220,7 +220,7 @@ function MiniKanban({ krId, tasks, onMoveTask, krStatus }) {
     if (!isActive) return;
     if (!newTaskForm.title.trim()) return;
     addTask(krId, newTaskForm);
-    setNewTaskForm({ title: '', assignee: ASSIGNEES[0], dueDay: currentDay + 5 });
+    setNewTaskForm({ title: '', assignee: assigneeList[0] || '', dueDay: currentDay + 5 });
     setShowNewTask(false);
   };
 
