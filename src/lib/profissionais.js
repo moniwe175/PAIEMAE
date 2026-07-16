@@ -55,11 +55,7 @@ async function loadData() {
 }
 
 async function upsertToSupabase(prof) {
-  if (!isSupabaseConfigured()) {
-    console.error('[PROFISSIONAIS] Supabase not configured');
-    return;
-  }
-  console.log('[PROFISSIONAIS] Upserting to Supabase:', prof.id, prof.nome);
+  if (!isSupabaseConfigured()) return;
   // Map camelCase to snake_case for Supabase
   const dbProf = {
     id: prof.id,
@@ -72,13 +68,7 @@ async function upsertToSupabase(prof) {
     servicos: prof.servicos
   };
   // Temporarily exclude fotoBase64 and user_id until columns are added to DB
-  console.log('[PROFISSIONAIS] DB payload:', dbProf);
-  const { data, error } = await supabase.from('profissionais').upsert([dbProf], { onConflict: 'id' });
-  if (error) {
-    console.error('[PROFISSIONAIS] Error upserting:', error);
-  } else {
-    console.log('[PROFISSIONAIS] Upsert successful:', data);
-  }
+  await supabase.from('profissionais').upsert([dbProf], { onConflict: 'id' });
 }
 
 async function deleteFromSupabase(id) {
