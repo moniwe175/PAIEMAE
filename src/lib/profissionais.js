@@ -63,11 +63,17 @@ async function upsertToSupabase(prof) {
   console.log('[PROFISSIONAIS] Upserting to Supabase:', prof.id, prof.nome);
   // Map camelCase to snake_case for Supabase
   const dbProf = {
-    ...prof,
-    foto_base64: prof.fotoBase64 || null,
+    id: prof.id,
+    nome: prof.nome,
+    cargo: prof.cargo,
+    cor: prof.cor,
+    telefone: prof.telefone,
+    email: prof.email,
+    comissao: prof.comissao,
+    servicos: prof.servicos,
     user_id: user?.id
   };
-  delete dbProf.fotoBase64; // Remove camelCase version
+  // Temporarily exclude fotoBase64 until column is added to DB
   console.log('[PROFISSIONAIS] DB payload:', dbProf);
   const { data, error } = await supabase.from('profissionais').upsert([dbProf], { onConflict: 'id' });
   if (error) {
