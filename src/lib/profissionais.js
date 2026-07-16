@@ -68,7 +68,7 @@ async function upsertToSupabase(prof) {
     cor: prof.cor,
     telefone: prof.telefone,
     email: prof.email,
-    comissao: prof.comissao,
+    comissao: Math.min(Math.max(prof.comissao || 0, 0), 100), // Limit to 0-100
     servicos: prof.servicos
   };
   // Temporarily exclude fotoBase64 and user_id until columns are added to DB
