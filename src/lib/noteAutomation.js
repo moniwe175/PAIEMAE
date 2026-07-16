@@ -62,6 +62,7 @@ export function generateAutoNotes({ stockAlerts = [], okrs = [], appointments = 
   // These replace the old kr.status-based notes. Each non-done task becomes a note.
   okrTasks.forEach(task => {
     const dueDate = dueDayToDate(task.dueDay, okrCycle?.start_date);
+    console.log('[DEBUG OKR] Task:', task.title, '| dueDay:', task.dueDay, '| cycleStartDate:', okrCycle?.start_date, '| dueDate:', dueDate?.toISOString());
     const prioridade = classifyPriority(dueDate, today);
     const formattedDate = formatDateBR(dueDate);
 
@@ -69,6 +70,8 @@ export function generateAutoNotes({ stockAlerts = [], okrs = [], appointments = 
     const msPerDay = 1000 * 60 * 60 * 24;
     const todayMidnight = new Date(today.getFullYear(), today.getMonth(), today.getDate());
     const dueMidnight = dueDate ? new Date(dueDate.getFullYear(), dueDate.getMonth(), dueDate.getDate()) : null;
+
+    console.log('[DEBUG OKR] today:', today.toISOString(), '| todayMidnight:', todayMidnight.toISOString(), '| dueMidnight:', dueMidnight?.toISOString(), '| isOverdue:', dueMidnight ? dueMidnight < todayMidnight : false, '| prioridade:', prioridade);
 
     notes.push({
       id: genAutoId('okrtask', task.id),
