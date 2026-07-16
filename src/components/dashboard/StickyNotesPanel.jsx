@@ -126,15 +126,10 @@ export default function StickyNotesPanel({ notes = [], onDismiss, onAdd, onMove 
               onDragOver={e => e.preventDefault()}
             >
               {/* Lane header */}
-              <div style={{ background: lane.bg, padding: '10px 14px', borderBottom: `2px solid ${lane.color}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <LaneIcon style={{ width: 13, height: 13, color: lane.color }} />
-                  <span style={{ fontSize: 11, fontWeight: 800, color: lane.color, letterSpacing: 0.5 }}>{lane.label}</span>
-                  <span style={{ background: lane.color, color: '#fff', borderRadius: 99, width: 18, height: 18, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 700 }}>{laneNotes.length}</span>
-                </div>
-                <button onClick={() => setAddingLane(lane.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 2, display: 'flex' }} title="Adicionar nota">
-                  <Plus style={{ width: 14, height: 14, color: lane.color }} />
-                </button>
+              <div style={{ background: lane.bg, padding: '10px 14px', borderBottom: `2px solid ${lane.color}`, display: 'flex', alignItems: 'center', gap: 6 }}>
+                <LaneIcon style={{ width: 13, height: 13, color: lane.color }} />
+                <span style={{ fontSize: 11, fontWeight: 800, color: lane.color, letterSpacing: 0.5 }}>{lane.label}</span>
+                <span style={{ background: lane.color, color: '#fff', borderRadius: 99, width: 18, height: 18, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 700 }}>{laneNotes.length}</span>
               </div>
               {/* Notes */}
               <div style={{ padding: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
