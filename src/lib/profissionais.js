@@ -59,7 +59,6 @@ async function upsertToSupabase(prof) {
     console.error('[PROFISSIONAIS] Supabase not configured');
     return;
   }
-  const user = await getCurrentUser();
   console.log('[PROFISSIONAIS] Upserting to Supabase:', prof.id, prof.nome);
   // Map camelCase to snake_case for Supabase
   const dbProf = {
@@ -70,10 +69,9 @@ async function upsertToSupabase(prof) {
     telefone: prof.telefone,
     email: prof.email,
     comissao: prof.comissao,
-    servicos: prof.servicos,
-    user_id: user?.id
+    servicos: prof.servicos
   };
-  // Temporarily exclude fotoBase64 until column is added to DB
+  // Temporarily exclude fotoBase64 and user_id until columns are added to DB
   console.log('[PROFISSIONAIS] DB payload:', dbProf);
   const { data, error } = await supabase.from('profissionais').upsert([dbProf], { onConflict: 'id' });
   if (error) {
