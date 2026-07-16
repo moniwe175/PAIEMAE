@@ -741,7 +741,7 @@ function ObjectiveBlock({ objective, onMoveTask, expandedKRs, toggleKR }) {
           </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
-          {criticalKRs.length > 0 && (
+          {overdueTasks.length > 0 && (
             <AlertTriangle style={{ width: 14, height: 14, color: 'var(--danger)' }} />
           )}
           <span className={`badge ${overallStatus.className}`}>{avgProgress}%</span>
@@ -766,7 +766,7 @@ function ObjectiveBlock({ objective, onMoveTask, expandedKRs, toggleKR }) {
       {/* Expanded Key Results */}
       {expanded && (
         <div style={{ marginTop: 16 }}>
-          {criticalKRs.length > 0 && (
+          {overdueTasks.length > 0 && (
             <div style={{
               padding: '8px 12px',
               background: 'var(--danger-bg)',
@@ -780,7 +780,7 @@ function ObjectiveBlock({ objective, onMoveTask, expandedKRs, toggleKR }) {
               marginBottom: 10,
             }}>
               <AlertTriangle style={{ width: 13, height: 13 }} />
-              {criticalKRs.length} KR{criticalKRs.length > 1 ? 's' : ''} em ritmo crítico — ação imediata necessária
+              {overdueTasks.length} tarefa{overdueTasks.length > 1 ? 's' : ''} atrasada{overdueTasks.length > 1 ? 's' : ''} — ação imediata necessária
             </div>
           )}
           {objective.keyResults.map(kr => (
