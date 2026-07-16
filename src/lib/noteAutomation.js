@@ -65,6 +65,11 @@ export function generateAutoNotes({ stockAlerts = [], okrs = [], appointments = 
     const prioridade = classifyPriority(dueDate, today);
     const formattedDate = formatDateBR(dueDate);
 
+    // Use same midnight comparison as classifyPriority for consistency
+    const msPerDay = 1000 * 60 * 60 * 24;
+    const todayMidnight = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    const dueMidnight = dueDate ? new Date(dueDate.getFullYear(), dueDate.getMonth(), dueDate.getDate()) : null;
+
     notes.push({
       id: genAutoId('okrtask', task.id),
       texto: task.title,
@@ -74,7 +79,7 @@ export function generateAutoNotes({ stockAlerts = [], okrs = [], appointments = 
       // Extra fields used by StickyNotesPanel for display:
       dueDate,            // JS Date object
       dueDateStr: formattedDate, // "15/07" formatted string
-      isOverdue: dueDate ? dueDate < new Date(today.getFullYear(), today.getMonth(), today.getDate()) : false,
+      isOverdue: dueMidnight ? dueMidnight < todayMidnight : false,
       okrTask: true,      // flag so Dashboard can distinguish from stock notes
     });
   });
