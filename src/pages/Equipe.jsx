@@ -46,7 +46,10 @@ function ProfissionalModal({ onClose, onSave, profissional }) {
           </div>
           <div className="form-group">
             <label className="form-label">Comissão (%)</label>
-            <input className="form-input" type="number" min="0" max="100" value={form.comissao} onChange={e => set('comissao', Number(e.target.value))} />
+            <input className="form-input" type="number" min="0" max="100" value={form.comissao} onChange={e => {
+              const value = Number(e.target.value);
+              set('comissao', value > 100 ? 100 : (value < 0 ? 0 : value));
+            }} />
           </div>
         </div>
 
