@@ -27,17 +27,19 @@ function StickyNote({ note, onDismiss, onDragStart, index }) {
       onMouseEnter={e => { e.currentTarget.style.transform = `rotate(0deg) scale(1.02)`; e.currentTarget.style.boxShadow = '0 4px 14px rgba(0,0,0,0.12)'; }}
       onMouseLeave={e => { e.currentTarget.style.transform = `rotate(${rotation}deg)`; e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.08)'; }}
     >
-      {note.auto_generated && (
-        <div style={{ fontSize: 9, fontWeight: 700, color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4, display: 'flex', alignItems: 'center', gap: 3 }}>
-          <GripVertical style={{ width: 8, height: 8 }} />Automatico
-        </div>
-      )}
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 4 }}>
+        {note.auto_generated && (
+          <div style={{ fontSize: 9, fontWeight: 700, color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: 0.5, display: 'flex', alignItems: 'center', gap: 3 }}>
+            <GripVertical style={{ width: 8, height: 8 }} />Automatico
+          </div>
+        )}
+        {note.assignee && (
+          <div style={{ fontSize: 10, fontWeight: 600, color: '#6B7280' }}>
+            {note.assignee}
+          </div>
+        )}
+      </div>
       <div style={{ fontSize: 12, fontWeight: 500, color: '#1F2937', lineHeight: 1.4, marginBottom: 6 }}>{note.texto}</div>
-      {note.assignee && (
-        <div style={{ fontSize: 10, fontWeight: 600, color: '#6B7280', marginBottom: 4 }}>
-          {note.assignee}
-        </div>
-      )}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         {note.source && (
           <span style={{ fontSize: 9, fontWeight: 600, color: '#9CA3AF', textTransform: 'uppercase', background: '#F3F4F6', padding: '1px 6px', borderRadius: 99 }}>{note.source}</span>
