@@ -346,20 +346,22 @@ export default function Pacientes() {
     setDeleteModal(null);
   };
 
+  const isNovo = (createdAt) => {
+    if (!createdAt) return false;
+    const date = new Date(createdAt);
+    const now = new Date();
+    return date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear();
+  };
+
   const filtrados = pacientes.filter(p => {
     const matchBusca = p.nome.toLowerCase().includes(busca.toLowerCase()) || p.telefone.includes(busca);
     if (!matchBusca) return false;
     
-    if (filtro === 'Ativo') return p.status === 'ativo';
-    if (filtro === 'Inativo') return p.status === 'inativo';
-    if (filtro === 'Novo') {
-      if (!p.createdAt) return false;
-      const created = new Date(p.createdAt);
-      const now = new Date();
-      const diffTime = Math.abs(now - created);
-      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-      return diffDays <= 30; // Considera novo se criado nos últimos 30 dias
-    }
+    const novo = isNovo(p.createdAt);
+    if (filtro === 'Novo') return novo;
+    if (filtro === 'Ativo') return p.status === 'ativo' && !novo;
+    if (filtro === 'Inativo') return p.status === 'inativo' && !novo;
+    
     return true; // 'Todos'
   });
 
@@ -421,13 +423,9 @@ export default function Pacientes() {
       <div className="grid-4 section-gap">
         {[
           {label:'Total',val:pacientes.length,cor:'var(--color-primary)'},
-          {label:'Ativos',val:pacientes.filter(p=>p.status==='ativo').length,cor:'var(--success)'},
-          {label:'Inativos',val:pacientes.filter(p=>p.status==='inativo').length,cor:'var(--warning)'},
-          {label:'Novos este mês',val:pacientes.filter(p => {
-            if (!p.createdAt) return false;
-            const diffDays = Math.ceil(Math.abs(new Date() - new Date(p.createdAt)) / (1000 * 60 * 60 * 24));
-            return diffDays <= 30;
-          }).length,cor:'var(--info)'},
+          {label:'Ativos',val:pacientes.filter(p=>p.status==='ativo' && !isNovo(p.createdAt)).length,cor:'var(--success)'},
+          {label:'Inativos',val:pacientes.filter(p=>p.status==='inativo' && !isNovo(p.createdAt)).length,cor:'var(--warning)'},
+          {label:'Novos este mês',val:pacientes.filter(p => isNovo(p.createdAt)).length,cor:'var(--info)'},
         ].map(({label,val,cor})=>(
           <div key={label} className="stat-card" style={{textAlign:'center'}}>
             <div className="stat-value" style={{color:cor}}>{val}</div>
@@ -488,7 +486,13 @@ export default function Pacientes() {
                       <td style={{fontSize:13,color:'var(--text-light)'}}>{p.ultimaVisita}</td>
                       <td style={{fontWeight:600,textAlign:'center'}}>{p.totalSessoes}</td>
                       <td style={{fontWeight:600,color:'var(--success)'}}>R$ {p.totalGasto.toLocaleString('pt-BR')}</td>
-                      <td><span className={`badge ${p.status==='ativo'?'badge-success':'badge-neutral'}`}>{p.status==='ativo'?'Ativo':'Inativo'}</span></td>
+                      <td>
+                        {isNovo(p.createdAt) ? (
+                          <span className="badge" style={{background:'#E0F2FE',color:'#0284C7'}}>Novo</span>
+                        ) : (
+                          <span className={`badge ${p.status==='ativo'?'badge-success':'badge-neutral'}`}>{p.status==='ativo'?'Ativo':'Inativo'}</span>
+                        )}
+                      </td>
                       <td>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                           <button
@@ -535,7 +539,11 @@ export default function Pacientes() {
               <div style={{textAlign:'center',marginBottom:16}}>
                 <div className="avatar avatar-lg" style={{margin:'0 auto 8px'}}>{selected.avatar}</div>
                 <div style={{fontWeight:700,fontSize:15,marginBottom:4}}>{selected.nome}</div>
-                <span className={`badge ${selected.status==='ativo'?'badge-success':'badge-neutral'}`}>{selected.status==='ativo'?'Ativo':'Inativo'}</span>
+                {isNovo(selected.createdAt) ? (
+                  <span className="badge" style={{background:'#E0F2FE',color:'#0284C7'}}>Novo</span>
+                ) : (
+                  <span className={`badge ${selected.status==='ativo'?'badge-success':'badge-neutral'}`}>{selected.status==='ativo'?'Ativo':'Inativo'}</span>
+                )}
               </div>
               <div className="divider"/>
               <div style={{display:'flex',flexDirection:'column',gap:9,fontSize:13}}>
