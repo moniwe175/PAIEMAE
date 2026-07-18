@@ -12,11 +12,7 @@ const defaultPacientes = [
   { id:6, nome:'Patrícia Rocha', telefone:'(11) 93210-9876', email:'patricia@email.com', cidade:'São Paulo', nascimento:'19/01/1982', ultimaVisita:'12/05/2026', totalSessoes:15, totalGasto:5800, status:'ativo', avatar:'P' },
 ];
 
-const historico = [
-  { data:'10/05/2026', servico:'Botox Facial', valor:650 },
-  { data:'15/03/2026', servico:'Preenchimento Labial', valor:900 },
-  { data:'10/01/2026', servico:'Peeling Químico', valor:320 },
-];
+const historicoDefault = [];
 
 function PacienteModal({ onClose, onSave }) {
   const [form, setForm] = useState({ nome:'', telefone:'', email:'', nascimento:'', cidade:'', obs:'' });
@@ -111,6 +107,20 @@ export default function Pacientes() {
           }, 0);
           const totalGasto = clientAppts.length > 0 ? calculadoGasto : (Number(item.total_spent) || 0);
 
+          const historicoPaciente = clientAppts.map(a => {
+            let v = 0;
+            try {
+              if (a.notes && a.notes.startsWith('{')) {
+                v = Number(JSON.parse(a.notes).valor) || 0;
+              }
+            } catch(e) {}
+            return {
+              data: a.appointment_date ? a.appointment_date.split('-').reverse().join('/') : '',
+              servico: a.procedure || 'Sessão',
+              valor: v
+            };
+          });
+
           return {
             id: item.id,
             nome: item.name || '',
@@ -123,7 +133,8 @@ export default function Pacientes() {
             totalSessoes: totalSessoes,
             totalGasto: totalGasto,
             status: item.status || 'ativo',
-            avatar: item.avatar || (item.name ? item.name.charAt(0).toUpperCase() : 'U')
+            avatar: item.avatar || (item.name ? item.name.charAt(0).toUpperCase() : 'U'),
+            historico: historicoPaciente
           };
         });
         setPacientes(mapped);
@@ -429,15 +440,18 @@ export default function Pacientes() {
                 </div>
               </div>
               <div style={{fontSize:12,fontWeight:600,color:'var(--text-medium)',marginBottom:8}}>Histórico de Sessões</div>
-              {historico.map((h,i)=>(
+              {(selected.historico || historicoDefault).map((h,i)=>(
                 <div key={i} className="alert-item">
                   <div>
                     <div className="alert-item-label">{h.servico}</div>
                     <div className="alert-item-sub">{h.data}</div>
                   </div>
-                  <div style={{fontWeight:700,color:'var(--success)',fontSize:13}}>R$ {h.valor}</div>
+                  <div style={{fontWeight:700,color:'var(--success)',fontSize:13}}>R$ {h.valor.toLocaleString('pt-BR')}</div>
                 </div>
               ))}
+              {(selected.historico || historicoDefault).length === 0 && (
+                <div style={{fontSize:12, color:'var(--text-muted)', textAlign:'center', margin:'12px 0'}}>Nenhuma sessão finalizada.</div>
+              )}
               <div style={{display:'flex',gap:6,marginTop:14}}>
                 <button className="btn btn-secondary btn-sm" style={{flex:1}}>Editar</button>
                 <button className="btn btn-primary btn-sm" style={{flex:1}}><Calendar style={{width:13,height:13}}/>Agendar</button>
