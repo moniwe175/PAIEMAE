@@ -70,6 +70,7 @@ export default function Pacientes() {
   const [editModal, setEditModal] = useState(null);
   const [deleteModal, setDeleteModal] = useState(null);
   const [busca, setBusca] = useState('');
+  const [filtro, setFiltro] = useState('Todos');
   const [selected, setSelected] = useState(null);
 
   // Load fresh data from Supabase on mount
@@ -132,7 +133,8 @@ export default function Pacientes() {
             totalGasto: totalGasto,
             status: item.status || 'ativo',
             avatar: item.avatar || (item.name ? item.name.charAt(0).toUpperCase() : 'U'),
-            historico: historicoPaciente
+            historico: historicoPaciente,
+            createdAt: item.created_at || new Date().toISOString()
           };
         });
         setPacientes(mapped);
@@ -286,7 +288,8 @@ export default function Pacientes() {
         totalGasto: Number(data.total_spent) || 0,
         status: data.status,
         avatar: data.avatar,
-        historico: []
+        historico: [],
+        createdAt: data.created_at || new Date().toISOString()
       };
       setPacientes(prev => [...prev, novo]);
     }
@@ -343,9 +346,22 @@ export default function Pacientes() {
     setDeleteModal(null);
   };
 
-  const filtrados = pacientes.filter(p =>
-    p.nome.toLowerCase().includes(busca.toLowerCase()) || p.telefone.includes(busca)
-  );
+  const filtrados = pacientes.filter(p => {
+    const matchBusca = p.nome.toLowerCase().includes(busca.toLowerCase()) || p.telefone.includes(busca);
+    if (!matchBusca) return false;
+    
+    if (filtro === 'Ativo') return p.status === 'ativo';
+    if (filtro === 'Inativo') return p.status === 'inativo';
+    if (filtro === 'Novo') {
+      if (!p.createdAt) return false;
+      const created = new Date(p.createdAt);
+      const now = new Date();
+      const diffTime = Math.abs(now - created);
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+      return diffDays <= 30; // Considera novo se criado nos últimos 30 dias
+    }
+    return true; // 'Todos'
+  });
 
   return (
     <div>
@@ -407,7 +423,11 @@ export default function Pacientes() {
           {label:'Total',val:pacientes.length,cor:'var(--color-primary)'},
           {label:'Ativos',val:pacientes.filter(p=>p.status==='ativo').length,cor:'var(--success)'},
           {label:'Inativos',val:pacientes.filter(p=>p.status==='inativo').length,cor:'var(--warning)'},
-          {label:'Novos este mês',val:2,cor:'var(--info)'},
+          {label:'Novos este mês',val:pacientes.filter(p => {
+            if (!p.createdAt) return false;
+            const diffDays = Math.ceil(Math.abs(new Date() - new Date(p.createdAt)) / (1000 * 60 * 60 * 24));
+            return diffDays <= 30;
+          }).length,cor:'var(--info)'},
         ].map(({label,val,cor})=>(
           <div key={label} className="stat-card" style={{textAlign:'center'}}>
             <div className="stat-value" style={{color:cor}}>{val}</div>
@@ -419,10 +439,32 @@ export default function Pacientes() {
       <div style={{display:'flex',gap:16}}>
         <div style={{flex:1}}>
           <div className="card" style={{padding:0,overflow:'hidden'}}>
-            <div style={{padding:'14px 20px',borderBottom:'1px solid var(--border-color)'}}>
-              <div className="search-box">
+            <div style={{padding:'14px 20px',borderBottom:'1px solid var(--border-color)',display:'flex',alignItems:'center',gap:16}}>
+              <div className="search-box" style={{flex:1}}>
                 <Search />
                 <input className="search-input" placeholder="Buscar paciente..." value={busca} onChange={e=>setBusca(e.target.value)} />
+              </div>
+              <div style={{display:'flex',gap:8}}>
+                {['Todos', 'Ativo', 'Inativo', 'Novo'].map(f => (
+                  <button
+                    key={f}
+                    onClick={() => setFiltro(f)}
+                    style={{
+                      padding: '6px 12px',
+                      borderRadius: 20,
+                      border: '1px solid',
+                      borderColor: filtro === f ? 'var(--color-primary)' : 'var(--border-color)',
+                      background: filtro === f ? 'var(--color-primary)' : '#fff',
+                      color: filtro === f ? '#fff' : 'var(--text-medium)',
+                      fontSize: 13,
+                      fontWeight: 500,
+                      cursor: 'pointer',
+                      transition: 'all 0.2s'
+                    }}
+                  >
+                    {f === 'Ativo' ? 'Ativos' : f === 'Inativo' ? 'Inativos' : f === 'Novo' ? 'Novos' : 'Todos'}
+                  </button>
+                ))}
               </div>
             </div>
             <div className="table-wrapper">
