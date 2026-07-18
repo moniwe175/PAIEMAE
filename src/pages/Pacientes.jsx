@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Users, Plus, Search, Phone, Calendar, FileText, Star, XCircle, ChevronRight, Mail, MapPin, Upload, Trash2 } from 'lucide-react';
+import { Users, Plus, Search, Phone, Calendar, FileText, Star, XCircle, ChevronRight, Mail, Instagram, Upload, Trash2 } from 'lucide-react';
 import { fetchClients, insertClient, deleteClient, fetchAppointments } from '../services/supabaseService';
 import { getCurrentUser } from '../lib/supabase';
 
@@ -116,6 +116,7 @@ export default function Pacientes() {
             nome: item.name || '',
             telefone: item.phone || '',
             email: item.email || '',
+            instagram: item.instagram || '',
             cidade: 'Não informada',
             nascimento: item.birthdate ? item.birthdate.split('-').reverse().join('/') : '',
             ultimaVisita: ultimaVisita,
@@ -412,8 +413,9 @@ export default function Pacientes() {
               <div className="divider"/>
               <div style={{display:'flex',flexDirection:'column',gap:9,fontSize:13}}>
                 <div style={{display:'flex',gap:8,alignItems:'center',color:'var(--text-light)'}}><Phone style={{width:13,height:13}}/>{selected.telefone}</div>
-                <div style={{display:'flex',gap:8,alignItems:'center',color:'var(--text-light)'}}><Mail style={{width:13,height:13}}/>{selected.email}</div>
-                <div style={{display:'flex',gap:8,alignItems:'center',color:'var(--text-light)'}}><MapPin style={{width:13,height:13}}/>{selected.cidade}</div>
+                {selected.email && <div style={{display:'flex',gap:8,alignItems:'center',color:'var(--text-light)'}}><Mail style={{width:13,height:13}}/>{selected.email}</div>}
+                {selected.instagram && <div style={{display:'flex',gap:8,alignItems:'center',color:'var(--text-light)'}}><Instagram style={{width:13,height:13}}/>{selected.instagram}</div>}
+                {selected.nascimento && <div style={{display:'flex',gap:8,alignItems:'center',color:'var(--text-light)'}}><Calendar style={{width:13,height:13}}/>{selected.nascimento}</div>}
               </div>
               <div className="divider"/>
               <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginBottom:12}}>
