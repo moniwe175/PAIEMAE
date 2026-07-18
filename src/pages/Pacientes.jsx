@@ -100,6 +100,17 @@ export default function Pacientes() {
 
           const totalSessoes = clientAppts.length > 0 ? clientAppts.length : (item.points || 0);
 
+          let calculadoGasto = clientAppts.reduce((acc, a) => {
+            let v = 0;
+            try {
+              if (a.notes && a.notes.startsWith('{')) {
+                v = Number(JSON.parse(a.notes).valor) || 0;
+              }
+            } catch(e) {}
+            return acc + v;
+          }, 0);
+          const totalGasto = clientAppts.length > 0 ? calculadoGasto : (Number(item.total_spent) || 0);
+
           return {
             id: item.id,
             nome: item.name || '',
@@ -109,7 +120,7 @@ export default function Pacientes() {
             nascimento: item.birthdate ? item.birthdate.split('-').reverse().join('/') : '',
             ultimaVisita: ultimaVisita,
             totalSessoes: totalSessoes,
-            totalGasto: Number(item.total_spent) || 0,
+            totalGasto: totalGasto,
             status: item.status || 'ativo',
             avatar: item.avatar || (item.name ? item.name.charAt(0).toUpperCase() : 'U')
           };
