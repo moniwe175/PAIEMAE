@@ -38,74 +38,152 @@ const CAT_COLORS = {
 };
 
 function ProdutoModal({ onClose, onSave }) {
-  const [form, setForm] = useState({ nome:'', categoria:'', lote:'', fornecedor:'', estoque:'', minimo:'', unidade:'unidade', preco:'', vencimento:'' });
+  const [form, setForm] = useState({
+    nome: '',
+    marca: '',
+    categoria: '',
+    unidade: 'unidade',
+    sku: '',
+    estoque: '0',
+    minimo: '5',
+    preco: '0',
+    preco_venda: '0',
+    vencimento: '',
+    lote: '',
+    fornecedor: '',
+    fornecedor_telefone: '',
+    fornecedor_email: '',
+    link: ''
+  });
   const set = (k,v) => setForm(f=>({...f,[k]:v}));
   const canSave = form.nome && form.categoria && form.estoque !== '';
+  
   const handleSave = async () => {
     if (!canSave) return;
-    const e = Number(form.estoque), m = Number(form.minimo) || 0, pr = Number(form.preco) || 0;
+    const e = Number(form.estoque), m = Number(form.minimo) || 0, pr = Number(form.preco) || 0, pv = Number(form.preco_venda) || 0;
     await onSave({
-      nome: form.nome, categoria: form.categoria, lote: form.lote,
-      fornecedor: form.fornecedor, estoque: e, minimo: m,
-      unidade: form.unidade || 'unidade',
-      preco: pr, vencimento: form.vencimento,
+      nome: form.nome,
+      marca: form.marca,
+      categoria: form.categoria,
+      unidade: form.unidade,
+      sku: form.sku,
+      estoque: e,
+      minimo: m,
+      preco: pr,
+      preco_venda: pv,
+      vencimento: form.vencimento,
+      lote: form.lote,
+      fornecedor: form.fornecedor,
+      fornecedor_telefone: form.fornecedor_telefone,
+      fornecedor_email: form.fornecedor_email,
+      link: form.link,
       status: calcStatus(e, m)
     });
     onClose();
   };
+
+  const labelStyle = { display: 'block', marginBottom: 6, fontSize: 13, fontWeight: 600, color: '#374151', fontFamily: 'inherit' };
+  const inputStyle = { width: '100%', padding: '10px 14px', border: '1.5px solid #E5E7EB', borderRadius: 12, outline: 'none', background: '#FAFAFA', fontSize: 13, color: '#374151', boxSizing: 'border-box', fontFamily: 'inherit' };
+
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={e=>e.stopPropagation()}>
-        <div className="modal-header">
-          <span className="modal-title">Novo Produto</span>
-          <button className="modal-close" onClick={onClose}><XCircle /></button>
+      <div className="modal" onClick={e=>e.stopPropagation()} style={{maxWidth: 480, padding: 0, borderRadius: 24, overflow: 'hidden', maxHeight: '90vh', display: 'flex', flexDirection: 'column'}}>
+        <div style={{padding: '20px 24px', borderBottom: '1px solid #F3F4F6', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#FAFAFA', flexShrink: 0}}>
+          <h2 style={{fontSize: 18, fontWeight: 700, color: '#111827', margin: 0, fontFamily: 'inherit'}}>Novo Produto</h2>
+          <button onClick={onClose} style={{background: 'none', border: 'none', cursor: 'pointer', color: '#9CA3AF', padding: 4}}><XCircle style={{width: 20, height: 20}} /></button>
         </div>
-        <div className="form-grid-2">
-          <div className="form-group" style={{gridColumn:'span 2'}}>
-            <label className="form-label">Nome do Produto *</label>
-            <input className="form-input" placeholder="Ex: Botox Allergan 100U" value={form.nome} onChange={e=>set('nome',e.target.value)} />
+
+        <div style={{padding: '24px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 16, flexGrow: 1}}>
+          <div>
+            <label style={labelStyle}>Nome *</label>
+            <input style={inputStyle} value={form.nome} onChange={e=>set('nome',e.target.value)} />
           </div>
-          <div className="form-group">
-            <label className="form-label">Categoria *</label>
-            <select className="form-select" value={form.categoria} onChange={e=>set('categoria',e.target.value)}>
-              <option value="">Selecione...</option>
-              {CATEGORIAS.map(c=><option key={c}>{c}</option>)}
-            </select>
+
+          <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12}}>
+            <div>
+              <label style={labelStyle}>Marca</label>
+              <input style={inputStyle} value={form.marca} onChange={e=>set('marca',e.target.value)} />
+            </div>
+            <div>
+              <label style={labelStyle}>Categoria *</label>
+              <select style={inputStyle} value={form.categoria} onChange={e=>set('categoria',e.target.value)}>
+                <option value="">Selecione...</option>
+                {CATEGORIAS.map(c=><option key={c}>{c}</option>)}
+              </select>
+            </div>
           </div>
-          <div className="form-group">
-            <label className="form-label">Unidade</label>
-            <select className="form-select" value={form.unidade} onChange={e=>set('unidade',e.target.value)}>
-              {UNIDADES.map(u=><option key={u}>{u}</option>)}
-            </select>
+
+          <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12}}>
+            <div>
+              <label style={labelStyle}>Unidade</label>
+              <select style={inputStyle} value={form.unidade} onChange={e=>set('unidade',e.target.value)}>
+                {UNIDADES.map(u=><option key={u}>{u}</option>)}
+              </select>
+            </div>
+            <div>
+              <label style={labelStyle}>SKU</label>
+              <input style={inputStyle} value={form.sku} onChange={e=>set('sku',e.target.value)} />
+            </div>
           </div>
-          <div className="form-group">
-            <label className="form-label">Fornecedor</label>
-            <input className="form-input" placeholder="Nome do fornecedor" value={form.fornecedor} onChange={e=>set('fornecedor',e.target.value)} />
+
+          <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12}}>
+            <div>
+              <label style={labelStyle}>Estoque Atual</label>
+              <input style={inputStyle} type="number" value={form.estoque} onChange={e=>set('estoque',e.target.value)} />
+            </div>
+            <div>
+              <label style={labelStyle}>Estoque Mínimo</label>
+              <input style={inputStyle} type="number" value={form.minimo} onChange={e=>set('minimo',e.target.value)} />
+            </div>
           </div>
-          <div className="form-group">
-            <label className="form-label">Lote</label>
-            <input className="form-input" placeholder="Ex: BOT2026A" value={form.lote} onChange={e=>set('lote',e.target.value)} />
+
+          <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12}}>
+            <div>
+              <label style={labelStyle}>Preço Custo (R$)</label>
+              <input style={inputStyle} type="number" value={form.preco} onChange={e=>set('preco',e.target.value)} />
+            </div>
+            <div>
+              <label style={labelStyle}>Preço Venda (R$)</label>
+              <input style={inputStyle} type="number" value={form.preco_venda} onChange={e=>set('preco_venda',e.target.value)} />
+            </div>
           </div>
-          <div className="form-group">
-            <label className="form-label">Estoque Atual *</label>
-            <input className="form-input" type="number" placeholder="0" value={form.estoque} onChange={e=>set('estoque',e.target.value)} />
+
+          <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12}}>
+            <div>
+              <label style={labelStyle}>Validade</label>
+              <input style={inputStyle} type="date" value={form.vencimento} onChange={e=>set('vencimento',e.target.value)} />
+            </div>
+            <div>
+              <label style={labelStyle}>Lote</label>
+              <input style={inputStyle} value={form.lote} onChange={e=>set('lote',e.target.value)} />
+            </div>
           </div>
-          <div className="form-group">
-            <label className="form-label">Estoque Mínimo</label>
-            <input className="form-input" type="number" placeholder="0" value={form.minimo} onChange={e=>set('minimo',e.target.value)} />
+
+          <div>
+            <label style={labelStyle}>Fornecedor — Nome</label>
+            <input style={inputStyle} placeholder="Nome do fornecedor" value={form.fornecedor} onChange={e=>set('fornecedor',e.target.value)} />
           </div>
-          <div className="form-group">
-            <label className="form-label">Custo (R$)</label>
-            <input className="form-input" type="number" placeholder="0,00" value={form.preco} onChange={e=>set('preco',e.target.value)} />
+
+          <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12}}>
+            <div>
+              <label style={labelStyle}>Fornecedor — Telefone</label>
+              <input style={inputStyle} placeholder="(11) 99999-9999" value={form.fornecedor_telefone} onChange={e=>set('fornecedor_telefone',e.target.value)} />
+            </div>
+            <div>
+              <label style={labelStyle}>Fornecedor — Email</label>
+              <input style={inputStyle} type="email" placeholder="contato@fornecedor.com" value={form.fornecedor_email} onChange={e=>set('fornecedor_email',e.target.value)} />
+            </div>
           </div>
-          <div className="form-group">
-            <label className="form-label">Validade</label>
-            <input className="form-input" type="date" value={form.vencimento} onChange={e=>set('vencimento',e.target.value)} />
+
+          <div>
+            <label style={labelStyle}>Link do Produto</label>
+            <input style={inputStyle} placeholder="https://..." value={form.link} onChange={e=>set('link',e.target.value)} />
           </div>
         </div>
-        <div style={{display:'flex',gap:8,justifyContent:'flex-end',marginTop:8}}>
-          <button className="btn btn-ghost" onClick={onClose}>Cancelar</button>
-          <button className="btn btn-primary" disabled={!canSave} onClick={handleSave} style={{opacity:canSave?1:0.5}}>Salvar</button>
+
+        <div style={{padding: '16px 24px', display: 'flex', gap: 12, justifyContent: 'flex-end', background: '#FAFAFA', borderTop: '1px solid #F3F4F6', flexShrink: 0}}>
+          <button className="btn btn-ghost" onClick={onClose} style={{padding: '10px 20px', borderRadius: 12, border: '1.5px solid #E5E7EB', background: '#fff', fontSize: 14, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit'}}>Cancelar</button>
+          <button className="btn btn-primary" disabled={!canSave} onClick={handleSave} style={{padding: '10px 20px', borderRadius: 12, border: 'none', background: canSave ? 'var(--color-primary)' : '#E5E7EB', color: '#fff', fontSize: 14, fontWeight: 600, cursor: canSave ? 'pointer' : 'not-allowed', fontFamily: 'inherit'}}>Salvar</button>
         </div>
       </div>
     </div>
