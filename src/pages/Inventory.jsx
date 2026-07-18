@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Package, Plus, Search, AlertTriangle, XCircle, TrendingDown, Trash2, AlertOctagon, MoreVertical, Edit2, ExternalLink } from 'lucide-react';
-import { fetchInventory, insertInventoryItem, deleteInventoryItem } from '../services/supabaseService';
+import { Package, Plus, Search, AlertTriangle, XCircle, TrendingDown, Trash2, AlertOctagon, MoreVertical, Edit2, ExternalLink, ArrowUp, ArrowDown } from 'lucide-react';
+import { fetchInventory, insertInventoryItem, deleteInventoryItem, updateInventoryItem } from '../services/supabaseService';
 import { getCurrentUser } from '../lib/supabase';
 
 function genId() {
@@ -37,23 +37,23 @@ const CAT_COLORS = {
   'Outros':             { bg: '#F3F4F6', color: '#6B7280' },
 };
 
-function ProdutoModal({ onClose, onSave }) {
+function ProdutoModal({ produto, onClose, onSave }) {
   const [form, setForm] = useState({
-    nome: '',
-    marca: '',
-    categoria: '',
-    unidade: 'unidade',
-    sku: '',
-    estoque: '0',
-    minimo: '5',
-    preco: '0',
-    preco_venda: '0',
-    vencimento: '',
-    lote: '',
-    fornecedor: '',
-    fornecedor_telefone: '',
-    fornecedor_email: '',
-    link: ''
+    nome: produto?.nome || '',
+    marca: produto?.marca || '',
+    categoria: produto?.categoria || '',
+    unidade: produto?.unidade || 'unidade',
+    sku: produto?.sku || '',
+    estoque: produto?.estoque?.toString() || '0',
+    minimo: produto?.minimo?.toString() || '5',
+    preco: produto?.preco?.toString() || '0',
+    preco_venda: produto?.preco_venda?.toString() || '0',
+    vencimento: produto?.vencimento || '',
+    lote: produto?.lote || '',
+    fornecedor: produto?.fornecedor || '',
+    fornecedor_telefone: produto?.fornecedor_telefone || '',
+    fornecedor_email: produto?.fornecedor_email || '',
+    link: produto?.link || ''
   });
   const set = (k,v) => setForm(f=>({...f,[k]:v}));
   const canSave = form.nome && form.categoria && form.estoque !== '';
@@ -61,7 +61,7 @@ function ProdutoModal({ onClose, onSave }) {
   const handleSave = async () => {
     if (!canSave) return;
     const e = Number(form.estoque), m = Number(form.minimo) || 0, pr = Number(form.preco) || 0, pv = Number(form.preco_venda) || 0;
-    await onSave({
+    const itemData = {
       nome: form.nome,
       marca: form.marca,
       categoria: form.categoria,
@@ -78,7 +78,9 @@ function ProdutoModal({ onClose, onSave }) {
       fornecedor_email: form.fornecedor_email,
       link: form.link,
       status: calcStatus(e, m)
-    });
+    };
+    if (produto?.id) itemData.id = produto.id;
+    await onSave(itemData);
     onClose();
   };
 
@@ -89,7 +91,7 @@ function ProdutoModal({ onClose, onSave }) {
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" onClick={e=>e.stopPropagation()} style={{maxWidth: 480, padding: 0, borderRadius: 24, overflow: 'hidden', maxHeight: '90vh', display: 'flex', flexDirection: 'column'}}>
         <div style={{padding: '20px 24px', borderBottom: '1px solid #F3F4F6', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#FAFAFA', flexShrink: 0}}>
-          <h2 style={{fontSize: 18, fontWeight: 700, color: '#111827', margin: 0, fontFamily: 'inherit'}}>Novo Produto</h2>
+          <h2 style={{fontSize: 18, fontWeight: 700, color: '#111827', margin: 0, fontFamily: 'inherit'}}>{produto ? 'Editar Produto' : 'Novo Produto'}</h2>
           <button onClick={onClose} style={{background: 'none', border: 'none', cursor: 'pointer', color: '#9CA3AF', padding: 4}}><XCircle style={{width: 20, height: 20}} /></button>
         </div>
 
@@ -190,7 +192,34 @@ function ProdutoModal({ onClose, onSave }) {
   );
 }
 
-function RowMenu({ produto, onDelete }) {
+function EntradaModal({ produto, onClose, onSave }) {
+  const [qtd, setQtd] = useState('');
+  const canSave = Number(qtd) > 0;
+  
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" onClick={e=>e.stopPropagation()} style={{maxWidth: 400, padding: 24, borderRadius: 24}}>
+        <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20}}>
+          <h2 style={{fontSize: 18, fontWeight: 700, margin: 0}}>Entrada de Estoque</h2>
+          <button onClick={onClose} style={{background: 'none', border: 'none', cursor: 'pointer', color: '#9CA3AF'}}><XCircle style={{width: 20, height: 20}} /></button>
+        </div>
+        <p style={{fontSize: 14, color: '#4B5563', marginBottom: 20}}>
+          Adicionar quantidade ao produto <strong>{produto.nome}</strong>. (Estoque atual: {produto.estoque})
+        </p>
+        <div>
+          <label style={{ display: 'block', marginBottom: 6, fontSize: 13, fontWeight: 600 }}>Quantidade a adicionar *</label>
+          <input type="number" style={{ width: '100%', padding: '10px 14px', border: '1.5px solid #E5E7EB', borderRadius: 12, outline: 'none', background: '#FAFAFA', fontSize: 13, boxSizing: 'border-box' }} value={qtd} onChange={e=>setQtd(e.target.value)} />
+        </div>
+        <div style={{display: 'flex', gap: 12, marginTop: 24, justifyContent: 'flex-end'}}>
+          <button className="btn btn-ghost" onClick={onClose} style={{padding: '10px 20px', borderRadius: 12, border: '1.5px solid #E5E7EB', background: '#fff', fontSize: 14, fontWeight: 600, cursor: 'pointer'}}>Cancelar</button>
+          <button className="btn btn-primary" disabled={!canSave} onClick={() => onSave(produto, Number(qtd))} style={{padding: '10px 20px', borderRadius: 12, border: 'none', background: canSave ? 'var(--color-primary)' : '#E5E7EB', color: '#fff', fontSize: 14, fontWeight: 600, cursor: canSave ? 'pointer' : 'not-allowed'}}>Confirmar</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function RowMenu({ produto, onEdit, onEntrada, onDelete }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
   useEffect(() => {
@@ -208,6 +237,22 @@ function RowMenu({ produto, onDelete }) {
       </button>
       {open && (
         <div style={{position:'absolute',right:0,top:'calc(100% + 4px)',background:'#fff',border:'1px solid #E5E7EB',borderRadius:10,boxShadow:'0 8px 24px rgba(0,0,0,0.12)',zIndex:100,minWidth:140,overflow:'hidden'}}>
+          <button
+            onClick={() => { onEdit(produto); setOpen(false); }}
+            style={{display:'flex',alignItems:'center',gap:8,width:'100%',padding:'10px 14px',background:'none',border:'none',cursor:'pointer',fontSize:13,color:'#374151',fontWeight:500}}
+            onMouseEnter={e=>e.currentTarget.style.background='#F3F4F6'}
+            onMouseLeave={e=>e.currentTarget.style.background='none'}
+          >
+            <Edit2 style={{width:14,height:14}} /> Editar
+          </button>
+          <button
+            onClick={() => { onEntrada(produto); setOpen(false); }}
+            style={{display:'flex',alignItems:'center',gap:8,width:'100%',padding:'10px 14px',background:'none',border:'none',cursor:'pointer',fontSize:13,color:'#374151',fontWeight:500}}
+            onMouseEnter={e=>e.currentTarget.style.background='#F3F4F6'}
+            onMouseLeave={e=>e.currentTarget.style.background='none'}
+          >
+            <ArrowUp style={{width:14,height:14}} /> Entrada
+          </button>
           <button
             onClick={() => { onDelete(produto); setOpen(false); }}
             style={{display:'flex',alignItems:'center',gap:8,width:'100%',padding:'10px 14px',background:'none',border:'none',cursor:'pointer',fontSize:13,color:'#EF4444',fontWeight:500}}
@@ -250,6 +295,8 @@ function DeleteConfirmModal({ produto, onClose, onConfirm }) {
 
 export default function Inventory() {
   const [modal, setModal] = useState(false);
+  const [editTarget, setEditTarget] = useState(null);
+  const [entradaTarget, setEntradaTarget] = useState(null);
   const [busca, setBusca] = useState('');
   const [produtos, setProdutos] = useState([]);
   const [deleteTarget, setDeleteTarget] = useState(null);
@@ -288,15 +335,39 @@ export default function Inventory() {
     setDeleteTarget(null);
   };
 
-  const handleAdd = async (produto) => {
-    const { data, error } = await insertInventoryItem(produto);
+  const handleSave = async (produto) => {
+    if (produto.id) {
+      const { data, error } = await updateInventoryItem(produto.id, produto);
+      if (error) {
+        alert('Erro ao atualizar produto: ' + (error.message || JSON.stringify(error)));
+        return;
+      }
+      if (data) {
+        setProdutos(prev => prev.map(p => p.id === data.id ? { ...data, estoque: Number(data.estoque) || 0, minimo: Number(data.minimo) || 0, preco: Number(data.preco) || 0 } : p));
+      }
+    } else {
+      const { data, error } = await insertInventoryItem(produto);
+      if (error) {
+        alert('Erro ao salvar produto: ' + (error.message || JSON.stringify(error)));
+        return;
+      }
+      if (data) {
+        setProdutos(prev => [...prev, { ...data, estoque: Number(data.estoque) || 0, minimo: Number(data.minimo) || 0, preco: Number(data.preco) || 0 }]);
+      }
+    }
+  };
+
+  const handleEntrada = async (produto, qtd) => {
+    const novoEstoque = produto.estoque + qtd;
+    const { data, error } = await updateInventoryItem(produto.id, { estoque: novoEstoque, status: calcStatus(novoEstoque, produto.minimo) });
     if (error) {
-      alert('Erro ao salvar produto: ' + (error.message || JSON.stringify(error)));
+      alert('Erro ao dar entrada: ' + (error.message || JSON.stringify(error)));
       return;
     }
     if (data) {
-      setProdutos(prev => [...prev, { ...data, estoque: Number(data.estoque) || 0, minimo: Number(data.minimo) || 0, preco: Number(data.preco) || 0 }]);
+      setProdutos(prev => prev.map(p => p.id === data.id ? { ...data, estoque: Number(data.estoque) || 0, minimo: Number(data.minimo) || 0, preco: Number(data.preco) || 0 } : p));
     }
+    setEntradaTarget(null);
   };
 
   const formatDate = (v) => {
@@ -310,7 +381,8 @@ export default function Inventory() {
 
   return (
     <div>
-      {modal && <ProdutoModal onClose={() => setModal(false)} onSave={handleAdd} />}
+      {(modal || editTarget) && <ProdutoModal produto={editTarget} onClose={() => { setModal(false); setEditTarget(null); }} onSave={handleSave} />}
+      {entradaTarget && <EntradaModal produto={entradaTarget} onClose={() => setEntradaTarget(null)} onSave={handleEntrada} />}
       {deleteTarget && <DeleteConfirmModal produto={deleteTarget} onClose={() => setDeleteTarget(null)} onConfirm={handleDelete} />}
 
       <div className="page-header" style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between'}}>
@@ -319,7 +391,12 @@ export default function Inventory() {
           <h1 className="page-title">Estoque</h1>
           <p className="page-subtitle">{produtos.length} produto(s) cadastrado(s)</p>
         </div>
-        <button className="btn btn-primary" onClick={() => setModal(true)}><Plus />Novo Produto</button>
+        <div style={{display:'flex', gap: 12}}>
+          <button className="btn btn-ghost" style={{padding: '10px 16px', borderRadius: 12, border: '1.5px solid #E5E7EB', background: '#fff', fontSize: 14, fontWeight: 600, color: '#374151', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8}} onClick={() => alert('Em breve: Relatório de Movimentações')}>
+            <ArrowDown style={{width: 16, height: 16}} /> Movimentação
+          </button>
+          <button className="btn btn-primary" onClick={() => setModal(true)}><Plus />Novo Produto</button>
+        </div>
       </div>
 
       <div className="grid-4 section-gap">
@@ -454,7 +531,7 @@ export default function Inventory() {
 
                     {/* Menu */}
                     <td style={{padding:'16px 16px',textAlign:'right'}}>
-                      <RowMenu produto={p} onDelete={setDeleteTarget} />
+                      <RowMenu produto={p} onEdit={setEditTarget} onEntrada={setEntradaTarget} onDelete={setDeleteTarget} />
                     </td>
                   </tr>
                 );
