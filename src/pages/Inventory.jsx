@@ -348,13 +348,13 @@ export default function Inventory() {
         </div>
       )}
 
-      <div className="card" style={{padding:0,overflow:'hidden',borderRadius:16}}>
+      <div className="card" style={{padding:0,overflow:'visible',borderRadius:12,border:'1px solid #EAE3DD'}}>
         {/* Search bar */}
-        <div style={{padding:'16px 20px',borderBottom:'1px solid #F3F4F6'}}>
-          <div style={{display:'flex',alignItems:'center',gap:10,background:'#F9FAFB',border:'1.5px solid #E5E7EB',borderRadius:50,padding:'9px 16px',maxWidth:360}}>
-            <Search style={{width:15,height:15,color:'#9CA3AF',flexShrink:0}} />
+        <div style={{padding:'20px 24px'}}>
+          <div style={{display:'flex',alignItems:'center',gap:10,background:'#FAF7F5',border:'1px solid #E5D5C5',borderRadius:8,padding:'10px 16px',maxWidth:360}}>
+            <Search style={{width:16,height:16,color:'#A89F96',flexShrink:0}} />
             <input
-              style={{border:'none',outline:'none',background:'transparent',fontSize:14,color:'#374151',width:'100%'}}
+              style={{border:'none',outline:'none',background:'transparent',fontSize:14,color:'#444',width:'100%',fontFamily:'inherit'}}
               placeholder="Buscar produto..."
               value={busca}
               onChange={e=>setBusca(e.target.value)}
@@ -363,12 +363,12 @@ export default function Inventory() {
         </div>
 
         {/* Table */}
-        <div style={{overflowX:'auto'}}>
+        <div>
           <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
             <thead>
               <tr style={{borderBottom:'1px solid #F3F4F6'}}>
                 {['Produto','Categoria','Estoque','Custo','Validade','Status',''].map(h=>(
-                  <th key={h} style={{padding:'10px 16px',textAlign:'left',fontSize:12,fontWeight:600,color:'#6B7280',whiteSpace:'nowrap'}}>{h}</th>
+                  <th key={h} style={{padding:'14px 24px',textAlign:'left',fontSize:13,fontWeight:600,color:'#78716C',whiteSpace:'nowrap',fontFamily:'inherit'}}>{h}</th>
                 ))}
               </tr>
             </thead>
@@ -377,25 +377,38 @@ export default function Inventory() {
                 const st = calcStatus(p.estoque, p.minimo);
                 const isCritico = st === 'critico';
                 const isBaixo = st === 'baixo';
-                const catStyle = CAT_COLORS[p.categoria] || { bg: '#F3F4F6', color: '#6B7280' };
+                const catStyle = CAT_COLORS[p.categoria] || { bg: '#FDF2F2', color: '#995B5B' }; // fallback pinkish
                 const maxBar = Math.max(p.minimo * 2, p.estoque, 1);
                 const barPct = Math.min((p.estoque / maxBar) * 100, 100);
-                const barColor = isCritico ? '#EF4444' : isBaixo ? '#F59E0B' : '#C4B5A0';
-                const subLabel = [p.fornecedor, p.lote ? `Lote: ${p.lote}` : null].filter(Boolean).join(' • ');
+                const barColor = isCritico ? '#DC2626' : isBaixo ? '#F59E0B' : '#B89B84'; // brown for ok
+                
+                // Build sublabel parts
+                const subParts = [];
+                if (p.marca) subParts.push(p.marca);
+                if (p.lote) subParts.push(`Lote: ${p.lote}`);
+                if (p.fornecedor) subParts.push(p.fornecedor);
+                const subLabel = subParts.join(' • ');
 
                 return (
-                  <tr key={p.id} style={{borderBottom: i < filtrados.length -1 ? '1px solid #F9FAFB' : 'none'}}>
+                  <tr key={p.id} style={{borderBottom: i < filtrados.length -1 ? '1px solid #F4F4F5' : 'none'}}>
                     {/* Produto */}
-                    <td style={{padding:'14px 16px'}}>
-                      <div style={{fontWeight:600,color:'#111827',fontSize:13}}>{p.nome}</div>
-                      {subLabel && <div style={{fontSize:11,color:'#9CA3AF',marginTop:2}}>{subLabel}</div>}
+                    <td style={{padding:'16px 24px'}}>
+                      <div style={{fontWeight:600,color:'#3F3F46',fontSize:14,display:'flex',alignItems:'center',gap:6}}>
+                        {p.nome}
+                        {p.link && (
+                          <a href={p.link} target="_blank" rel="noreferrer" style={{color:'#D4A373',display:'flex',alignItems:'center'}}>
+                            <ExternalLink style={{width:14,height:14}} />
+                          </a>
+                        )}
+                      </div>
+                      {subLabel && <div style={{fontSize:12,color:'#A1A1AA',marginTop:4}}>{subLabel}</div>}
                     </td>
 
                     {/* Categoria */}
-                    <td style={{padding:'14px 16px',whiteSpace:'nowrap'}}>
+                    <td style={{padding:'16px 24px',whiteSpace:'nowrap'}}>
                       <span style={{
                         background: catStyle.bg, color: catStyle.color,
-                        padding:'3px 10px', borderRadius:20, fontSize:11, fontWeight:600,
+                        padding:'4px 12px', borderRadius:20, fontSize:12, fontWeight:600,
                         whiteSpace:'nowrap'
                       }}>
                         {p.categoria}
@@ -403,44 +416,44 @@ export default function Inventory() {
                     </td>
 
                     {/* Estoque */}
-                    <td style={{padding:'14px 16px',minWidth:120}}>
-                      <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:4}}>
-                        <span style={{fontWeight:700,fontSize:13,color: isCritico ? '#EF4444' : '#111827'}}>
+                    <td style={{padding:'16px 24px',minWidth:140}}>
+                      <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:6}}>
+                        <span style={{fontWeight:600,fontSize:13,color: isCritico ? '#DC2626' : '#52525B'}}>
                           {p.estoque} {p.unidade || ''}
                         </span>
-                        {isCritico && <AlertTriangle style={{width:13,height:13,color:'#F97316',flexShrink:0}} />}
+                        {isCritico && <AlertTriangle style={{width:14,height:14,color:'#DC2626',flexShrink:0}} />}
                       </div>
                       {/* progress bar */}
-                      <div style={{height:3,background:'#F3F4F6',borderRadius:4,overflow:'hidden',width:'100%'}}>
+                      <div style={{height:4,background:'#F4F4F5',borderRadius:4,overflow:'hidden',width:'80px'}}>
                         <div style={{height:'100%',width:`${barPct}%`,background:barColor,borderRadius:4,transition:'width 0.3s'}} />
                       </div>
                     </td>
 
                     {/* Custo */}
-                    <td style={{padding:'14px 16px',whiteSpace:'nowrap',fontWeight:500,color:'#374151'}}>
+                    <td style={{padding:'16px 24px',whiteSpace:'nowrap',fontWeight:500,color:'#52525B'}}>
                       R$ {p.preco.toLocaleString('pt-BR',{minimumFractionDigits:2})}
                     </td>
 
                     {/* Validade */}
-                    <td style={{padding:'14px 16px',whiteSpace:'nowrap',color:'#6B7280',fontSize:13}}>
+                    <td style={{padding:'16px 24px',whiteSpace:'nowrap',color:'#52525B',fontSize:13}}>
                       {formatDate(p.vencimento)}
                     </td>
 
                     {/* Status */}
-                    <td style={{padding:'14px 16px'}}>
+                    <td style={{padding:'16px 24px'}}>
                       {isCritico ? (
-                        <span style={{border:'1.5px solid #EF4444',color:'#EF4444',background:'transparent',padding:'4px 12px',borderRadius:20,fontSize:12,fontWeight:600}}>
+                        <span style={{border:'1px solid #FECACA',color:'#DC2626',background:'transparent',padding:'4px 14px',borderRadius:20,fontSize:12,fontWeight:600}}>
                           Crítico
                         </span>
                       ) : (
-                        <span style={{border:'1.5px solid #D1D5DB',color:'#374151',background:'transparent',padding:'4px 12px',borderRadius:20,fontSize:12,fontWeight:600}}>
+                        <span style={{border:'1px solid #E4E4E7',color:'#71717A',background:'transparent',padding:'4px 14px',borderRadius:20,fontSize:12,fontWeight:600}}>
                           OK
                         </span>
                       )}
                     </td>
 
                     {/* Menu */}
-                    <td style={{padding:'14px 8px',textAlign:'right'}}>
+                    <td style={{padding:'16px 16px',textAlign:'right'}}>
                       <RowMenu produto={p} onDelete={setDeleteTarget} />
                     </td>
                   </tr>
