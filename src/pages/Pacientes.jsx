@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Users, Plus, Search, Phone, Calendar, FileText, Star, XCircle, ChevronRight, Mail, Instagram, Upload, Trash2 } from 'lucide-react';
-import { fetchClients, insertClient, deleteClient, fetchAppointments } from '../services/supabaseService';
+import { Users, Plus, Search, Phone, Calendar, FileText, Star, XCircle, ChevronRight, Mail, Instagram, Upload, Trash2, AlertTriangle } from 'lucide-react';
+import { fetchClients, insertClient, deleteClient, updateClient, fetchAppointments } from '../services/supabaseService';
 import { getCurrentUser } from '../lib/supabase';
 
 const defaultPacientes = [
@@ -14,8 +14,8 @@ const defaultPacientes = [
 
 const historicoDefault = [];
 
-function PacienteModal({ onClose, onSave }) {
-  const [form, setForm] = useState({ nome:'', telefone:'', email:'', nascimento:'', cidade:'', obs:'' });
+function PacienteModal({ onClose, onSave, initialData }) {
+  const [form, setForm] = useState(initialData || { nome:'', telefone:'', email:'', instagram:'', nascimento:'', cidade:'', obs:'' });
   const set = (k,v) => setForm(f=>({...f,[k]:v}));
 
   const handleSave = () => {
@@ -30,7 +30,7 @@ function PacienteModal({ onClose, onSave }) {
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" onClick={e=>e.stopPropagation()}>
         <div className="modal-header">
-          <span className="modal-title">Novo Paciente</span>
+          <span className="modal-title">{initialData ? 'Editar Paciente' : 'Novo Paciente'}</span>
           <button className="modal-close" onClick={onClose}><XCircle /></button>
         </div>
         <div className="form-grid-2">
@@ -45,6 +45,10 @@ function PacienteModal({ onClose, onSave }) {
           <div className="form-group">
             <label className="form-label">E-mail</label>
             <input className="form-input" type="email" placeholder="email@exemplo.com" value={form.email} onChange={e=>set('email',e.target.value)} />
+          </div>
+          <div className="form-group">
+            <label className="form-label">Instagram</label>
+            <input className="form-input" placeholder="@usuario" value={form.instagram} onChange={e=>set('instagram',e.target.value)} />
           </div>
           <div className="form-group">
             <label className="form-label">Nascimento</label>
@@ -71,6 +75,8 @@ function PacienteModal({ onClose, onSave }) {
 export default function Pacientes() {
   const [pacientes, setPacientes] = useState([]);
   const [modal, setModal] = useState(false);
+  const [editModal, setEditModal] = useState(null);
+  const [deleteModal, setDeleteModal] = useState(null);
   const [busca, setBusca] = useState('');
   const [selected, setSelected] = useState(null);
 
@@ -259,6 +265,7 @@ export default function Pacientes() {
       name: cleanAndTitleCaseName(formData.nome),
       phone: formData.telefone || '(00) 00000-0000',
       email: formData.email || '',
+      instagram: formData.instagram || '',
       birthdate: formData.nascimento || null,
       status: 'ativo',
       avatar: formData.nome.charAt(0).toUpperCase(),
@@ -279,17 +286,58 @@ export default function Pacientes() {
         nome: data.name,
         telefone: data.phone,
         email: data.email,
+        instagram: data.instagram || '',
         cidade: 'Não informada',
         nascimento: data.birthdate ? data.birthdate.split('-').reverse().join('/') : '',
         ultimaVisita: 'Nunca',
         totalSessoes: data.points || 0,
         totalGasto: Number(data.total_spent) || 0,
         status: data.status,
-        avatar: data.avatar
+        avatar: data.avatar,
+        historico: []
       };
       setPacientes(prev => [...prev, novo]);
     }
     setModal(false);
+  };
+
+  const handleSaveEditPaciente = async (formData) => {
+    const clientData = {
+      name: cleanAndTitleCaseName(formData.nome),
+      phone: formData.telefone || '(00) 00000-0000',
+      email: formData.email || '',
+      instagram: formData.instagram || '',
+      birthdate: formData.nascimento || null,
+      avatar: formData.nome.charAt(0).toUpperCase(),
+    };
+
+    const { data, error } = await updateClient(editModal.id, clientData);
+    if (error) {
+      alert('Erro ao atualizar paciente no banco de dados: ' + (error.message || error));
+      return;
+    }
+
+    if (data) {
+      setPacientes(prev => prev.map(p => {
+        if (p.id === editModal.id) {
+          const updated = {
+            ...p,
+            nome: data.name,
+            telefone: data.phone,
+            email: data.email,
+            instagram: data.instagram || '',
+            nascimento: data.birthdate ? data.birthdate.split('-').reverse().join('/') : '',
+            avatar: data.avatar
+          };
+          if (selected && selected.id === updated.id) {
+            setSelected(updated);
+          }
+          return updated;
+        }
+        return p;
+      }));
+    }
+    setEditModal(null);
   };
 
   const handleDeletePaciente = async (id) => {
@@ -298,9 +346,9 @@ export default function Pacientes() {
       alert('Erro ao excluir paciente no banco de dados: ' + (error.message || error));
       return;
     }
-    // Remove from state
     setPacientes(prev => prev.filter(p => p.id !== id));
-    setSelected(null);
+    if (selected && selected.id === id) setSelected(null);
+    setDeleteModal(null);
   };
 
   const filtrados = pacientes.filter(p =>
@@ -309,21 +357,61 @@ export default function Pacientes() {
 
   return (
     <div>
-      {modal && <PacienteModal onClose={()=>setModal(false)} onSave={handleSaveNovoPaciente} />}
       <div className="page-header" style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between'}}>
         <div>
           <div className="page-header-label"><Users />PACIENTES</div>
           <h1 className="page-title">Pacientes</h1>
           <p className="page-subtitle">{pacientes.length} pacientes cadastrados</p>
         </div>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <label className="btn btn-secondary" style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
-            <Upload style={{ width: 16, height: 16 }} />
-            Importar Planilha
-            <input type="file" accept=".csv" style={{ display: 'none' }} onChange={handleImportCSV} />
-          </label>
+        <div className="content-header">
+          <div className="search-bar">
+            <Search className="search-icon" />
+            <input className="search-input" placeholder="Buscar paciente..." value={busca} onChange={e=>setBusca(e.target.value)} />
+          </div>
+          <button className="btn btn-secondary"><Upload />Importar Planilha</button>
+          <input type="file" accept=".csv" style={{display:'none'}} id="import-csv" onChange={handleImportCSV} />
           <button className="btn btn-primary" onClick={()=>setModal(true)}><Plus />Novo Paciente</button>
         </div>
+
+        {modal && <PacienteModal onClose={()=>setModal(false)} onSave={handleSaveNovoPaciente} />}
+        {editModal && (
+          <PacienteModal 
+            onClose={()=>setEditModal(null)} 
+            onSave={handleSaveEditPaciente} 
+            initialData={{
+              nome: editModal.nome,
+              telefone: editModal.telefone,
+              email: editModal.email,
+              instagram: editModal.instagram,
+              nascimento: editModal.nascimento ? editModal.nascimento.split('/').reverse().join('-') : '',
+              cidade: editModal.cidade,
+              obs: ''
+            }} 
+          />
+        )}
+        {deleteModal && (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,20,30,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 11000, backdropFilter: 'blur(6px)', padding: 16 }} onClick={() => setDeleteModal(null)}>
+            <div style={{ background: '#fff', borderRadius: 22, width: '100%', maxWidth: 400, boxShadow: '0 32px 80px rgba(0,0,0,0.25)', padding: '24px 24px' }} onClick={e => e.stopPropagation()}>
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
+                <div style={{ width: 56, height: 56, borderRadius: '50%', background: '#FEE2E2', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 16 }}>
+                  <AlertTriangle style={{ width: 28, height: 28, color: '#DC2626' }} />
+                </div>
+                <div style={{ fontSize: 20, fontWeight: 700, color: '#111827', marginBottom: 12 }}>Excluir Paciente</div>
+                <div style={{ fontSize: 14, color: '#4B5563', marginBottom: 24 }}>
+                  Deseja realmente excluir o paciente <strong>"{deleteModal.nome}"</strong>?
+                </div>
+                <div style={{ display: 'flex', gap: 12, width: '100%' }}>
+                  <button onClick={() => setDeleteModal(null)} style={{ flex: 1, padding: '12px 0', borderRadius: 12, border: '1.5px solid #E5E7EB', background: '#fff', fontSize: 14, fontWeight: 600, color: '#374151', cursor: 'pointer', transition: 'all 0.2s' }}>
+                    Voltar
+                  </button>
+                  <button onClick={() => handleDeletePaciente(deleteModal.id)} style={{ flex: 1, padding: '12px 0', borderRadius: 12, border: 'none', background: '#DC2626', fontSize: 14, fontWeight: 600, color: '#fff', cursor: 'pointer', transition: 'all 0.2s' }}>
+                    Excluir
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="grid-4 section-gap">
@@ -376,9 +464,7 @@ export default function Pacientes() {
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              if (confirm(`Deseja realmente excluir o paciente "${p.nome}"?`)) {
-                                handleDeletePaciente(p.id);
-                              }
+                              setDeleteModal(p);
                             }}
                             style={{
                               background: 'none',
@@ -453,17 +539,13 @@ export default function Pacientes() {
                 <div style={{fontSize:12, color:'var(--text-muted)', textAlign:'center', margin:'12px 0'}}>Nenhuma sessão finalizada.</div>
               )}
               <div style={{display:'flex',gap:6,marginTop:14}}>
-                <button className="btn btn-secondary btn-sm" style={{flex:1}}>Editar</button>
+                <button className="btn btn-secondary btn-sm" style={{flex:1}} onClick={() => setEditModal(selected)}>Editar</button>
                 <button className="btn btn-primary btn-sm" style={{flex:1}}><Calendar style={{width:13,height:13}}/>Agendar</button>
               </div>
               <button 
                 className="btn btn-ghost btn-sm" 
                 style={{width:'100%',marginTop:8,color:'#ef4444',borderColor:'rgba(239, 68, 68, 0.2)',display:'flex',alignItems:'center',justifyContent:'center',gap:4}}
-                onClick={() => {
-                  if (confirm(`Deseja realmente excluir o paciente "${selected.nome}"?`)) {
-                    handleDeletePaciente(selected.id);
-                  }
-                }}
+                onClick={() => setDeleteModal(selected)}
               >
                 <Trash2 style={{width:13,height:13}}/>Excluir Paciente
               </button>
