@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Users, Plus, Search, Phone, Calendar, FileText, Star, XCircle, ChevronRight, Mail, MapPin, Upload, Trash2 } from 'lucide-react';
-import { fetchClients, insertClient, deleteClient } from '../services/supabaseService';
+import { fetchClients, insertClient, deleteClient, fetchAppointments } from '../services/supabaseService';
 import { getCurrentUser } from '../lib/supabase';
 
 const defaultPacientes = [
@@ -81,21 +81,39 @@ export default function Pacientes() {
   // Load fresh data from Supabase on mount
   useEffect(() => {
     async function load() {
-      const { data } = await fetchClients();
+      const [clientsRes, apptsRes] = await Promise.all([
+        fetchClients(),
+        fetchAppointments()
+      ]);
+      const data = clientsRes.data;
+      const appts = apptsRes.data || [];
+
       if (data) {
-        const mapped = data.map(item => ({
-          id: item.id,
-          nome: item.name || '',
-          telefone: item.phone || '',
-          email: item.email || '',
-          cidade: 'Não informada',
-          nascimento: item.birthdate ? item.birthdate.split('-').reverse().join('/') : '',
-          ultimaVisita: item.last_visit ? item.last_visit.split('-').reverse().join('/') : 'Nunca',
-          totalSessoes: item.points || 0,
-          totalGasto: Number(item.total_spent) || 0,
-          status: item.status || 'ativo',
-          avatar: item.avatar || (item.name ? item.name.charAt(0).toUpperCase() : 'U')
-        }));
+        const mapped = data.map(item => {
+          const clientAppts = appts.filter(a => a.client_name === item.name && a.status === 'finalizado');
+          clientAppts.sort((a, b) => new Date(b.appointment_date) - new Date(a.appointment_date));
+
+          let ultimaVisita = item.last_visit ? item.last_visit.split('-').reverse().join('/') : 'Nunca';
+          if (clientAppts.length > 0) {
+            ultimaVisita = clientAppts[0].appointment_date.split('-').reverse().join('/');
+          }
+
+          const totalSessoes = clientAppts.length > 0 ? clientAppts.length : (item.points || 0);
+
+          return {
+            id: item.id,
+            nome: item.name || '',
+            telefone: item.phone || '',
+            email: item.email || '',
+            cidade: 'Não informada',
+            nascimento: item.birthdate ? item.birthdate.split('-').reverse().join('/') : '',
+            ultimaVisita: ultimaVisita,
+            totalSessoes: totalSessoes,
+            totalGasto: Number(item.total_spent) || 0,
+            status: item.status || 'ativo',
+            avatar: item.avatar || (item.name ? item.name.charAt(0).toUpperCase() : 'U')
+          };
+        });
         setPacientes(mapped);
       }
     }
