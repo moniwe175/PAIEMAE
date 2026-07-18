@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Package, Plus, Search, AlertTriangle, XCircle, TrendingDown, Trash2, AlertOctagon, MoreVertical, Edit2 } from 'lucide-react';
+import { Package, Plus, Search, AlertTriangle, XCircle, TrendingDown, Trash2, AlertOctagon, MoreVertical, Edit2, ExternalLink } from 'lucide-react';
 import { fetchInventory, insertInventoryItem, deleteInventoryItem } from '../services/supabaseService';
 import { getCurrentUser } from '../lib/supabase';
 
