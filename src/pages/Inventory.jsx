@@ -211,10 +211,12 @@ export default function Inventory() {
   };
 
   const handleAdd = async (produto) => {
-    const user = await getCurrentUser();
-    const item = { id: genId(), ...produto, user_id: user?.id };
-    const { data, error } = await insertInventoryItem(item);
-    if (!error && data) {
+    const { data, error } = await insertInventoryItem(produto);
+    if (error) {
+      alert('Erro ao salvar produto: ' + (error.message || JSON.stringify(error)));
+      return;
+    }
+    if (data) {
       setProdutos(prev => [...prev, { ...data, estoque: Number(data.estoque) || 0, minimo: Number(data.minimo) || 0, preco: Number(data.preco) || 0 }]);
     }
   };
