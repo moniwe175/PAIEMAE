@@ -276,6 +276,7 @@ function QuickClientModal({ onClose, onSave }) {
   const [nome, setNome] = useState('');
   const [telefone, setTelefone] = useState('');
   const [email, setEmail] = useState('');
+  const [instagram, setInstagram] = useState('');
   const [dataNascimento, setDataNascimento] = useState('');
   const [erro, setErro] = useState('');
   const [erroTelefone, setErroTelefone] = useState('');
@@ -287,7 +288,7 @@ function QuickClientModal({ onClose, onSave }) {
     if (!telefone.trim()) { setErroTelefone('Telefone obrigatório'); hasError = true; }
     if (!dataNascimento) { setErroNascimento('Data de nascimento obrigatória'); hasError = true; }
     if (hasError) return;
-    onSave({ nome: nome.trim(), telefone, email, data_nascimento: dataNascimento });
+    onSave({ nome: nome.trim(), telefone, email, instagram, data_nascimento: dataNascimento });
   };
 
   return (
@@ -309,6 +310,7 @@ function QuickClientModal({ onClose, onSave }) {
           { label: 'Nome completo *', val: nome, set: v => { setNome(v); setErro(''); }, type: 'text', placeholder: 'Ex: Maria da Silva', err: erro },
           { label: 'Telefone *', val: telefone, set: v => { setTelefone(v); setErroTelefone(''); }, type: 'tel', placeholder: '(11) 99999-9999', err: erroTelefone },
           { label: 'E-mail', val: email, set: setEmail, type: 'email', placeholder: 'email@exemplo.com' },
+          { label: 'Instagram', val: instagram, set: setInstagram, type: 'text', placeholder: '@usuario' },
           { label: 'Data de Nascimento *', val: dataNascimento, set: v => { setDataNascimento(v); setErroNascimento(''); }, type: 'date', placeholder: '', err: erroNascimento },
         ].map(({ label, val, set, type, placeholder, err }) => (
           <div key={label} style={{ marginBottom: 14 }}>
@@ -719,12 +721,13 @@ function AgendamentoModal({ onClose, date, profissional: prefillProf, hora: pref
             name: c.nome,
             phone: c.telefone,
             email: c.email || '',
+            instagram: c.instagram || '',
             birthdate: c.data_nascimento || null,
             status: 'ativo'
           };
           const { data } = await insertClient(clientData);
           if (data) {
-            const mapped = { nome: data.name, telefone: data.phone, email: data.email };
+            const mapped = { nome: data.name, telefone: data.phone, email: data.email, instagram: data.instagram };
             setPacientes(prev => [...prev, mapped]);
             set('paciente', mapped.nome);
             set('telefone', mapped.telefone || '');
