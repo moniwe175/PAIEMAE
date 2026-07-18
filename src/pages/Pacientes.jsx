@@ -54,18 +54,10 @@ function PacienteModal({ onClose, onSave, initialData }) {
             <label className="form-label">Nascimento</label>
             <input className="form-input" type="date" value={form.nascimento} onChange={e=>set('nascimento',e.target.value)} />
           </div>
-          <div className="form-group">
-            <label className="form-label">Cidade</label>
-            <input className="form-input" placeholder="São Paulo" value={form.cidade} onChange={e=>set('cidade',e.target.value)} />
-          </div>
-          <div className="form-group" style={{gridColumn:'span 2'}}>
-            <label className="form-label">Anamnese / Observações</label>
-            <textarea className="form-textarea" placeholder="Alergias, histórico relevante..." value={form.obs} onChange={e=>set('obs',e.target.value)} />
-          </div>
         </div>
         <div style={{display:'flex',gap:8,justifyContent:'flex-end',marginTop:8}}>
           <button className="btn btn-ghost" onClick={onClose}>Cancelar</button>
-          <button className="btn btn-primary" onClick={handleSave}><Star />Salvar</button>
+          <button className="btn btn-primary" onClick={handleSave}>Salvar</button>
         </div>
       </div>
     </div>
