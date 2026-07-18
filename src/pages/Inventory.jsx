@@ -1,5 +1,5 @@
-﻿import React, { useState, useEffect } from 'react';
-import { Package, Plus, Search, AlertTriangle, XCircle, TrendingDown, Trash2, AlertOctagon } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Package, Plus, Search, AlertTriangle, XCircle, TrendingDown, Trash2, AlertOctagon, MoreVertical, Edit2 } from 'lucide-react';
 import { fetchInventory, insertInventoryItem, deleteInventoryItem } from '../services/supabaseService';
 import { getCurrentUser } from '../lib/supabase';
 
@@ -9,19 +9,48 @@ function genId() {
 
 function calcStatus(estoque, minimo) {
   const e = Number(estoque), m = Number(minimo);
-  if (e <= m * 0.5) return 'critico';
+  if (m === 0) return e === 0 ? 'critico' : 'ok';
+  if (e === 0 || e <= m * 0.5) return 'critico';
   if (e <= m) return 'baixo';
   return 'ok';
 }
 
+const CATEGORIAS = [
+  'Toxina Botulínica','Preenchedor','Bioestimulador','Peeling',
+  'Fio','Skincare','Anestésico','Descartável','Cosmético',
+  'Ácido Hialurônico','Outros'
+];
+
+const UNIDADES = ['unidade','frasco','ampola','caixa','kit','tubo','seringa'];
+
+const CAT_COLORS = {
+  'Toxina Botulínica': { bg: '#FDE8E8', color: '#B91C1C' },
+  'Preenchedor':        { bg: '#E0F2FE', color: '#0369A1' },
+  'Bioestimulador':     { bg: '#F3E8FF', color: '#7C3AED' },
+  'Peeling':            { bg: '#FEF9C3', color: '#92400E' },
+  'Fio':                { bg: '#D1FAE5', color: '#065F46' },
+  'Skincare':           { bg: '#FCE7F3', color: '#9D174D' },
+  'Anestésico':         { bg: '#E0F2FE', color: '#0284C7' },
+  'Descartável':        { bg: '#F1F5F9', color: '#475569' },
+  'Cosmético':          { bg: '#FEF3C7', color: '#B45309' },
+  'Ácido Hialurônico':  { bg: '#E0F2FE', color: '#0369A1' },
+  'Outros':             { bg: '#F3F4F6', color: '#6B7280' },
+};
+
 function ProdutoModal({ onClose, onSave }) {
-  const [form, setForm] = useState({ nome:'', categoria:'', estoque:'', minimo:'', preco:'', fornecedor:'', vencimento:'' });
+  const [form, setForm] = useState({ nome:'', categoria:'', lote:'', fornecedor:'', estoque:'', minimo:'', unidade:'unidade', preco:'', vencimento:'' });
   const set = (k,v) => setForm(f=>({...f,[k]:v}));
   const canSave = form.nome && form.categoria && form.estoque !== '';
   const handleSave = async () => {
     if (!canSave) return;
     const e = Number(form.estoque), m = Number(form.minimo) || 0, pr = Number(form.preco) || 0;
-    await onSave({ nome: form.nome, categoria: form.categoria, estoque: e, minimo: m, preco: pr, fornecedor: form.fornecedor, vencimento: form.vencimento, status: calcStatus(e, m) });
+    await onSave({
+      nome: form.nome, categoria: form.categoria, lote: form.lote,
+      fornecedor: form.fornecedor, estoque: e, minimo: m,
+      unidade: form.unidade || 'unidade',
+      preco: pr, vencimento: form.vencimento,
+      status: calcStatus(e, m)
+    });
     onClose();
   };
   return (
@@ -33,14 +62,20 @@ function ProdutoModal({ onClose, onSave }) {
         </div>
         <div className="form-grid-2">
           <div className="form-group" style={{gridColumn:'span 2'}}>
-            <label className="form-label">Nome do Produto</label>
-            <input className="form-input" placeholder="Nome do produto" value={form.nome} onChange={e=>set('nome',e.target.value)} />
+            <label className="form-label">Nome do Produto *</label>
+            <input className="form-input" placeholder="Ex: Botox Allergan 100U" value={form.nome} onChange={e=>set('nome',e.target.value)} />
           </div>
           <div className="form-group">
-            <label className="form-label">Categoria</label>
+            <label className="form-label">Categoria *</label>
             <select className="form-select" value={form.categoria} onChange={e=>set('categoria',e.target.value)}>
               <option value="">Selecione...</option>
-              {['Toxina BotulÃ­nica','Preenchedor','Bioestimulador','Peeling','Fio','Skincare','Outros'].map(c=><option key={c}>{c}</option>)}
+              {CATEGORIAS.map(c=><option key={c}>{c}</option>)}
+            </select>
+          </div>
+          <div className="form-group">
+            <label className="form-label">Unidade</label>
+            <select className="form-select" value={form.unidade} onChange={e=>set('unidade',e.target.value)}>
+              {UNIDADES.map(u=><option key={u}>{u}</option>)}
             </select>
           </div>
           <div className="form-group">
@@ -48,27 +83,63 @@ function ProdutoModal({ onClose, onSave }) {
             <input className="form-input" placeholder="Nome do fornecedor" value={form.fornecedor} onChange={e=>set('fornecedor',e.target.value)} />
           </div>
           <div className="form-group">
-            <label className="form-label">Estoque Atual</label>
+            <label className="form-label">Lote</label>
+            <input className="form-input" placeholder="Ex: BOT2026A" value={form.lote} onChange={e=>set('lote',e.target.value)} />
+          </div>
+          <div className="form-group">
+            <label className="form-label">Estoque Atual *</label>
             <input className="form-input" type="number" placeholder="0" value={form.estoque} onChange={e=>set('estoque',e.target.value)} />
           </div>
           <div className="form-group">
-            <label className="form-label">Estoque MÃ­nimo</label>
+            <label className="form-label">Estoque Mínimo</label>
             <input className="form-input" type="number" placeholder="0" value={form.minimo} onChange={e=>set('minimo',e.target.value)} />
           </div>
           <div className="form-group">
-            <label className="form-label">PreÃ§o de Custo (R$)</label>
+            <label className="form-label">Custo (R$)</label>
             <input className="form-input" type="number" placeholder="0,00" value={form.preco} onChange={e=>set('preco',e.target.value)} />
           </div>
           <div className="form-group">
             <label className="form-label">Validade</label>
-            <input className="form-input" placeholder="MM/AAAA" value={form.vencimento} onChange={e=>set('vencimento',e.target.value)} />
+            <input className="form-input" type="date" value={form.vencimento} onChange={e=>set('vencimento',e.target.value)} />
           </div>
         </div>
         <div style={{display:'flex',gap:8,justifyContent:'flex-end',marginTop:8}}>
           <button className="btn btn-ghost" onClick={onClose}>Cancelar</button>
-          <button className="btn btn-primary" disabled={!canSave} onClick={handleSave} style={{opacity:canSave?1:0.5}}><Package />Salvar</button>
+          <button className="btn btn-primary" disabled={!canSave} onClick={handleSave} style={{opacity:canSave?1:0.5}}>Salvar</button>
         </div>
       </div>
+    </div>
+  );
+}
+
+function RowMenu({ produto, onDelete }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => {
+    function handler(e) { if (ref.current && !ref.current.contains(e.target)) setOpen(false); }
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+  return (
+    <div ref={ref} style={{position:'relative'}}>
+      <button
+        onClick={() => setOpen(o => !o)}
+        style={{background:'none',border:'none',cursor:'pointer',padding:'4px 6px',borderRadius:6,display:'flex',alignItems:'center',color:'#9CA3AF'}}
+      >
+        <MoreVertical style={{width:16,height:16}} />
+      </button>
+      {open && (
+        <div style={{position:'absolute',right:0,top:'calc(100% + 4px)',background:'#fff',border:'1px solid #E5E7EB',borderRadius:10,boxShadow:'0 8px 24px rgba(0,0,0,0.12)',zIndex:100,minWidth:140,overflow:'hidden'}}>
+          <button
+            onClick={() => { onDelete(produto); setOpen(false); }}
+            style={{display:'flex',alignItems:'center',gap:8,width:'100%',padding:'10px 14px',background:'none',border:'none',cursor:'pointer',fontSize:13,color:'#EF4444',fontWeight:500}}
+            onMouseEnter={e=>e.currentTarget.style.background='#FEE2E2'}
+            onMouseLeave={e=>e.currentTarget.style.background='none'}
+          >
+            <Trash2 style={{width:14,height:14}} /> Excluir
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -76,35 +147,28 @@ function ProdutoModal({ onClose, onSave }) {
 function DeleteConfirmModal({ produto, onClose, onConfirm }) {
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div style={{ background:'#fff', borderRadius:'var(--radius-lg)', width:'100%', maxWidth:420, padding:'28px 28px 24px', boxShadow:'0 24px 64px rgba(0,0,0,0.2)' }} onClick={e=>e.stopPropagation()}>
-        <div style={{ display:'flex', alignItems:'center', gap:14, marginBottom:20 }}>
-          <div style={{ width:48, height:48, borderRadius:14, background:'var(--danger-bg)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
-            <AlertOctagon style={{ width:22, height:22, color:'var(--danger)' }} />
+      <div style={{ background:'#fff', borderRadius: 22, width:'100%', maxWidth:400, boxShadow:'0 32px 80px rgba(0,0,0,0.25)', padding:'24px' }} onClick={e=>e.stopPropagation()}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center' }}>
+          <div style={{ width: 56, height: 56, borderRadius: '50%', background: '#FEE2E2', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 16 }}>
+            <AlertTriangle style={{ width: 28, height: 28, color: '#DC2626' }} />
           </div>
-          <div>
-            <div style={{ fontSize:16, fontWeight:700, color:'var(--text-dark)', marginBottom:2 }}>Excluir Produto</div>
-            <div style={{ fontSize:13, color:'var(--text-muted)' }}>Esta aÃ§Ã£o nÃ£o pode ser desfeita.</div>
+          <div style={{ fontSize: 20, fontWeight: 700, color: '#111827', marginBottom: 8 }}>Excluir Produto</div>
+          <div style={{ fontSize: 14, color: '#4B5563', marginBottom: 24 }}>
+            Deseja realmente excluir <strong>"{produto.nome}"</strong>?
           </div>
-        </div>
-        <div style={{ background:'#F9FAFB', borderRadius:'var(--radius-md)', padding:'12px 16px', marginBottom:20, fontSize:13, color:'var(--text-light)' }}>
-          Tem certeza que deseja excluir <strong style={{ color:'var(--text-dark)' }}>{produto.nome}</strong>?
-        </div>
-        <div style={{ display:'flex', gap:8, justifyContent:'flex-end' }}>
-          <button className="btn btn-ghost" onClick={onClose}>Cancelar</button>
-          <button onClick={onConfirm} style={{ padding:'9px 18px', borderRadius:'var(--radius-md)', border:'none', background:'var(--danger)', color:'#fff', fontSize:13, fontWeight:700, cursor:'pointer', display:'flex', alignItems:'center', gap:6 }}>
-            <Trash2 style={{width:14,height:14}} />Excluir
-          </button>
+          <div style={{ display: 'flex', gap: 12, width: '100%' }}>
+            <button onClick={onClose} style={{ flex: 1, padding: '12px 0', borderRadius: 12, border: '1.5px solid #E5E7EB', background: '#fff', fontSize: 14, fontWeight: 600, color: '#374151', cursor: 'pointer' }}>
+              Voltar
+            </button>
+            <button onClick={onConfirm} style={{ flex: 1, padding: '12px 0', borderRadius: 12, border: 'none', background: '#DC2626', fontSize: 14, fontWeight: 600, color: '#fff', cursor: 'pointer' }}>
+              Excluir
+            </button>
+          </div>
         </div>
       </div>
     </div>
   );
 }
-
-const STATUS_MAP = {
-  ok: { label:'Normal', cls:'badge-success' },
-  baixo: { label:'Baixo', cls:'badge-warning' },
-  critico: { label:'CrÃ­tico', cls:'badge-danger' },
-};
 
 export default function Inventory() {
   const [modal, setModal] = useState(false);
@@ -129,11 +193,12 @@ export default function Inventory() {
 
   const filtrados = produtos.filter(p =>
     p.nome.toLowerCase().includes(busca.toLowerCase()) ||
-    (p.categoria || '').toLowerCase().includes(busca.toLowerCase())
+    (p.categoria || '').toLowerCase().includes(busca.toLowerCase()) ||
+    (p.fornecedor || '').toLowerCase().includes(busca.toLowerCase())
   );
 
-  const criticos = produtos.filter(p => p.status === 'critico').length;
-  const baixos = produtos.filter(p => p.status === 'baixo').length;
+  const criticos = produtos.filter(p => calcStatus(p.estoque, p.minimo) === 'critico').length;
+  const baixos = produtos.filter(p => calcStatus(p.estoque, p.minimo) === 'baixo').length;
   const valorEstoque = produtos.reduce((s, p) => s + p.estoque * p.preco, 0);
 
   const handleDelete = async () => {
@@ -154,10 +219,19 @@ export default function Inventory() {
     }
   };
 
+  const formatDate = (v) => {
+    if (!v) return '-';
+    if (v.includes('-') && v.length === 10) {
+      const [y, m, d] = v.split('-');
+      return `${d}/${m}/${y}`;
+    }
+    return v;
+  };
+
   return (
     <div>
-      {modal && <ProdutoModal onClose={()=>setModal(false)} onSave={handleAdd} />}
-      {deleteTarget && <DeleteConfirmModal produto={deleteTarget} onClose={()=>setDeleteTarget(null)} onConfirm={handleDelete} />}
+      {modal && <ProdutoModal onClose={() => setModal(false)} onSave={handleAdd} />}
+      {deleteTarget && <DeleteConfirmModal produto={deleteTarget} onClose={() => setDeleteTarget(null)} onConfirm={handleDelete} />}
 
       <div className="page-header" style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between'}}>
         <div>
@@ -165,13 +239,13 @@ export default function Inventory() {
           <h1 className="page-title">Estoque</h1>
           <p className="page-subtitle">{produtos.length} produto(s) cadastrado(s)</p>
         </div>
-        <button className="btn btn-primary" onClick={()=>setModal(true)}><Plus />Novo Produto</button>
+        <button className="btn btn-primary" onClick={() => setModal(true)}><Plus />Novo Produto</button>
       </div>
 
       <div className="grid-4 section-gap">
         {[
           {label:'Total Produtos',val:produtos.length,cor:'var(--color-primary)',icon:Package},
-          {label:'Estoque CrÃ­tico',val:criticos,cor:'var(--danger)',icon:AlertTriangle},
+          {label:'Estoque Crítico',val:criticos,cor:'var(--danger)',icon:AlertTriangle},
           {label:'Estoque Baixo',val:baixos,cor:'var(--warning)',icon:TrendingDown},
           {label:'Valor em Estoque',val:`R$ ${valorEstoque.toLocaleString('pt-BR',{minimumFractionDigits:2})}`,cor:'var(--success)',icon:Package},
         ].map(({label,val,cor,icon:Icon})=>(
@@ -186,56 +260,114 @@ export default function Inventory() {
       </div>
 
       {criticos > 0 && (
-        <div style={{background:'var(--danger-bg)',border:'1px solid #f8c4c8',borderRadius:'var(--radius-md)',padding:'12px 16px',marginBottom:20,display:'flex',alignItems:'center',gap:8}}>
-          <AlertTriangle style={{width:16,height:16,color:'var(--danger)',flexShrink:0}} />
-          <span style={{fontSize:13,color:'var(--danger)',fontWeight:600}}>
-            {criticos} produto(s) com estoque crÃ­tico! Realize a reposiÃ§Ã£o imediatamente.
+        <div style={{background:'#FEF2F2',border:'1px solid #FECACA',borderRadius:12,padding:'12px 16px',marginBottom:20,display:'flex',alignItems:'center',gap:8}}>
+          <AlertTriangle style={{width:16,height:16,color:'#DC2626',flexShrink:0}} />
+          <span style={{fontSize:13,color:'#DC2626',fontWeight:600}}>
+            {criticos} produto(s) com estoque crítico! Realize a reposição imediatamente.
           </span>
         </div>
       )}
 
-      <div className="card" style={{padding:0,overflow:'hidden'}}>
-        <div style={{padding:'14px 20px',borderBottom:'1px solid var(--border-color)'}}>
-          <div className="search-box">
-            <Search />
-            <input className="search-input" placeholder="Buscar produto..." value={busca} onChange={e=>setBusca(e.target.value)} />
+      <div className="card" style={{padding:0,overflow:'hidden',borderRadius:16}}>
+        {/* Search bar */}
+        <div style={{padding:'16px 20px',borderBottom:'1px solid #F3F4F6'}}>
+          <div style={{display:'flex',alignItems:'center',gap:10,background:'#F9FAFB',border:'1.5px solid #E5E7EB',borderRadius:50,padding:'9px 16px',maxWidth:360}}>
+            <Search style={{width:15,height:15,color:'#9CA3AF',flexShrink:0}} />
+            <input
+              style={{border:'none',outline:'none',background:'transparent',fontSize:14,color:'#374151',width:'100%'}}
+              placeholder="Buscar produto..."
+              value={busca}
+              onChange={e=>setBusca(e.target.value)}
+            />
           </div>
         </div>
-        <div className="table-wrapper">
-          <table>
-            <thead><tr>
-              <th>Produto</th><th>Categoria</th><th>Fornecedor</th><th>Estoque</th><th>MÃ­nimo</th><th>Custo</th><th>Validade</th><th>Status</th><th style={{width:50}}></th>
-            </tr></thead>
+
+        {/* Table */}
+        <div style={{overflowX:'auto'}}>
+          <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
+            <thead>
+              <tr style={{borderBottom:'1px solid #F3F4F6'}}>
+                {['Produto','Categoria','Estoque','Custo','Validade','Status',''].map(h=>(
+                  <th key={h} style={{padding:'10px 16px',textAlign:'left',fontSize:12,fontWeight:600,color:'#6B7280',whiteSpace:'nowrap'}}>{h}</th>
+                ))}
+              </tr>
+            </thead>
             <tbody>
-              {filtrados.map(p=>(
-                <tr key={p.id}>
-                  <td style={{fontWeight:600,fontSize:13}}>{p.nome}</td>
-                  <td><span className="badge badge-neutral">{p.categoria}</span></td>
-                  <td style={{fontSize:13,color:'var(--text-light)'}}>{p.fornecedor}</td>
-                  <td>
-                    <span style={{fontWeight:700,fontSize:15,color:p.status==='critico'?'var(--danger)':p.status==='baixo'?'var(--warning)':'var(--text-dark)'}}>
-                      {p.estoque}
-                    </span>
-                  </td>
-                  <td style={{fontSize:13,color:'var(--text-muted)'}}>{p.minimo}</td>
-                  <td style={{fontWeight:600}}>R$ {p.preco.toLocaleString('pt-BR')}</td>
-                  <td style={{fontSize:13,color:'var(--text-light)'}}>{p.vencimento}</td>
-                  <td><span className={`badge ${STATUS_MAP[p.status]?.cls || 'badge-neutral'}`}>{STATUS_MAP[p.status]?.label || p.status}</span></td>
-                  <td>
-                    <button
-                      onClick={() => setDeleteTarget(p)}
-                      title="Excluir produto"
-                      style={{ background:'none', border:'none', cursor:'pointer', padding:4, borderRadius:6, display:'flex', alignItems:'center', justifyContent:'center' }}
-                      onMouseEnter={e => e.currentTarget.style.background = '#FEE2E2'}
-                      onMouseLeave={e => e.currentTarget.style.background = 'none'}
-                    >
-                      <Trash2 style={{width:14,height:14,color:'var(--danger)'}} />
-                    </button>
-                  </td>
-                </tr>
-              ))}
+              {filtrados.map((p, i) => {
+                const st = calcStatus(p.estoque, p.minimo);
+                const isCritico = st === 'critico';
+                const isBaixo = st === 'baixo';
+                const catStyle = CAT_COLORS[p.categoria] || { bg: '#F3F4F6', color: '#6B7280' };
+                const maxBar = Math.max(p.minimo * 2, p.estoque, 1);
+                const barPct = Math.min((p.estoque / maxBar) * 100, 100);
+                const barColor = isCritico ? '#EF4444' : isBaixo ? '#F59E0B' : '#C4B5A0';
+                const subLabel = [p.fornecedor, p.lote ? `Lote: ${p.lote}` : null].filter(Boolean).join(' • ');
+
+                return (
+                  <tr key={p.id} style={{borderBottom: i < filtrados.length -1 ? '1px solid #F9FAFB' : 'none'}}>
+                    {/* Produto */}
+                    <td style={{padding:'14px 16px'}}>
+                      <div style={{fontWeight:600,color:'#111827',fontSize:13}}>{p.nome}</div>
+                      {subLabel && <div style={{fontSize:11,color:'#9CA3AF',marginTop:2}}>{subLabel}</div>}
+                    </td>
+
+                    {/* Categoria */}
+                    <td style={{padding:'14px 16px',whiteSpace:'nowrap'}}>
+                      <span style={{
+                        background: catStyle.bg, color: catStyle.color,
+                        padding:'3px 10px', borderRadius:20, fontSize:11, fontWeight:600,
+                        whiteSpace:'nowrap'
+                      }}>
+                        {p.categoria}
+                      </span>
+                    </td>
+
+                    {/* Estoque */}
+                    <td style={{padding:'14px 16px',minWidth:120}}>
+                      <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:4}}>
+                        <span style={{fontWeight:700,fontSize:13,color: isCritico ? '#EF4444' : '#111827'}}>
+                          {p.estoque} {p.unidade || ''}
+                        </span>
+                        {isCritico && <AlertTriangle style={{width:13,height:13,color:'#F97316',flexShrink:0}} />}
+                      </div>
+                      {/* progress bar */}
+                      <div style={{height:3,background:'#F3F4F6',borderRadius:4,overflow:'hidden',width:'100%'}}>
+                        <div style={{height:'100%',width:`${barPct}%`,background:barColor,borderRadius:4,transition:'width 0.3s'}} />
+                      </div>
+                    </td>
+
+                    {/* Custo */}
+                    <td style={{padding:'14px 16px',whiteSpace:'nowrap',fontWeight:500,color:'#374151'}}>
+                      R$ {p.preco.toLocaleString('pt-BR',{minimumFractionDigits:2})}
+                    </td>
+
+                    {/* Validade */}
+                    <td style={{padding:'14px 16px',whiteSpace:'nowrap',color:'#6B7280',fontSize:13}}>
+                      {formatDate(p.vencimento)}
+                    </td>
+
+                    {/* Status */}
+                    <td style={{padding:'14px 16px'}}>
+                      {isCritico ? (
+                        <span style={{border:'1.5px solid #EF4444',color:'#EF4444',background:'transparent',padding:'4px 12px',borderRadius:20,fontSize:12,fontWeight:600}}>
+                          Crítico
+                        </span>
+                      ) : (
+                        <span style={{border:'1.5px solid #D1D5DB',color:'#374151',background:'transparent',padding:'4px 12px',borderRadius:20,fontSize:12,fontWeight:600}}>
+                          OK
+                        </span>
+                      )}
+                    </td>
+
+                    {/* Menu */}
+                    <td style={{padding:'14px 8px',textAlign:'right'}}>
+                      <RowMenu produto={p} onDelete={setDeleteTarget} />
+                    </td>
+                  </tr>
+                );
+              })}
               {filtrados.length === 0 && (
-                <tr><td colSpan={9} style={{textAlign:'center',padding:'32px 0',color:'var(--text-muted)',fontSize:13}}>Nenhum produto encontrado</td></tr>
+                <tr><td colSpan={7} style={{textAlign:'center',padding:'40px 0',color:'#9CA3AF',fontSize:14}}>Nenhum produto encontrado</td></tr>
               )}
             </tbody>
           </table>
