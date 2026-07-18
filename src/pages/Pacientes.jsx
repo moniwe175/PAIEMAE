@@ -356,10 +356,6 @@ export default function Pacientes() {
           <p className="page-subtitle">{pacientes.length} pacientes cadastrados</p>
         </div>
         <div className="content-header">
-          <div className="search-bar">
-            <Search className="search-icon" />
-            <input className="search-input" placeholder="Buscar paciente..." value={busca} onChange={e=>setBusca(e.target.value)} />
-          </div>
           <button className="btn btn-secondary"><Upload />Importar Planilha</button>
           <input type="file" accept=".csv" style={{display:'none'}} id="import-csv" onChange={handleImportCSV} />
           <button className="btn btn-primary" onClick={()=>setModal(true)}><Plus />Novo Paciente</button>
@@ -532,15 +528,14 @@ export default function Pacientes() {
               )}
               <div style={{display:'flex',gap:6,marginTop:14}}>
                 <button className="btn btn-secondary btn-sm" style={{flex:1}} onClick={() => setEditModal(selected)}>Editar</button>
-                <button className="btn btn-primary btn-sm" style={{flex:1}}><Calendar style={{width:13,height:13}}/>Agendar</button>
+                <button 
+                  className="btn btn-ghost btn-sm" 
+                  style={{flex:1,color:'#ef4444',borderColor:'rgba(239, 68, 68, 0.2)',display:'flex',alignItems:'center',justifyContent:'center',gap:4}}
+                  onClick={() => setDeleteModal(selected)}
+                >
+                  <Trash2 style={{width:13,height:13}}/>Excluir
+                </button>
               </div>
-              <button 
-                className="btn btn-ghost btn-sm" 
-                style={{width:'100%',marginTop:8,color:'#ef4444',borderColor:'rgba(239, 68, 68, 0.2)',display:'flex',alignItems:'center',justifyContent:'center',gap:4}}
-                onClick={() => setDeleteModal(selected)}
-              >
-                <Trash2 style={{width:13,height:13}}/>Excluir Paciente
-              </button>
             </div>
           </div>
         )}
