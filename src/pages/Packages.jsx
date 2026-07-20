@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { ShoppingBag, Plus, XCircle, DollarSign, Clock, Tag, Trash2, AlertOctagon, Edit3 } from 'lucide-react';
 import { fetchPackages, insertPackage, updatePackage, deletePackage } from '../services/supabaseService';
 import { getCurrentUser } from '../lib/supabase';
@@ -127,7 +127,11 @@ export default function Packages() {
 
   useEffect(() => {
     async function load() {
-      const { data } = await fetchPackages();
+      const { data, error } = await fetchPackages();
+      if (error) {
+        console.error('Erro ao carregar pacotes:', error);
+        alert('Erro ao carregar pacotes: ' + (error.message || JSON.stringify(error)));
+      }
       if (data) {
         setPacotes(data.map(p => ({
           ...p,
@@ -144,27 +148,48 @@ export default function Packages() {
   }, []);
 
   const handleAdd = async (formData) => {
-    const user = await getCurrentUser();
-    const newPkg = { id: genId(), ...formData, user_id: user?.id };
-    const { data, error } = await insertPackage(newPkg);
-    if (!error && data) {
-      setPacotes(prev => [...prev, { ...data, servicos: data.servicos || [], preco: Number(data.preco) || 0, desconto: Number(data.desconto) || 0, sessoes: Number(data.sessoes) || 1, vendidos: Number(data.vendidos) || 0, ativo: data.ativo !== false }]);
+    try {
+      const user = await getCurrentUser();
+      const newPkg = { id: genId(), ...formData, user_id: user?.id };
+      console.log('Tentando salvar pacote:', newPkg);
+      const { data, error } = await insertPackage(newPkg);
+      
+      if (error) {
+        console.error('Erro detalhado:', error);
+        alert('Erro ao salvar no banco: ' + (error.message || JSON.stringify(error)));
+        return;
+      }
+      
+      if (data) {
+        setPacotes(prev => [...prev, { ...data, servicos: data.servicos || [], preco: Number(data.preco) || 0, desconto: Number(data.desconto) || 0, sessoes: Number(data.sessoes) || 1, vendidos: Number(data.vendidos) || 0, ativo: data.ativo !== false }]);
+        setModal(false);
+      }
+    } catch (e) {
+      console.error('Exceção capturada:', e);
+      alert('Erro inesperado: ' + e.message);
     }
   };
 
   const handleUpdate = async (updated) => {
     const { data, error } = await updatePackage(updated.id, updated);
-    if (!error && data) {
+    if (error) {
+      alert('Erro ao atualizar: ' + (error.message || JSON.stringify(error)));
+      return;
+    }
+    if (data) {
       setPacotes(prev => prev.map(p => p.id === data.id ? { ...data, servicos: data.servicos || [], preco: Number(data.preco) || 0, desconto: Number(data.desconto) || 0, sessoes: Number(data.sessoes) || 1, vendidos: Number(data.vendidos) || 0, ativo: data.ativo !== false } : p));
+      setEditTarget(null);
     }
   };
 
   const handleDelete = async () => {
     if (!deleteTarget) return;
     const { error } = await deletePackage(deleteTarget.id);
-    if (!error) {
-      setPacotes(prev => prev.filter(p => p.id !== deleteTarget.id));
+    if (error) {
+      alert('Erro ao excluir: ' + (error.message || JSON.stringify(error)));
+      return;
     }
+    setPacotes(prev => prev.filter(p => p.id !== deleteTarget.id));
     setDeleteTarget(null);
   };
 
