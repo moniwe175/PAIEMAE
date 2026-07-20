@@ -518,8 +518,13 @@ export async function fetchPackages() {
 
 export async function insertPackage(pkg) {
   if (!isSupabaseConfigured()) return handleError('Supabase not configured');
+  console.log('[PACKAGES] Inserting package:', pkg);
   const { data, error } = await supabase.from('packages').insert([pkg]).select().single();
-  if (error) return handleError(error);
+  if (error) {
+    console.error('[PACKAGES] Error inserting:', error);
+    return handleError(error);
+  }
+  console.log('[PACKAGES] Insert successful:', data);
   return { data, error: null };
 }
 
