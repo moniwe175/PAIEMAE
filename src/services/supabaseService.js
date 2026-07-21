@@ -179,8 +179,14 @@ export async function fetchSyncLogs(limit = 200) {
 
 export async function insertSyncLog(log) {
   if (!isSupabaseConfigured()) return handleError('Supabase not configured');
-  // Pass only expected columns to avoid PGRST204
-  const dbLog = { type: log.type, message: log.message };
+  // Mapear para colunas reais do banco (event e status são NOT NULL)
+  const dbLog = {
+    event: log.event || log.type || 'info',
+    status: log.status || (log.type === 'error' ? 'error' : 'success'),
+    details: log.message || log.details || null,
+    type: log.type || null,
+    message: log.message || null,
+  };
   const { data, error } = await supabase.from('sync_logs').insert([dbLog]).select().single();
   if (error) return handleError(error);
   return { data, error: null };
@@ -204,14 +210,24 @@ export async function fetchSheetConnections() {
 
 export async function upsertSheetConnection(connection) {
   if (!isSupabaseConfigured()) return handleError('Supabase not configured');
-  // Mapear apenas colunas que existem na tabela real sheet_connections
+
+  // Mapear para colunas reais da tabela (campos NOT NULL obrigatórios)
   const dbConnection = {
-    sheet_id: connection.sheetId || connection.sheet_id,
+    provider: connection.provider || connection.tipo || 'google',
+    name: connection.nome || connection.name || connection.sheetName || 'Planilha',
+    sheet_url: connection.url || connection.sheetUrl || connection.sheet_url || '',
+    status: connection.status || 'aguardando',
+    sync_mode: connection.syncMode || connection.sync_mode || 'polling60',
+    poll_interval: connection.pollingInterval || connection.poll_interval || 60,
+    auto_sync: connection.autoSync ?? connection.auto_sync ?? true,
+    rows_synced: connection.linhasSincronizadas || connection.rows_synced || 0,
+    // Colunas opcionais
+    sheet_id: connection.sheetId || connection.sheet_id || null,
+    api_key: connection.googleApiKey || connection.api_key || null,
     range: connection.range || 'A1:Z1000',
-    api_key: connection.googleApiKey || connection.api_key
   };
-  
-  // Validar uuid
+
+  // Só inclui o id se for um UUID válido (evita erro de casting)
   const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
   if (connection.id && uuidRegex.test(connection.id)) {
     dbConnection.id = connection.id;

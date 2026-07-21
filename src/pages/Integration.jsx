@@ -36,25 +36,33 @@ function mapFromSupabase(conn) {
   return {
     id: conn.id,
     sheetId: conn.sheet_id,
+    url: conn.sheet_url,
     api_key: conn.api_key,
     range: conn.range,
-    nome: conn.sheet_id ? `Planilha ${conn.sheet_id.substring(0, 8)}...` : 'Nova Planilha',
-    tipo: 'sheets',
-    tipoLabel: 'Google Sheets',
-    status: conn.sheet_id ? 'connected' : 'disconnected',
-    autoSync: true,
-    pollingInterval: 60,
-    tags: ['Ativo'],
-    linhasSincronizadas: 0,
-    ultimoSync: 'Recente'
+    nome: conn.name || (conn.sheet_id ? `Planilha ${conn.sheet_id.substring(0, 8)}...` : 'Nova Planilha'),
+    tipo: conn.provider || 'google',
+    tipoLabel: conn.provider === 'excel' ? 'Excel Online (Microsoft 365)' : 'Google Sheets',
+    status: conn.status || 'aguardando',
+    autoSync: conn.auto_sync ?? true,
+    pollingInterval: conn.poll_interval || 60,
+    tags: conn.columns || ['Ativo'],
+    linhasSincronizadas: conn.rows_synced || 0,
+    ultimoSync: conn.last_sync ? new Date(conn.last_sync).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : null,
   };
 }
 
 function mapToSupabase(sheet) {
   return {
-    id: sheet.id || undefined,
-    sheet_id: sheet.sheetId || sheet.url?.match(/spreadsheets\/d\/([a-zA-Z0-9-_]+)/)?.[1],
-    api_key: sheet.googleApiKey || sheet.api_key,
+    provider: sheet.tipo || 'google',
+    name: sheet.nome || 'Planilha',
+    sheet_url: sheet.url || '',
+    status: sheet.status || 'aguardando',
+    sync_mode: sheet.pollingInterval <= 15 ? 'realtime' : `polling${sheet.pollingInterval}`,
+    poll_interval: sheet.pollingInterval || 60,
+    auto_sync: sheet.autoSync ?? true,
+    rows_synced: sheet.linhasSincronizadas || 0,
+    sheet_id: sheet.sheetId || sheet.url?.match(/spreadsheets\/d\/([a-zA-Z0-9-_]+)/)?.[1] || null,
+    api_key: sheet.googleApiKey || sheet.api_key || null,
     range: sheet.range || 'A1:Z1000'
   };
 }
