@@ -35,32 +35,27 @@ const defaultSheet = {
 function mapFromSupabase(conn) {
   return {
     id: conn.id,
-    nome: conn.nome,
-    tipo: conn.tipo,
-    tipoLabel: conn.tipo_label || conn.tipo,
-    url: conn.url,
-    status: conn.status,
-    autoSync: conn.auto_sync,
-    pollingInterval: conn.polling_interval,
-    tags: conn.tags || [],
-    linhasSincronizadas: conn.linhas_sincronizadas || 0,
-    ultimoSync: conn.ultimo_sync,
+    sheetId: conn.sheet_id,
+    api_key: conn.api_key,
+    range: conn.range,
+    nome: conn.sheet_id ? `Planilha ${conn.sheet_id.substring(0, 8)}...` : 'Nova Planilha',
+    tipo: 'sheets',
+    tipoLabel: 'Google Sheets',
+    status: conn.sheet_id ? 'connected' : 'disconnected',
+    autoSync: true,
+    pollingInterval: 60,
+    tags: ['Ativo'],
+    linhasSincronizadas: 0,
+    ultimoSync: 'Recente'
   };
 }
 
 function mapToSupabase(sheet) {
   return {
-    id: sheet.id,
-    nome: sheet.nome,
-    tipo: sheet.tipo,
-    tipo_label: sheet.tipoLabel,
-    url: sheet.url,
-    status: sheet.status,
-    auto_sync: sheet.autoSync,
-    polling_interval: sheet.pollingInterval,
-    tags: sheet.tags || [],
-    linhas_sincronizadas: sheet.linhasSincronizadas || 0,
-    ultimo_sync: sheet.ultimoSync,
+    id: sheet.id || undefined,
+    sheet_id: sheet.sheetId || sheet.url?.match(/spreadsheets\/d\/([a-zA-Z0-9-_]+)/)?.[1],
+    api_key: sheet.googleApiKey || sheet.api_key,
+    range: sheet.range || 'A1:Z1000'
   };
 }
 

@@ -179,7 +179,9 @@ export async function fetchSyncLogs(limit = 200) {
 
 export async function insertSyncLog(log) {
   if (!isSupabaseConfigured()) return handleError('Supabase not configured');
-  const { data, error } = await supabase.from('sync_logs').insert([log]).select().single();
+  // Pass only expected columns to avoid PGRST204
+  const dbLog = { type: log.type, message: log.message };
+  const { data, error } = await supabase.from('sync_logs').insert([dbLog]).select().single();
   if (error) return handleError(error);
   return { data, error: null };
 }
@@ -202,9 +204,22 @@ export async function fetchSheetConnections() {
 
 export async function upsertSheetConnection(connection) {
   if (!isSupabaseConfigured()) return handleError('Supabase not configured');
+  // Mapear apenas colunas que existem na tabela real sheet_connections
+  const dbConnection = {
+    sheet_id: connection.sheetId || connection.sheet_id,
+    range: connection.range || 'A1:Z1000',
+    api_key: connection.googleApiKey || connection.api_key
+  };
+  
+  // Validar uuid
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  if (connection.id && uuidRegex.test(connection.id)) {
+    dbConnection.id = connection.id;
+  }
+
   const { data, error } = await supabase
     .from('sheet_connections')
-    .upsert(connection, { onConflict: 'id' })
+    .upsert(dbConnection, { onConflict: 'id' })
     .select()
     .single();
   if (error) return handleError(error);

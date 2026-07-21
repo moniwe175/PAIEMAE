@@ -9,7 +9,7 @@ import {
   fetchComissoes, insertComissao as sbInsertCom, updateComissao as sbUpdateCom,
   fetchCashierState, upsertCashierState,
   fetchSplitConfig, upsertSplitConfig,
-  insertSyncLog as sbInsertLog, clearSyncLogs as sbClearLogs,
+  insertSyncLog as sbInsertLog, clearSyncLogs as sbClearLogs, fetchSyncLogs,
   insertDailyReport as sbInsertDailyReport, fetchDailyReports as sbFetchDailyReports,
 } from '../services/supabaseService';
 import { defaultCashier, defaultSplitConfig } from '../mocks/financial';
@@ -75,12 +75,13 @@ export function SyncProvider({ children }) {
       if (!connected) return;
 
       try {
-        const [txRes, expRes, comRes, cashRes, splitRes] = await Promise.all([
+        const [txRes, expRes, comRes, cashRes, splitRes, logsRes] = await Promise.all([
           fetchTransactions(),
           fetchExpenses(),
           fetchComissoes(),
           fetchCashierState(),
           fetchSplitConfig(),
+          fetchSyncLogs(50),
         ]);
 
         if (txRes.data?.length > 0) setTransactions(txRes.data);
@@ -88,6 +89,16 @@ export function SyncProvider({ children }) {
         if (comRes.data?.length > 0) setComissoes(comRes.data);
         if (cashRes.data) setCashier(cashRes.data);
         if (splitRes.data?.length > 0) setSplitConfig(splitRes.data);
+        
+        if (logsRes.data?.length > 0) {
+          const formattedLogs = logsRes.data.map(l => ({
+            id: l.id,
+            type: l.type,
+            message: l.message,
+            timestamp: new Date(l.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+          }));
+          setSyncLogs(formattedLogs);
+        }
 
         setSupabaseReady(true);
       } catch (e) {
