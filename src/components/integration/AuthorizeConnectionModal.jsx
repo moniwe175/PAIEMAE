@@ -24,24 +24,28 @@ export default function AuthorizeConnectionModal({ sheet, onClose, onAuthorized 
     { text: `Requer login com a conta que tem acesso à planilha`, warn: true },
   ];
 
-  const handleAuthorize = () => {
+  const handleAuthorize = async () => {
     setAuthorizing(true);
-
-    // For Excel - we'd need Microsoft Graph API auth here
-    // For demo purposes, we'll use the demo mode
-    setTimeout(() => {
+    
+    try {
       connect({
-        provider: 'demo',
-        sheetId: sheet.id || 'demo_sheet',
+        provider: 'google',
+        sheetId: sheet.id || sheet.url.match(/spreadsheets\/d\/([a-zA-Z0-9-_]+)/)?.[1],
         sheetName: sheet.nome,
         pollingInterval: sheet.pollingInterval || 60,
+        range: 'A1:Z1000',
+        // In a real scenario, this would retrieve credentials safely from user/session
+        googleApiKey: import.meta.env.VITE_GOOGLE_API_KEY || ''
       });
 
       onAuthorized(sheet);
       addLog('success', `Conectado à planilha "${sheet.nome}" com sucesso`);
+    } catch (error) {
+      addLog('error', `Falha ao conectar na planilha: ${error.message}`);
+    } finally {
       setAuthorizing(false);
       onClose();
-    }, 1500);
+    }
   };
 
   return (

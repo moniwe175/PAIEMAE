@@ -326,49 +326,85 @@ export function SyncProvider({ children }) {
   }, [syncToSupabase, requireConnection]);
 
   // ─── Import from sheet (upsert to Supabase) ─────────────────
-  const importFromSheet = useCallback((newTransactions, newComissoes = [], newExpenses = [], rowHashes = []) => {
-    if (!requireConnection('importar da planilha')) return;
+  const importFromSheet = useCallback(async (newTransactions, newComissoes = [], newExpenses = [], rowHashes = [], caixaReport = null) => {
+    if (!requireConnection('importar da planilha')) return { upsertedCount: 0, error: 'Supabase desconectado' };
+
+    let upsertedCount = 0;
+    let hasError = false;
 
     if (newTransactions.length > 0) {
-      setTransactions(prev => {
-        const existingIds = new Set(prev.map(t => t.id));
-        const toUpsert = newTransactions.filter(t => !existingIds.has(t.id));
-        // Upsert to Supabase (insert or update by id)
-        if (supabaseReady) {
-          toUpsert.forEach(tx => sbUpsertTx(tx).catch(e => console.error('[SyncContext] Upsert tx failed:', e)));
+      const existingIds = new Set(transactions.map(t => t.id));
+      const toUpsert = newTransactions.filter(t => !existingIds.has(t.id));
+      
+      if (supabaseReady && toUpsert.length > 0) {
+        try {
+          await Promise.all(toUpsert.map(tx => sbUpsertTx(tx)));
+          upsertedCount += toUpsert.length;
+        } catch (e) {
+          console.error('[SyncContext] Upsert tx failed:', e);
+          hasError = true;
         }
-        return [...toUpsert, ...prev];
-      });
+      }
+      setTransactions(prev => [...toUpsert, ...prev]);
     }
+    
     if (newComissoes.length > 0) {
-      setComissoes(prev => {
-        const existingIds = new Set(prev.map(c => c.id));
-        const unique = newComissoes.filter(c => !existingIds.has(c.id));
-        if (supabaseReady) {
-          unique.forEach(com => sbInsertCom(com).catch(e => console.error('[SyncContext] Insert comissão failed:', e)));
+      const existingIds = new Set(comissoes.map(c => c.id));
+      const unique = newComissoes.filter(c => !existingIds.has(c.id));
+      
+      if (supabaseReady && unique.length > 0) {
+        try {
+          await Promise.all(unique.map(com => sbInsertCom(com)));
+        } catch (e) {
+          console.error('[SyncContext] Insert comissão failed:', e);
+          hasError = true;
         }
-        return [...unique, ...prev];
-      });
+      }
+      setComissoes(prev => [...unique, ...prev]);
     }
+    
     if (newExpenses.length > 0) {
-      setExpenses(prev => {
-        const existingIds = new Set(prev.map(e => e.id));
-        const toUpsert = newExpenses.filter(e => !existingIds.has(e.id));
-        if (supabaseReady) {
-          toUpsert.forEach(exp => sbUpsertExp(exp).catch(e => console.error('[SyncContext] Upsert expense failed:', e)));
+      const existingIds = new Set(expenses.map(e => e.id));
+      const toUpsert = newExpenses.filter(e => !existingIds.has(e.id));
+      
+      if (supabaseReady && toUpsert.length > 0) {
+        try {
+          await Promise.all(toUpsert.map(exp => sbUpsertExp(exp)));
+          upsertedCount += toUpsert.length;
+        } catch (e) {
+          console.error('[SyncContext] Upsert expense failed:', e);
+          hasError = true;
         }
-        return [...toUpsert, ...prev];
-      });
+      }
+      setExpenses(prev => [...toUpsert, ...prev]);
     }
+    
     if (rowHashes.length > 0) {
       setSyncConfig(prev => ({
         ...prev,
         syncedRowHashes: [...new Set([...prev.syncedRowHashes, ...rowHashes])],
       }));
     }
-    setSyncedRowCount(prev => prev + newTransactions.length);
+    
+    // Salvar metadados do caixa (Fundo inicial, faturamento, despesas)
+    if (caixaReport && supabaseReady) {
+      try {
+        await sbInsertDailyReport(caixaReport);
+      } catch (e) {
+        console.error('[SyncContext] Insert daily_report failed:', e);
+        hasError = true;
+      }
+    }
+    
+    if (hasError && upsertedCount === 0) {
+      return { upsertedCount: 0, error: 'falha ao persistir dados no banco' };
+    }
+
+    setSyncedRowCount(prev => prev + upsertedCount);
     setLastSyncAt(new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }));
-  }, [supabaseReady, requireConnection]);
+    
+    return { upsertedCount, error: hasError ? 'Alguns registros falharam' : null };
+  }, [transactions, comissoes, expenses, supabaseReady, requireConnection]);
 
   const connectSheet = useCallback((config) => {
     setSyncConfig(prev => ({ ...prev, ...config }));
