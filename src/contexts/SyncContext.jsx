@@ -11,6 +11,7 @@ import {
   fetchSplitConfig, upsertSplitConfig,
   insertSyncLog as sbInsertLog, clearSyncLogs as sbClearLogs, fetchSyncLogs,
   insertDailyReport as sbInsertDailyReport, fetchDailyReports as sbFetchDailyReports,
+  fetchSheetConnections, upsertSheetConnection as sbUpsertSheetConnection,
 } from '../services/supabaseService';
 import { defaultCashier, defaultSplitConfig } from '../mocks/financial';
 
@@ -75,13 +76,14 @@ export function SyncProvider({ children }) {
       if (!connected) return;
 
       try {
-        const [txRes, expRes, comRes, cashRes, splitRes, logsRes] = await Promise.all([
+        const [txRes, expRes, comRes, cashRes, splitRes, logsRes, sheetsRes] = await Promise.all([
           fetchTransactions(),
           fetchExpenses(),
           fetchComissoes(),
           fetchCashierState(),
           fetchSplitConfig(),
           fetchSyncLogs(50),
+          fetchSheetConnections(),
         ]);
 
         if (txRes.data?.length > 0) setTransactions(txRes.data);
@@ -90,6 +92,23 @@ export function SyncProvider({ children }) {
         if (cashRes.data) setCashier(cashRes.data);
         if (splitRes.data?.length > 0) setSplitConfig(splitRes.data);
         
+        if (sheetsRes.data?.length > 0) {
+          const active = sheetsRes.data.find(s => s.status === 'conectado') || sheetsRes.data[0];
+          if (active) {
+            setSyncConfig({
+              provider: active.provider || 'google',
+              sheetId: active.sheet_id || '',
+              sheetName: active.name || '',
+              range: active.range || 'A1:Z1000',
+              pollingInterval: active.poll_interval || 30,
+              googleApiKey: active.api_key || '',
+              sheet_url: active.sheet_url || '',
+              id: active.id,
+            });
+            setSyncStatus(active.status === 'conectado' ? 'connected' : 'disconnected');
+          }
+        }
+
         if (logsRes.data?.length > 0) {
           const formattedLogs = logsRes.data.map(l => ({
             id: l.id,
@@ -476,6 +495,7 @@ export function SyncProvider({ children }) {
     setSyncConfig(prev => ({ ...prev, ...config }));
     setSyncStatus('connected');
     addLog('success', `Conectado à planilha: ${config.sheetName || config.sheetId}`);
+    sbUpsertSheetConnection({ ...config, status: 'conectado' }).catch(err => console.error('[SyncContext] Auto-persist error:', err));
   }, [addLog]);
 
   const disconnectSheet = useCallback(() => {

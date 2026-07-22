@@ -289,23 +289,32 @@ export async function upsertSheetConnection(connection) {
     user_id: connection.user_id || null,
   };
 
-  // Só inclui o id se for um UUID válido (evita erro de casting com strings como 'sheet_1')
+  // Só inclui o id se for um UUID válido
   const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
   if (connection.id && uuidRegex.test(connection.id)) {
     dbConnection.id = connection.id;
   }
-  // Se nao tem UUID valido, nao inclui id para o banco gerar automaticamente
 
-  const { data, error } = await supabase
-    .from('sheet_connections')
-    .upsert(dbConnection, { onConflict: 'id' })
-    .select()
-    .single();
-  if (error) {
-    console.error('[Supabase] upsertSheetConnection error:', error);
-    return handleError(error);
+  let result;
+  if (dbConnection.id) {
+    result = await supabase
+      .from('sheet_connections')
+      .upsert([dbConnection], { onConflict: 'id' })
+      .select()
+      .single();
+  } else {
+    result = await supabase
+      .from('sheet_connections')
+      .insert([dbConnection])
+      .select()
+      .single();
   }
-  return { data, error: null };
+
+  if (result.error) {
+    console.error('[Supabase] upsertSheetConnection error:', result.error);
+    return handleError(result.error);
+  }
+  return { data: result.data, error: null };
 }
 
 export async function deleteSheetConnection(id) {
