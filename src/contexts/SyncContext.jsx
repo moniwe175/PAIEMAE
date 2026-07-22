@@ -3,7 +3,7 @@ import { isSupabaseConfigured } from '../lib/supabase';
 import {
   checkSupabaseConnection,
   fetchTransactions, insertTransaction as sbInsertTx, deleteTransaction as sbDeleteTx,
-  upsertTransaction as sbUpsertTx,
+  upsertTransaction as sbUpsertTx, fetchAllTransactionIds, deleteTransactionsByIds,
   fetchExpenses, insertExpense as sbInsertExp, deleteExpense as sbDeleteExp,
   upsertExpense as sbUpsertExp,
   fetchComissoes, insertComissao as sbInsertCom, updateComissao as sbUpdateCom,
@@ -342,80 +342,135 @@ export function SyncProvider({ children }) {
 
     let upsertedCount = 0;
     let hasError = false;
+    const errors = [];
 
+    // ── Full sync (espelho): comparar IDs da planilha vs banco e deletar registros excluídos ──
     if (newTransactions.length > 0) {
-      const existingIds = new Set(transactions.map(t => t.id));
-      const toUpsert = newTransactions.filter(t => !existingIds.has(t.id));
-      
-      if (supabaseReady && toUpsert.length > 0) {
-        try {
-          await Promise.all(toUpsert.map(tx => sbUpsertTx(tx)));
-          upsertedCount += toUpsert.length;
-        } catch (e) {
-          console.error('[SyncContext] Upsert tx failed:', e);
+      try {
+        const sheetIds = new Set(newTransactions.map(tx => String(tx.comanda || tx.id).trim()));
+        const { data: existingIds } = await fetchAllTransactionIds();
+        
+        if (existingIds && existingIds.length > 0) {
+          const idsToDelete = existingIds.filter(id => !sheetIds.has(id));
+          if (idsToDelete.length > 0) {
+            console.log('[SyncContext] Deletando registros do banco não presentes na planilha:', idsToDelete);
+            await deleteTransactionsByIds(idsToDelete);
+          }
+        }
+
+        const results = await Promise.all(newTransactions.map(tx => sbUpsertTx(tx)));
+        const failed = results.filter(r => r.error);
+        const succeeded = results.filter(r => !r.error);
+        
+        if (failed.length > 0) {
+          console.error('[SyncContext] Algumas transações falharam:', failed.map(r => r.error?.message));
+          errors.push(`${failed.length} transações falharam: ${failed[0].error?.message || 'erro desconhecido'}`);
           hasError = true;
         }
+        
+        upsertedCount += succeeded.length;
+        
+        // Espelhar exatamente os registros da planilha ordenados por ordem
+        const upsertedData = results.filter(r => r.data).map(r => r.data);
+        if (upsertedData.length > 0) {
+          const sorted = [...upsertedData].sort((a, b) => Number(a.ordem ?? 0) - Number(b.ordem ?? 0));
+          setTransactions(sorted);
+        }
+      } catch (e) {
+        console.error('[SyncContext] Upsert tx falhou completamente:', e);
+        errors.push(`Falha ao persistir transações: ${e.message}`);
+        hasError = true;
       }
-      setTransactions(prev => [...toUpsert, ...prev]);
     }
-    
+
+    // ── Upsert de comissões ──
     if (newComissoes.length > 0) {
-      const existingIds = new Set(comissoes.map(c => c.id));
-      const unique = newComissoes.filter(c => !existingIds.has(c.id));
-      
-      if (supabaseReady && unique.length > 0) {
-        try {
-          await Promise.all(unique.map(com => sbInsertCom(com)));
-        } catch (e) {
-          console.error('[SyncContext] Insert comissão failed:', e);
-          hasError = true;
-        }
+      try {
+        const results = await Promise.all(newComissoes.map(com => sbInsertCom(com)));
+        const succeeded = results.filter(r => !r.error);
+        setComissoes(prev => {
+          const existingIds = new Set(prev.map(c => c.id));
+          const newOnes = succeeded.filter(r => r.data && !existingIds.has(r.data.id)).map(r => r.data);
+          return [...newOnes, ...prev];
+        });
+      } catch (e) {
+        console.error('[SyncContext] Insert comissão falhou:', e);
+        hasError = true;
       }
-      setComissoes(prev => [...unique, ...prev]);
     }
-    
+
+    // ── Upsert TODAS as despesas ──
     if (newExpenses.length > 0) {
-      const existingIds = new Set(expenses.map(e => e.id));
-      const toUpsert = newExpenses.filter(e => !existingIds.has(e.id));
-      
-      if (supabaseReady && toUpsert.length > 0) {
-        try {
-          await Promise.all(toUpsert.map(exp => sbUpsertExp(exp)));
-          upsertedCount += toUpsert.length;
-        } catch (e) {
-          console.error('[SyncContext] Upsert expense failed:', e);
+      try {
+        const results = await Promise.all(newExpenses.map(exp => sbUpsertExp(exp)));
+        const failed = results.filter(r => r.error);
+        const succeeded = results.filter(r => !r.error);
+
+        if (failed.length > 0) {
+          console.error('[SyncContext] Algumas despesas falharam:', failed.map(r => r.error?.message));
+          errors.push(`${failed.length} despesas falharam: ${failed[0].error?.message || 'erro desconhecido'}`);
           hasError = true;
         }
+
+        upsertedCount += succeeded.length;
+
+        const upsertedData = results.filter(r => r.data).map(r => r.data);
+        if (upsertedData.length > 0) {
+          setExpenses(prev => {
+            const existingIds = new Set(prev.map(e => e.id));
+            const newOnes = upsertedData.filter(e => !existingIds.has(e.id));
+            const updated = prev.map(e => {
+              const found = upsertedData.find(u => u.id === e.id);
+              return found || e;
+            });
+            return [...newOnes, ...updated];
+          });
+        }
+      } catch (e) {
+        console.error('[SyncContext] Upsert expense falhou completamente:', e);
+        errors.push(`Falha ao persistir despesas: ${e.message}`);
+        hasError = true;
       }
-      setExpenses(prev => [...toUpsert, ...prev]);
     }
-    
+
+    // ── Salvar hashes de linhas sincronizadas ──
     if (rowHashes.length > 0) {
       setSyncConfig(prev => ({
         ...prev,
         syncedRowHashes: [...new Set([...prev.syncedRowHashes, ...rowHashes])],
       }));
     }
-    
-    // Salvar metadados do caixa (Fundo inicial, faturamento, despesas)
-    if (caixaReport && supabaseReady) {
+
+    // ── Salvar relatório diário ──
+    if (caixaReport) {
       try {
-        await sbInsertDailyReport(caixaReport);
+        const reportResult = await sbInsertDailyReport(caixaReport);
+        if (reportResult.error) {
+          console.error('[SyncContext] Insert daily_report falhou:', reportResult.error);
+          // Não bloqueia o contador — relatório é secundário
+        }
       } catch (e) {
-        console.error('[SyncContext] Insert daily_report failed:', e);
-        hasError = true;
+        console.error('[SyncContext] Insert daily_report exception:', e);
       }
     }
-    
+
+    // ── Mensagem clara de erro se falhou tudo ──
     if (hasError && upsertedCount === 0) {
-      return { upsertedCount: 0, error: 'falha ao persistir dados no banco' };
+      const errorMsg = errors.length > 0 ? errors[0] : 'Falha ao persistir dados no banco';
+      addLog('error', `❌ ${errorMsg}`);
+      return { upsertedCount: 0, error: errorMsg };
     }
 
+    // ── Atualizar contador apenas após confirmação do banco ──
     setSyncedRowCount(prev => prev + upsertedCount);
     setLastSyncAt(new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }));
-    
-    return { upsertedCount, error: hasError ? 'Alguns registros falharam' : null };
-  }, [transactions, comissoes, expenses, supabaseReady, requireConnection]);
+
+    if (hasError) {
+      addLog('warning', `⚠️ Sincronização parcial: ${upsertedCount} registros salvos, ${errors.length} com falha.`);
+    }
+
+    return { upsertedCount, error: hasError ? errors.join('; ') : null };
+  }, [comissoes, supabaseReady, requireConnection, addLog]);
 
   const connectSheet = useCallback((config) => {
     setSyncConfig(prev => ({ ...prev, ...config }));

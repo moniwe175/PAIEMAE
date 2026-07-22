@@ -166,42 +166,49 @@ export default function Financial() {
   }, [txsHoje, dailySheet]);
 
   const txFiltradas = useMemo(() => {
-    // Transform sheet rows into transaction objects
-    const sheetTxs = (dailySheet?.rows || []).map((r, idx) => {
-      const total = r.credito + r.debito + r.dinheiro + r.pix;
-      // Detect primary payment method
-      let pagamento = 'Pix';
-      if (r.pix > 0) pagamento = 'Pix';
-      else if (r.credito > 0) pagamento = 'Crédito';
-      else if (r.debito > 0) pagamento = 'Débito';
-      else if (r.dinheiro > 0) pagamento = 'Dinheiro';
+    const supabaseTxs = transactions.map(normalizeTx);
 
-      return {
-        id: `sheet_tx_${idx}_${r.cliente}`,
-        tipo: 'receita',
-        desc: r.cliente,
-        cliente: r.cliente,
-        procedimento: r.profissional || '—',  // G column = service type (e.g. depilaçao)
-        total,
-        valor: total,
-        data: dailySheet?.dataCaixa || '--',
-        hora: dailySheet?.lastUpdated || '--:--',
-        pagamento,
-        status: 'paid',
-        profissionalNome: r.profNome || '—',    // H column = professional name
-        comanda: r.comanda || '—',               // I column = command number
-        origem: 'planilha',
-        clinica: total - (r.repasse || 0),
-        profissional: r.repasse || 0,
-      };
+    // Map por id/comanda para priorizar transações persistidas no Supabase
+    const txMap = new Map();
+    supabaseTxs.forEach(t => {
+      const key = String(t.id || t.comanda || '').trim();
+      if (key) txMap.set(key, t);
     });
 
-    // Supabase transactions (exclude old sheet ones to avoid duplicates)
-    const supabaseTxs = transactions
-      .filter(t => t.origem !== 'planilha')
-      .map(normalizeTx);
+    if (dailySheet?.rows) {
+      dailySheet.rows.forEach(r => {
+        const comandaId = r.comanda ? String(r.comanda).trim() : null;
+        if (comandaId && !txMap.has(comandaId)) {
+          const total = r.credito + r.debito + r.dinheiro + r.pix;
+          let pagamento = 'pix';
+          if (r.pix > 0) pagamento = 'pix';
+          else if (r.credito > 0) pagamento = 'credito';
+          else if (r.debito > 0) pagamento = 'debito';
+          else if (r.dinheiro > 0) pagamento = 'dinheiro';
 
-    const all = [...supabaseTxs, ...sheetTxs];
+          txMap.set(comandaId, {
+            id: comandaId,
+            tipo: 'receita',
+            desc: r.cliente,
+            cliente: r.cliente,
+            procedimento: r.profissional || '—',
+            total,
+            valor: total,
+            data: dailySheet?.dataCaixa || '--',
+            hora: dailySheet?.lastUpdated || '--:--',
+            pagamento,
+            status: 'paid',
+            profissionalNome: r.profNome || '—',
+            comanda: comandaId,
+            origem: 'planilha',
+            clinica: total - (r.repasse || 0),
+            profissional: r.repasse || 0,
+          });
+        }
+      });
+    }
+
+    const all = Array.from(txMap.values()).sort((a, b) => (Number(a.ordem ?? 0) - Number(b.ordem ?? 0)));
     return all.filter(t => txFiltroStatus === 'todos' || t.status === txFiltroStatus);
   }, [transactions, dailySheet, txFiltroStatus]);
 

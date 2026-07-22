@@ -109,16 +109,16 @@ export default function useSheetSync() {
         const despesasKeys = ['PASSAGEM', 'PRODUTOS', 'TRIBUTOS', 'OUTRAS SAÍDAS', 'SANGRIA'];
         const isDespesa = despesasKeys.some(k => col0 === k);
 
-        // Achar o valor e forma de pagamento nas colunas 1 a 5
+        // Achar o valor e forma de pagamento nas colunas 1 a 4 (CRÉDITO, DÉBITO, DINHEIRO, PIX)
         let valor = 0;
-        let formaPagamento = '';
-        const formas = ['Crédito', 'Débito', 'Dinheiro', 'Pix', 'Repasse'];
+        let formaPagamento = 'pix';
+        const formas = ['credito', 'debito', 'dinheiro', 'pix'];
         
-        for (let c = 1; c <= 5; c++) {
+        for (let c = 1; c <= 4; c++) {
           const v = parseValue(row[c]);
           if (v > 0) {
             valor = v;
-            formaPagamento = formas[c - 1];
+            formaPagamento = formas[c - 1]; // CRÉDITO -> credito, DÉBITO -> debito, DINHEIRO -> dinheiro, PIX -> pix
             break;
           }
         }
@@ -126,33 +126,44 @@ export default function useSheetSync() {
         // Ignorar se não tem valor
         if (valor === 0) continue;
 
-        // Comanda (coluna 7 - índice 7 seria H, 0-indexed: CLIENTE=0, CREDITO=1, DEBITO=2, DINHEIRO=3, PIX=4, REPASSE=5, PROFISSIONAL=6, COMANDA=7)
+        // Comanda (coluna 7 / índice 7)
         const profissional = row[6] ? row[6].toString().trim() : 'Não informado';
-        const comanda = row[7] ? row[7].toString().trim() : `CMD_AUTO_${i}`;
+        const comandaRaw = row[7] ? row[7].toString().trim() : '';
+
+        // A comanda é o identificador único exclusivo
+        if (!comandaRaw) continue;
+        const comandaId = String(comandaRaw).trim();
 
         if (isDespesa) {
           newExpenses.push({
-            id: `sheet_exp_${comanda}`,
+            id: comandaId,
             data: currentDataCaixa,
             descricao: col0,
             categoria: col0,
             valor: valor,
-            metodo_pagamento: formaPagamento || 'Outros',
+            metodo_pagamento: formaPagamento,
             origem: 'planilha',
-            tipo: 'despesa'
+            tipo: 'despesa',
           });
         } else {
           newTransactions.push({
-            id: `sheet_tx_${comanda}`,
+            // Regra do ID: id = comanda exclusivamente (sem prefixos ou concatenações)
+            id: comandaId,
+            tipo: 'receita',
             data: currentDataCaixa,
             cliente: row[0].toString().trim(),
             procedimento: 'Procedimento Importado',
             valor: valor,
-            formaPagamento: formaPagamento,
+            total: valor,
+            pagamento: formaPagamento,
+            forma_pagamento: formaPagamento,
             profissional_nome: profissional,
-            comanda: comanda,
+            profissional: 0,
+            clinica: valor,
+            comanda: comandaId,
+            ordem: i, // Preserva a ordem da planilha
             origem: 'planilha',
-            tipo: 'receita'
+            status: 'paid',
           });
         }
       }

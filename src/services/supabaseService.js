@@ -27,7 +27,7 @@ export async function fetchTransactions() {
   const { data, error } = await supabase
     .from('transactions')
     .select('*')
-    .order('created_at', { ascending: false });
+    .order('ordem', { ascending: true });
   if (error) return handleError(error, []);
   return { data: data || [], error: null };
 }
@@ -41,18 +41,62 @@ export async function insertTransaction(tx) {
 
 export async function upsertTransaction(tx) {
   if (!isSupabaseConfigured()) return handleError('Supabase not configured');
+
+  const comandaId = String(tx.comanda || tx.id || '').trim();
+
+  // Normalizar campos para corresponder exatamente ao schema do banco
+  const dbTx = {
+    id: comandaId,
+    tipo: tx.tipo || 'receita',
+    descricao: tx.desc || tx.descricao || tx.procedimento || tx.cliente || null,
+    categoria: tx.categoria || null,
+    data: tx.data || new Date().toLocaleDateString('pt-BR'),
+    valor: Number(tx.valor ?? tx.total ?? 0),
+    total: Number(tx.total ?? tx.valor ?? 0),
+    origem: tx.origem || 'planilha',
+    hora: tx.hora || null,
+    cliente: tx.cliente || null,
+    procedimento: tx.procedimento || null,
+    clinica: Number(tx.clinica ?? 0),
+    profissional: Number(tx.profissional ?? 0),
+    pagamento: tx.pagamento || tx.formaPagamento || tx.forma_pagamento || 'pix',
+    forma_pagamento: tx.forma_pagamento || tx.formaPagamento || tx.pagamento || null,
+    status: tx.status || 'paid',
+    profissional_nome: tx.profissionalNome || tx.profissional_nome || null,
+    comanda: comandaId,
+    ordem: Number(tx.ordem ?? 0),
+    user_id: tx.user_id || null,
+  };
+
   const { data, error } = await supabase
     .from('transactions')
-    .upsert([tx], { onConflict: 'id' })
+    .upsert([dbTx], { onConflict: 'id' })
     .select()
     .single();
-  if (error) return handleError(error);
+  if (error) {
+    console.error('[Supabase] upsertTransaction error:', error);
+    return handleError(error);
+  }
   return { data, error: null };
 }
 
 export async function deleteTransaction(id) {
   if (!isSupabaseConfigured()) return handleError('Supabase not configured');
   const { error } = await supabase.from('transactions').delete().eq('id', id);
+  if (error) return handleError(error);
+  return { data: true, error: null };
+}
+
+export async function fetchAllTransactionIds() {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured', []);
+  const { data, error } = await supabase.from('transactions').select('id');
+  if (error) return handleError(error, []);
+  return { data: (data || []).map(row => String(row.id)), error: null };
+}
+
+export async function deleteTransactionsByIds(idsToDelete) {
+  if (!isSupabaseConfigured() || !idsToDelete || idsToDelete.length === 0) return { data: true, error: null };
+  const { error } = await supabase.from('transactions').delete().in('id', idsToDelete);
   if (error) return handleError(error);
   return { data: true, error: null };
 }
@@ -78,12 +122,29 @@ export async function insertExpense(exp) {
 
 export async function upsertExpense(exp) {
   if (!isSupabaseConfigured()) return handleError('Supabase not configured');
+
+  // Normalizar campos para corresponder exatamente ao schema do banco
+  const dbExp = {
+    id: (exp.id || '').toString(),
+    data: exp.data || new Date().toLocaleDateString('pt-BR'),
+    descricao: exp.descricao || exp.description || exp.categoria || 'Despesa',
+    categoria: exp.categoria || exp.category || 'Outros',
+    valor: Number(exp.valor ?? exp.amount ?? 0),
+    metodo_pagamento: exp.metodo_pagamento || exp.metodoPagamento || exp.metodo || 'Outros',
+    origem: exp.origem || 'manual',
+    tipo: exp.tipo || 'despesa',
+    user_id: exp.user_id || null,
+  };
+
   const { data, error } = await supabase
     .from('expenses')
-    .upsert([exp], { onConflict: 'id' })
+    .upsert([dbExp], { onConflict: 'id' })
     .select()
     .single();
-  if (error) return handleError(error);
+  if (error) {
+    console.error('[Supabase] upsertExpense error:', error);
+    return handleError(error);
+  }
   return { data, error: null };
 }
 
@@ -211,7 +272,7 @@ export async function fetchSheetConnections() {
 export async function upsertSheetConnection(connection) {
   if (!isSupabaseConfigured()) return handleError('Supabase not configured');
 
-  // Mapear para colunas reais da tabela (campos NOT NULL obrigatórios)
+  // Mapear para colunas reais da tabela
   const dbConnection = {
     provider: connection.provider || connection.tipo || 'google',
     name: connection.nome || connection.name || connection.sheetName || 'Planilha',
@@ -225,20 +286,25 @@ export async function upsertSheetConnection(connection) {
     sheet_id: connection.sheetId || connection.sheet_id || null,
     api_key: connection.googleApiKey || connection.api_key || null,
     range: connection.range || 'A1:Z1000',
+    user_id: connection.user_id || null,
   };
 
-  // Só inclui o id se for um UUID válido (evita erro de casting)
+  // Só inclui o id se for um UUID válido (evita erro de casting com strings como 'sheet_1')
   const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
   if (connection.id && uuidRegex.test(connection.id)) {
     dbConnection.id = connection.id;
   }
+  // Se nao tem UUID valido, nao inclui id para o banco gerar automaticamente
 
   const { data, error } = await supabase
     .from('sheet_connections')
     .upsert(dbConnection, { onConflict: 'id' })
     .select()
     .single();
-  if (error) return handleError(error);
+  if (error) {
+    console.error('[Supabase] upsertSheetConnection error:', error);
+    return handleError(error);
+  }
   return { data, error: null };
 }
 
@@ -269,12 +335,23 @@ export function unsubscribeChannel(channel) {
 
 export async function insertDailyReport(report) {
   if (!isSupabaseConfigured()) return handleError('Supabase not configured');
+
+  // Remover user_id se nao for fornecido (coluna nullable)
+  const dbReport = { ...report };
+  if (!dbReport.user_id) delete dbReport.user_id;
+  // Remover id para deixar o banco gerar UUID automaticamente
+  if (!dbReport.id) delete dbReport.id;
+
+  // Usar onConflict apenas em data_caixa (user_id pode ser null)
   const { data, error } = await supabase
     .from('daily_reports')
-    .upsert([report], { onConflict: 'user_id,data_caixa' })
+    .upsert([dbReport], { onConflict: 'data_caixa' })
     .select()
     .single();
-  if (error) return handleError(error);
+  if (error) {
+    console.error('[Supabase] insertDailyReport error:', error);
+    return handleError(error);
+  }
   return { data, error: null };
 }
 
