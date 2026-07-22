@@ -52,7 +52,7 @@ function mapFromSupabase(conn) {
 }
 
 function mapToSupabase(sheet) {
-  return {
+  const payload = {
     provider: sheet.tipo || 'google',
     name: sheet.nome || 'Planilha',
     sheet_url: sheet.url || '',
@@ -65,14 +65,8 @@ function mapToSupabase(sheet) {
     api_key: sheet.googleApiKey || sheet.api_key || null,
     range: sheet.range || 'A1:Z1000'
   };
-}
-
-async function seedSheets() {
-  const { data } = await fetchSheetConnections();
-  if (!data || data.length === 0) {
-    const user = await getCurrentUser();
-    await upsertSheetConnection({ ...mapToSupabase(defaultSheet), user_id: user?.id });
-  }
+  if (sheet.id) payload.id = sheet.id;
+  return payload;
 }
 
 export default function Integration() {
@@ -97,7 +91,6 @@ export default function Integration() {
 
   const loadSheets = async () => {
     setLoading(true);
-    await seedSheets();
     const { data } = await fetchSheetConnections();
     if (data) setSheets(data.map(mapFromSupabase));
     setLoading(false);
