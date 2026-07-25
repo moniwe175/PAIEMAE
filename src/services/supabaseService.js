@@ -274,8 +274,8 @@ export async function upsertSheetConnection(connection) {
 
   const sheetId = (connection.id || connection.sheet_id || `sheet_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`).toString();
 
-  // Payload 1: Colunas em português (padrão original da tabela no Supabase)
-  const payloadPT = {
+  // ── Tentativa 1: payload completo em português (com sheet_id, api_key, range)
+  const payloadFull = {
     id: sheetId,
     nome: connection.nome || connection.name || connection.sheetName || 'Planilha',
     tipo: connection.tipo || connection.provider || 'google',
@@ -288,37 +288,33 @@ export async function upsertSheetConnection(connection) {
     api_key: connection.googleApiKey || connection.api_key || null,
     range: connection.range || 'A1:Z1000',
   };
-  if (connection.user_id) payloadPT.user_id = connection.user_id;
+  if (connection.user_id) payloadFull.user_id = connection.user_id;
 
-  // Tenta salvar usando esquema em português
   let { data, error } = await supabase
     .from('sheet_connections')
-    .upsert([payloadPT], { onConflict: 'id' })
+    .upsert([payloadFull], { onConflict: 'id' })
     .select()
     .single();
 
-  // Se falhar por incompatibilidade de colunas, tenta o esquema em inglês
+  // ── Tentativa 2: payload mínimo em português (sem colunas opcionais sheet_id/api_key/range)
+  // Acontece quando a tabela foi criada sem essas colunas extras
   if (error && error.code === 'PGRST204') {
-    console.warn('[Supabase] upsertSheetConnection PT falhou (coluna ausente), tentando formato EN:', error.message);
-    const payloadEN = {
+    console.warn('[Supabase] Tentando payload mínimo PT (sem sheet_id/api_key/range):', error.message);
+    const payloadMin = {
       id: sheetId,
-      name: connection.name || connection.nome || connection.sheetName || 'Planilha',
-      provider: connection.provider || connection.tipo || 'google',
-      sheet_url: connection.sheet_url || connection.url || connection.sheetUrl || '',
+      nome: connection.nome || connection.name || connection.sheetName || 'Planilha',
+      tipo: connection.tipo || connection.provider || 'google',
+      url: connection.url || connection.sheet_url || connection.sheetUrl || '',
       status: connection.status || 'aguardando',
-      sync_mode: connection.syncMode || connection.sync_mode || 'polling60',
-      poll_interval: connection.poll_interval || connection.pollingInterval || 60,
-      auto_sync: connection.auto_sync ?? connection.autoSync ?? true,
-      rows_synced: connection.rows_synced || connection.linhasSincronizadas || 0,
-      sheet_id: connection.sheet_id || connection.sheetId || null,
-      api_key: connection.api_key || connection.googleApiKey || null,
-      range: connection.range || 'A1:Z1000',
+      auto_sync: connection.autoSync ?? connection.auto_sync ?? true,
+      polling_interval: connection.pollingInterval || connection.poll_interval || 60,
+      linhas_sincronizadas: connection.linhasSincronizadas || connection.rows_synced || 0,
     };
-    if (connection.user_id) payloadEN.user_id = connection.user_id;
+    if (connection.user_id) payloadMin.user_id = connection.user_id;
 
     const res2 = await supabase
       .from('sheet_connections')
-      .upsert([payloadEN], { onConflict: 'id' })
+      .upsert([payloadMin], { onConflict: 'id' })
       .select()
       .single();
 
@@ -326,8 +322,33 @@ export async function upsertSheetConnection(connection) {
     error = res2.error;
   }
 
+  // ── Tentativa 3: payload mínimo em inglês (fallback para schema alternativo)
+  if (error && error.code === 'PGRST204') {
+    console.warn('[Supabase] Tentando payload mínimo EN:', error.message);
+    const payloadEN = {
+      id: sheetId,
+      name: connection.name || connection.nome || connection.sheetName || 'Planilha',
+      provider: connection.provider || connection.tipo || 'google',
+      sheet_url: connection.sheet_url || connection.url || connection.sheetUrl || '',
+      status: connection.status || 'aguardando',
+      auto_sync: connection.auto_sync ?? connection.autoSync ?? true,
+      poll_interval: connection.poll_interval || connection.pollingInterval || 60,
+      rows_synced: connection.rows_synced || connection.linhasSincronizadas || 0,
+    };
+    if (connection.user_id) payloadEN.user_id = connection.user_id;
+
+    const res3 = await supabase
+      .from('sheet_connections')
+      .upsert([payloadEN], { onConflict: 'id' })
+      .select()
+      .single();
+
+    data = res3.data;
+    error = res3.error;
+  }
+
   if (error) {
-    console.error('[Supabase] upsertSheetConnection error:', error);
+    console.error('[Supabase] upsertSheetConnection erro final:', error);
     return handleError(error);
   }
   return { data, error: null };
@@ -708,3 +729,103 @@ export async function deleteKanbanLead(id) {
   return { data: true, error: null };
 }
 
+// ─── Motor Marketing — Templates ─────────────────────────────
+
+export async function fetchTemplates() {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured', []);
+  const { data, error } = await supabase
+    .from('message_templates')
+    .select('*')
+    .order('tool_id', { ascending: true });
+  if (error) return handleError(error, []);
+  return { data: data || [], error: null };
+}
+
+export async function updateTemplate(toolId, text) {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured');
+  const { data, error } = await supabase
+    .from('message_templates')
+    .update({ template_text: text, updated_at: new Date().toISOString() })
+    .eq('tool_id', toolId)
+    .select()
+    .single();
+  if (error) return handleError(error);
+  return { data, error: null };
+}
+
+export async function toggleTemplate(toolId, active) {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured');
+  const { data, error } = await supabase
+    .from('message_templates')
+    .update({ active, updated_at: new Date().toISOString() })
+    .eq('tool_id', toolId)
+    .select()
+    .single();
+  if (error) return handleError(error);
+  return { data, error: null };
+}
+
+// ─── Motor Marketing — Queue ──────────────────────────────────
+
+export async function fetchQueue(status = null) {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured', []);
+  let query = supabase
+    .from('marketing_queue')
+    .select('*')
+    .order('scheduled_at', { ascending: true })
+    .limit(100);
+  if (status) query = query.eq('status', status);
+  const { data, error } = await query;
+  if (error) return handleError(error, []);
+  return { data: data || [], error: null };
+}
+
+export async function fetchQueueHistory() {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured', []);
+  const { data, error } = await supabase
+    .from('marketing_queue')
+    .select('*')
+    .in('status', ['sent', 'failed', 'cancelled', 'expired'])
+    .order('updated_at', { ascending: false })
+    .limit(200);
+  if (error) return handleError(error, []);
+  return { data: data || [], error: null };
+}
+
+export async function fetchQueuePendingCount() {
+  if (!isSupabaseConfigured()) return { data: 0, error: null };
+  const { count, error } = await supabase
+    .from('marketing_queue')
+    .select('id', { count: 'exact', head: true })
+    .eq('status', 'pending');
+  if (error) return { data: 0, error };
+  return { data: count || 0, error: null };
+}
+
+export async function approveMessage(id) {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured');
+  const { data, error } = await supabase
+    .from('marketing_queue')
+    .update({
+      status: 'approved',
+      approved_by: 'gestora',
+      approved_at: new Date().toISOString(),
+    })
+    .eq('id', id)
+    .select()
+    .single();
+  if (error) return handleError(error);
+  return { data, error: null };
+}
+
+export async function discardMessage(id) {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured');
+  const { data, error } = await supabase
+    .from('marketing_queue')
+    .update({ status: 'cancelled' })
+    .eq('id', id)
+    .select()
+    .single();
+  if (error) return handleError(error);
+  return { data, error: null };
+}

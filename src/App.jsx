@@ -17,6 +17,7 @@ import Services from './pages/Services';
 import Packages from './pages/Packages';
 import Equipe from './pages/Equipe';
 import Marketing from './pages/Marketing';
+import MotorMarketing from './pages/MotorMarketing';
 import Integration from './pages/Integration';
 import Reports from './pages/Reports';
 import ClientBooking from './pages/ClientBooking';
@@ -57,6 +58,7 @@ function App() {
                 <Route path="/packages" element={<Packages />} />
                 <Route path="/equipe" element={<Equipe />} />
                 <Route path="/marketing" element={<Marketing />} />
+                <Route path="/motor-marketing" element={<MotorMarketing />} />
                 <Route path="/integration" element={<Integration />} />
                 <Route path="/reports" element={<Reports />} />
                 <Route path="/client-booking" element={<ClientBooking />} />

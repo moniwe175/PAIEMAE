@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard,
@@ -20,6 +20,7 @@ import {
   ClipboardCheck,
   Target
 } from 'lucide-react';
+import { fetchQueuePendingCount } from '../../services/supabaseService';
 
 const menuItems = [
   { name: 'Dashboard', path: '/', icon: LayoutDashboard },
@@ -34,6 +35,7 @@ const menuItems = [
   { name: 'Estratégia', path: '/estrategia', icon: Target },
   { name: 'Tarefas', path: '/kanban', icon: ClipboardList },
   { name: 'Marketing', path: '/marketing', icon: Megaphone },
+  { name: 'Motor', path: '/motor-marketing', icon: Zap, badgeKey: 'pending' },
   { name: 'Comissões', path: '/comissoes', icon: Coins },
   { name: 'Financeiro', path: '/financial', icon: Wallet },
   { name: 'Integrações', path: '/integration', icon: Zap },
@@ -41,11 +43,25 @@ const menuItems = [
 
 const Sidebar = () => {
   const navigate = useNavigate();
+  const [pendingCount, setPendingCount] = useState(0);
+
+  // Poll pending messages count every 30s
+  useEffect(() => {
+    let cancelled = false;
+    const fetch = async () => {
+      try {
+        const { data } = await fetchQueuePendingCount();
+        if (!cancelled) setPendingCount(data || 0);
+      } catch { /* silent */ }
+    };
+    fetch();
+    const interval = setInterval(fetch, 30000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, []);
 
   const handleLogout = (e) => {
     e.preventDefault();
     if (window.confirm('Deseja realmente sair do sistema?')) {
-      // Aqui ficaria a lógica de logout. Por enquanto, apenas redireciona para a home
       navigate('/');
     }
   };
@@ -76,6 +92,25 @@ const Sidebar = () => {
               <item.icon className="w-5 h-5" />
             </span>
             <span className="sidebar-item-label">{item.name}</span>
+            {item.badgeKey === 'pending' && pendingCount > 0 && (
+              <span style={{
+                marginLeft: 'auto',
+                minWidth: 18, height: 18,
+                padding: '0 5px',
+                borderRadius: 99,
+                fontSize: 10,
+                fontWeight: 800,
+                background: '#F39C12',
+                color: '#fff',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                lineHeight: 1,
+                flexShrink: 0,
+              }}>
+                {pendingCount > 99 ? '99+' : pendingCount}
+              </span>
+            )}
             <span className="sidebar-tooltip">{item.name}</span>
           </NavLink>
         ))}
@@ -117,3 +152,4 @@ const Sidebar = () => {
 };
 
 export default Sidebar;
+
