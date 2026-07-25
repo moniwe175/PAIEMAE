@@ -3,13 +3,12 @@ import {
   RefreshCw, Table2, Clock, AlertTriangle, Plus, Trash2,
   Copy, ToggleLeft, ToggleRight, Link2, FileSpreadsheet,
   CheckCircle, XCircle, WifiOff,
-  ScrollText, BarChart3, ArrowRightLeft, Zap, Loader2
+  ScrollText, BarChart3, Zap, Loader2
 } from 'lucide-react';
 import { useSync } from '../contexts/SyncContext';
 import useSheetSync from '../hooks/useSheetSync';
 import AddSheetModal from '../components/integration/AddSheetModal';
 import AuthorizeConnectionModal from '../components/integration/AuthorizeConnectionModal';
-import ColumnMappingEditor from '../components/integration/ColumnMappingEditor';
 import SyncLogPanel from '../components/integration/SyncLogPanel';
 import {
   getMarketingEngineStatus, setMarketingEngineEnabled,
@@ -223,7 +222,6 @@ export default function Integration() {
     { key: 'python', label: 'Python Sync', icon: Zap },
     { key: 'log', label: 'Log de Sync', icon: ScrollText },
     { key: 'relatorios', label: 'Relatórios', icon: BarChart3 },
-    { key: 'mapeamento', label: 'Mapeamento', icon: ArrowRightLeft },
     { key: 'motor', label: 'Motor Marketing', icon: Zap },
   ];
 
@@ -786,11 +784,6 @@ export default function Integration() {
             )}
           </div>
         </div>
-      )}
-
-      {/* Tab Content: Mapeamento */}
-      {activeTab === 'mapeamento' && (
-        <ColumnMappingEditor />
       )}
 
       {/* Tab Content: Motor Marketing */}
