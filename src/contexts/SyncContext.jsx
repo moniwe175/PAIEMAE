@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useCallback, useRef, useEffect } from 'react';
-import { isSupabaseConfigured } from '../lib/supabase';
+import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import {
   checkSupabaseConnection,
   fetchTransactions, insertTransaction as sbInsertTx, deleteTransaction as sbDeleteTx,
@@ -45,10 +45,13 @@ export function SyncProvider({ children }) {
   const [supabaseConnected, setSupabaseConnected] = useState(false);
   const [connectionError, setConnectionError] = useState(null);
   const [dailySheet, setDailySheet] = useState(null);
+  // Status do Python sync (lido dos sync_logs em tempo real)
+  const [pythonSyncStatus, setPythonSyncStatus] = useState(null); // { lastSync, rowCount, status }
 
   const pollTimerRef = useRef(null);
   const countdownTimerRef = useRef(null);
   const connectionCheckRef = useRef(null);
+  const realtimeChannelRef = useRef(null);
 
   // ─── Load from Supabase on mount + connectivity monitor ────
   useEffect(() => {
@@ -134,6 +137,82 @@ export function SyncProvider({ children }) {
 
     return () => {
       if (connectionCheckRef.current) clearInterval(connectionCheckRef.current);
+    };
+  }, []);
+
+  // ─── Supabase Realtime: escuta mudanças na tabela transactions ──
+  // Quando o Python sync faz upsert/delete, o frontend atualiza automaticamente
+  useEffect(() => {
+    if (!isSupabaseConfigured()) return;
+
+    const channel = supabase
+      .channel('transactions-realtime')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'transactions' },
+        async (payload) => {
+          // Reidratar todas as transações do banco ao detectar qualquer mudança
+          try {
+            const { data, error } = await supabase
+              .from('transactions')
+              .select('*')
+              .order('ordem', { ascending: true });
+            if (!error && data) {
+              setTransactions(data);
+              setLastSyncAt(new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }));
+              setSyncedRowCount(data.length);
+              setSyncStatus('connected');
+            }
+          } catch (e) {
+            console.warn('[SyncContext] Realtime rehydrate error:', e);
+          }
+        }
+      )
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          console.log('[SyncContext] Realtime: subscrito na tabela transactions');
+        }
+      });
+
+    realtimeChannelRef.current = channel;
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
+
+  // ─── Supabase Realtime: escuta sync_logs para mostrar status do Python ──
+  useEffect(() => {
+    if (!isSupabaseConfigured()) return;
+
+    const channel = supabase
+      .channel('sync-logs-realtime')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'sync_logs' },
+        (payload) => {
+          const log = payload.new;
+          if (!log) return;
+          // Atualizar status do Python sync
+          setPythonSyncStatus(prev => ({
+            lastSync: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+            status: log.status || log.type || 'info',
+            message: log.message || log.details || '',
+          }));
+          // Adicionar ao log local
+          const entry = {
+            id: log.id || Date.now(),
+            timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+            type: log.type || log.status || 'info',
+            message: log.message || log.details || '',
+          };
+          setSyncLogs(prev => [entry, ...prev].slice(0, 200));
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
     };
   }, []);
 
@@ -542,6 +621,7 @@ export function SyncProvider({ children }) {
     lastSyncAt, syncedRowCount, nextSyncIn,
     supabaseReady, supabaseConnected, connectionError,
     dailySheet, updateDailySheet, saveDailyReport,
+    pythonSyncStatus,
 
     addTransaction, removeTransaction,
     addExpense, removeExpense,

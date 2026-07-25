@@ -48,6 +48,8 @@ export default function Financial() {
     syncStatus, addLog,
     supabaseConnected, connectionError,
     dailySheet,
+    pythonSyncStatus,
+    lastSyncAt, syncedRowCount,
   } = useSync();
 
   const [activeTab, setActiveTab] = useState('caixa');
@@ -137,80 +139,34 @@ export default function Financial() {
     return transactions.map(normalizeTx).filter(t => t.data === hoje() && t.status === 'paid');
   }, [transactions]);
 
-  // Use dailySheet data when available (from Google Sheets), fallback to transactions
-  const faturamentoHoje = dailySheet ? dailySheet.faturamentoBruto : txsHoje.reduce((a, t) => a + t.total, 0);
-  const ticketMedio = dailySheet
-    ? (dailySheet.totalTransacoes > 0 ? dailySheet.faturamentoBruto / dailySheet.totalTransacoes : 0)
-    : (txsHoje.length > 0 ? faturamentoHoje / txsHoje.length : 0);
+  // Calcular totais direto das transactions do Supabase (espelho exato da planilha)
+  const faturamentoHoje = txsHoje.reduce((a, t) => a + t.total, 0);
+  const ticketMedio = txsHoje.length > 0 ? faturamentoHoje / txsHoje.length : 0;
   const aReceber = transactions.map(normalizeTx).filter(t => t.status === 'pending').reduce((a, t) => a + t.total, 0);
   const pendentesCount = transactions.map(normalizeTx).filter(t => t.status === 'pending').length;
 
-  // Payment methods: use dailySheet totals when available
+  // Formas de pagamento calculadas direto do Supabase
   const formasPagamento = useMemo(() => {
-    if (dailySheet) {
-      const total = dailySheet.totalPix + dailySheet.totalCredito + dailySheet.totalDebito + dailySheet.totalDinheiro || 1;
-      return paymentMethods.map(pm => {
-        const valorMap = { Pix: dailySheet.totalPix, Crédito: dailySheet.totalCredito, Débito: dailySheet.totalDebito, Dinheiro: dailySheet.totalDinheiro };
-        const valor = valorMap[pm.nome] || 0;
-        return { ...pm, valor, pct: Math.round((valor / total) * 100) };
-      });
-    }
     const counts = {};
-    txsHoje.forEach(t => { counts[t.pagamento] = (counts[t.pagamento] || 0) + t.total; });
+    txsHoje.forEach(t => {
+      const pg = (t.pagamento || 'pix').toLowerCase();
+      counts[pg] = (counts[pg] || 0) + t.total;
+    });
     const total = Object.values(counts).reduce((a, v) => a + v, 0) || 1;
     return paymentMethods.map(pm => ({
       ...pm,
-      valor: counts[pm.nome] || 0,
-      pct: Math.round(((counts[pm.nome] || 0) / total) * 100),
+      valor: counts[(pm.nome || '').toLowerCase()] || counts[pm.id] || 0,
+      pct: Math.round(((counts[(pm.nome || '').toLowerCase()] || counts[pm.id] || 0) / total) * 100),
     }));
-  }, [txsHoje, dailySheet]);
+  }, [txsHoje]);
 
+  // Transações filtradas: fonte única = Supabase (mantido em espelho pelo Python sync)
   const txFiltradas = useMemo(() => {
-    const supabaseTxs = transactions.map(normalizeTx);
-
-    // Map por id/comanda para priorizar transações persistidas no Supabase
-    const txMap = new Map();
-    supabaseTxs.forEach(t => {
-      const key = String(t.id || t.comanda || '').trim();
-      if (key) txMap.set(key, t);
-    });
-
-    if (dailySheet?.rows) {
-      dailySheet.rows.forEach(r => {
-        const comandaId = r.comanda ? String(r.comanda).trim() : null;
-        if (comandaId && !txMap.has(comandaId)) {
-          const total = r.credito + r.debito + r.dinheiro + r.pix;
-          let pagamento = 'pix';
-          if (r.pix > 0) pagamento = 'pix';
-          else if (r.credito > 0) pagamento = 'credito';
-          else if (r.debito > 0) pagamento = 'debito';
-          else if (r.dinheiro > 0) pagamento = 'dinheiro';
-
-          txMap.set(comandaId, {
-            id: comandaId,
-            tipo: 'receita',
-            desc: r.cliente,
-            cliente: r.cliente,
-            procedimento: r.profissional || '—',
-            total,
-            valor: total,
-            data: dailySheet?.dataCaixa || '--',
-            hora: dailySheet?.lastUpdated || '--:--',
-            pagamento,
-            status: 'paid',
-            profissionalNome: r.profNome || '—',
-            comanda: comandaId,
-            origem: 'planilha',
-            clinica: total - (r.repasse || 0),
-            profissional: r.repasse || 0,
-          });
-        }
-      });
-    }
-
-    const all = Array.from(txMap.values()).sort((a, b) => (Number(a.ordem ?? 0) - Number(b.ordem ?? 0)));
+    const all = transactions
+      .map(normalizeTx)
+      .sort((a, b) => Number(a.ordem ?? 0) - Number(b.ordem ?? 0));
     return all.filter(t => txFiltroStatus === 'todos' || t.status === txFiltroStatus);
-  }, [transactions, dailySheet, txFiltroStatus]);
+  }, [transactions, txFiltroStatus]);
 
   const expFiltradas = useMemo(() => {
     // Merge Supabase expenses + sheet expense rows
@@ -582,6 +538,51 @@ export default function Financial() {
         </div>
       )}
 
+      {/* Python Sync status banner */}
+      {supabaseConnected && (
+        <div style={{
+          background: pythonSyncStatus?.status === 'success' ? 'var(--success-bg)'
+            : pythonSyncStatus?.status === 'error' ? 'var(--danger-bg)'
+            : '#FFF8E1',
+          border: `1px solid ${
+            pythonSyncStatus?.status === 'success' ? 'var(--success)'
+            : pythonSyncStatus?.status === 'error' ? 'var(--danger)'
+            : '#FFD966'}`,
+          borderLeft: `4px solid ${
+            pythonSyncStatus?.status === 'success' ? 'var(--success)'
+            : pythonSyncStatus?.status === 'error' ? 'var(--danger)'
+            : '#FFD966'}`,
+          borderRadius: 'var(--radius-sm)',
+          padding: '10px 16px',
+          marginBottom: 20,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+          fontSize: 12,
+        }}>
+          <span style={{
+            width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
+            background: pythonSyncStatus?.status === 'success' ? 'var(--success)'
+              : pythonSyncStatus?.status === 'error' ? 'var(--danger)'
+              : '#E6A800',
+            boxShadow: pythonSyncStatus?.status === 'success' ? '0 0 0 3px rgba(46,204,113,0.2)' : 'none',
+          }} />
+          <span style={{ color: 'var(--text-dark)', fontWeight: 600 }}>
+            {pythonSyncStatus?.status === 'success' ? 'Python Sync ativo'
+              : pythonSyncStatus?.status === 'error' ? 'Python Sync com erro'
+              : 'Aguardando Python Sync'}
+          </span>
+          <span style={{ color: 'var(--text-muted)' }}>
+            {pythonSyncStatus?.message || 'Inicie o sync_financeiro.py no computador da clínica para sincronizar a planilha automaticamente.'}
+          </span>
+          {lastSyncAt && (
+            <span style={{ marginLeft: 'auto', color: 'var(--text-muted)', flexShrink: 0 }}>
+              Último update: {lastSyncAt} • {syncedRowCount} linhas
+            </span>
+          )}
+        </div>
+      )}
+
       {/* KPI Cards */}
       <div className="grid-4 section-gap">
         {/* Caixa do Dia - Dark Green */}
@@ -631,11 +632,11 @@ export default function Financial() {
             <TrendingUp style={{ color: 'var(--success)' }} />
           </div>
           <div className="stat-value" style={{ color: 'var(--success)' }}>
-            {isConnected ? fmtCurrency(faturamentoHoje) : 'R$ --'}
+            {fmtCurrency(faturamentoHoje)}
           </div>
           <div className="stat-label">Faturamento Hoje</div>
           <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
-            {isConnected ? 'Da planilha Excel' : 'Aguardando planilha'}
+            {syncedRowCount > 0 ? `${syncedRowCount} transações no banco` : 'Aguardando Python Sync'}
           </div>
         </div>
 
