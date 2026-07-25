@@ -115,46 +115,49 @@ export default function Integration() {
   }, []);
 
   // Fetch initial WhatsApp connection status and subscribe to realtime updates
+  // Runs whenever the 'motor' tab is activated
   useEffect(() => {
+    if (activeTab !== 'motor') return;
+
+    console.log('[DEBUG] Buscando status WA...');
+
     let active = true;
 
     const fetchWaStatus = async () => {
-      try {
-        const { data, error } = await supabase
-          .from('whatsapp_connection_status')
-          .select('*')
-          .eq('id', 1)
-          .single();
-        
-        if (error) throw error;
-        if (active && data) {
-          setWaStatus(data);
-        }
-      } catch (err) {
-        console.error('Erro ao buscar status inicial do WhatsApp:', err);
+      const { data, error } = await supabase
+        .from('whatsapp_connection_status')
+        .select('*')
+        .eq('id', 1)
+        .single();
+      console.log('[DEBUG] Status recebido:', data, error);
+      if (active && data) {
+        setWaStatus(data);
       }
     };
 
     fetchWaStatus();
 
     const channel = supabase
-      .channel('whatsapp-status')
+      .channel('wa-status-' + Date.now())
       .on('postgres_changes', {
-        event: 'UPDATE',
+        event: '*',
         schema: 'public',
         table: 'whatsapp_connection_status'
       }, (payload) => {
-        if (active && payload.new) {
-          setWaStatus(payload.new);
-        }
+        console.log('[DEBUG] Realtime recebido:', payload.new);
+        if (active) setWaStatus(payload.new);
       })
-      .subscribe();
+      .subscribe((status) => {
+        console.log('[DEBUG] Subscription status:', status);
+      });
 
     return () => {
       active = false;
       supabase.removeChannel(channel);
     };
-  }, []);
+  }, [activeTab]);
+
+  console.log('[DEBUG] waStatus atual:', waStatus);
 
   const isSheetConnected = syncStatus === 'connected' || syncStatus === 'connecting';
 
