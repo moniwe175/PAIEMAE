@@ -272,49 +272,65 @@ export async function fetchSheetConnections() {
 export async function upsertSheetConnection(connection) {
   if (!isSupabaseConfigured()) return handleError('Supabase not configured');
 
-  // Mapear para colunas reais da tabela
-  const dbConnection = {
-    provider: connection.provider || connection.tipo || 'google',
-    name: connection.nome || connection.name || connection.sheetName || 'Planilha',
-    sheet_url: connection.url || connection.sheetUrl || connection.sheet_url || '',
+  const sheetId = (connection.id || connection.sheet_id || `sheet_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`).toString();
+
+  // Payload 1: Colunas em português (padrão original da tabela no Supabase)
+  const payloadPT = {
+    id: sheetId,
+    nome: connection.nome || connection.name || connection.sheetName || 'Planilha',
+    tipo: connection.tipo || connection.provider || 'google',
+    url: connection.url || connection.sheet_url || connection.sheetUrl || '',
     status: connection.status || 'aguardando',
-    sync_mode: connection.syncMode || connection.sync_mode || 'polling60',
-    poll_interval: connection.pollingInterval || connection.poll_interval || 60,
     auto_sync: connection.autoSync ?? connection.auto_sync ?? true,
-    rows_synced: connection.linhasSincronizadas || connection.rows_synced || 0,
-    // Colunas opcionais
+    polling_interval: connection.pollingInterval || connection.poll_interval || 60,
+    linhas_sincronizadas: connection.linhasSincronizadas || connection.rows_synced || 0,
     sheet_id: connection.sheetId || connection.sheet_id || null,
     api_key: connection.googleApiKey || connection.api_key || null,
     range: connection.range || 'A1:Z1000',
-    user_id: connection.user_id || null,
   };
+  if (connection.user_id) payloadPT.user_id = connection.user_id;
 
-  // Só inclui o id se for um UUID válido
-  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-  if (connection.id && uuidRegex.test(connection.id)) {
-    dbConnection.id = connection.id;
-  }
+  // Tenta salvar usando esquema em português
+  let { data, error } = await supabase
+    .from('sheet_connections')
+    .upsert([payloadPT], { onConflict: 'id' })
+    .select()
+    .single();
 
-  let result;
-  if (dbConnection.id) {
-    result = await supabase
+  // Se falhar por incompatibilidade de colunas, tenta o esquema em inglês
+  if (error && error.code === 'PGRST204') {
+    console.warn('[Supabase] upsertSheetConnection PT falhou (coluna ausente), tentando formato EN:', error.message);
+    const payloadEN = {
+      id: sheetId,
+      name: connection.name || connection.nome || connection.sheetName || 'Planilha',
+      provider: connection.provider || connection.tipo || 'google',
+      sheet_url: connection.sheet_url || connection.url || connection.sheetUrl || '',
+      status: connection.status || 'aguardando',
+      sync_mode: connection.syncMode || connection.sync_mode || 'polling60',
+      poll_interval: connection.poll_interval || connection.pollingInterval || 60,
+      auto_sync: connection.auto_sync ?? connection.autoSync ?? true,
+      rows_synced: connection.rows_synced || connection.linhasSincronizadas || 0,
+      sheet_id: connection.sheet_id || connection.sheetId || null,
+      api_key: connection.api_key || connection.googleApiKey || null,
+      range: connection.range || 'A1:Z1000',
+    };
+    if (connection.user_id) payloadEN.user_id = connection.user_id;
+
+    const res2 = await supabase
       .from('sheet_connections')
-      .upsert([dbConnection], { onConflict: 'id' })
+      .upsert([payloadEN], { onConflict: 'id' })
       .select()
       .single();
-  } else {
-    result = await supabase
-      .from('sheet_connections')
-      .insert([dbConnection])
-      .select()
-      .single();
+
+    data = res2.data;
+    error = res2.error;
   }
 
-  if (result.error) {
-    console.error('[Supabase] upsertSheetConnection error:', result.error);
-    return handleError(result.error);
+  if (error) {
+    console.error('[Supabase] upsertSheetConnection error:', error);
+    return handleError(error);
   }
-  return { data: result.data, error: null };
+  return { data, error: null };
 }
 
 export async function deleteSheetConnection(id) {

@@ -35,19 +35,19 @@ const defaultSheet = {
 function mapFromSupabase(conn) {
   return {
     id: conn.id,
-    sheetId: conn.sheet_id,
-    url: conn.sheet_url,
-    api_key: conn.api_key,
-    range: conn.range,
-    nome: conn.name || (conn.sheet_id ? `Planilha ${conn.sheet_id.substring(0, 8)}...` : 'Nova Planilha'),
-    tipo: conn.provider || 'google',
-    tipoLabel: conn.provider === 'excel' ? 'Excel Online (Microsoft 365)' : 'Google Sheets',
+    sheetId: conn.sheet_id || conn.sheetId,
+    url: conn.url || conn.sheet_url || conn.sheetUrl || '',
+    api_key: conn.api_key || conn.googleApiKey,
+    range: conn.range || 'A1:Z1000',
+    nome: conn.nome || conn.name || (conn.sheet_id ? `Planilha ${conn.sheet_id.substring(0, 8)}...` : 'Nova Planilha'),
+    tipo: conn.tipo || conn.provider || 'google',
+    tipoLabel: (conn.tipo === 'excel' || conn.provider === 'excel') ? 'Excel Online (Microsoft 365)' : 'Google Sheets',
     status: conn.status || 'aguardando',
-    autoSync: conn.auto_sync ?? true,
-    pollingInterval: conn.poll_interval || 60,
-    tags: conn.columns || ['Ativo'],
-    linhasSincronizadas: conn.rows_synced || 0,
-    ultimoSync: conn.last_sync ? new Date(conn.last_sync).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : null,
+    autoSync: conn.auto_sync ?? conn.autoSync ?? true,
+    pollingInterval: conn.polling_interval || conn.poll_interval || 60,
+    tags: conn.tags || conn.columns || ['Ativo'],
+    linhasSincronizadas: conn.linhas_sincronizadas || conn.rows_synced || 0,
+    ultimoSync: conn.ultimo_sync || conn.last_sync ? new Date(conn.ultimo_sync || conn.last_sync).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : null,
   };
 }
 
