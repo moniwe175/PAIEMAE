@@ -273,36 +273,47 @@ export async function fetchSheetConnections() {
 export async function upsertSheetConnection(connection) {
   if (!isSupabaseConfigured()) return handleError('Supabase not configured');
 
-  const sheetId = (connection.id || connection.sheet_id || `sheet_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`).toString();
+  // Só usa id existente se for UUID válido
+  const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  const validUuid = connection.id && UUID_REGEX.test(connection.id) ? connection.id : undefined;
 
-  // ── Tentativa 1: payload completo em português (com sheet_id, api_key, range)
-  const payloadFull = {
-    id: sheetId,
-    nome: connection.nome || connection.name || connection.sheetName || 'Planilha',
-    tipo: connection.tipo || connection.provider || 'google',
-    url: connection.url || connection.sheet_url || connection.sheetUrl || '',
+  const extractSheetId = connection.sheetId || connection.sheet_id
+    || connection.url?.match(/spreadsheets\/d\/([a-zA-Z0-9-_]+)/)?.[1]
+    || connection.sheet_url?.match(/spreadsheets\/d\/([a-zA-Z0-9-_]+)/)?.[1]
+    || null;
+
+  // ── Payload EN (schema do iury2: name, provider, sheet_url, poll_interval, rows_synced)
+  const payloadEN = {
+    ...(validUuid ? { id: validUuid } : {}),
+    provider: connection.provider || connection.tipo || 'google',
+    name: connection.name || connection.nome || connection.sheetName || 'Planilha',
+    sheet_url: connection.url || connection.sheet_url || connection.sheetUrl || '',
     status: connection.status || 'aguardando',
-    auto_sync: connection.autoSync ?? connection.auto_sync ?? true,
-    polling_interval: connection.pollingInterval || connection.poll_interval || 60,
-    linhas_sincronizadas: connection.linhasSincronizadas || connection.rows_synced || 0,
-    sheet_id: connection.sheetId || connection.sheet_id || null,
+    sync_mode: connection.sync_mode || connection.syncMode || (connection.pollingInterval <= 15 ? 'realtime' : `polling${connection.pollingInterval || 60}`),
+    poll_interval: connection.pollingInterval || connection.poll_interval || 60,
+    auto_sync: connection.auto_sync ?? connection.autoSync ?? true,
+    rows_synced: connection.linhasSincronizadas || connection.rows_synced || 0,
+    sheet_id: extractSheetId,
     api_key: connection.googleApiKey || connection.api_key || null,
     range: connection.range || 'A1:Z1000',
+    ...(connection.user_id ? { user_id: connection.user_id } : {}),
   };
-  if (connection.user_id) payloadFull.user_id = connection.user_id;
 
-  let { data, error } = await supabase
-    .from('sheet_connections')
-    .upsert([payloadFull], { onConflict: 'id' })
-    .select()
-    .single();
+  let data, error;
 
-  // ── Tentativa 2: payload mínimo em português (sem colunas opcionais sheet_id/api_key/range)
-  // Acontece quando a tabela foi criada sem essas colunas extras
-  if (error && error.code === 'PGRST204') {
-    console.warn('[Supabase] Tentando payload mínimo PT (sem sheet_id/api_key/range):', error.message);
-    const payloadMin = {
-      id: sheetId,
+  if (validUuid) {
+    const res = await supabase.from('sheet_connections').upsert([payloadEN], { onConflict: 'id' }).select();
+    data = res.data; error = res.error;
+  } else {
+    const res = await supabase.from('sheet_connections').insert([payloadEN]).select();
+    data = res.data; error = res.error;
+  }
+
+  // ── Fallback PT (schema antigo: nome, tipo, url, polling_interval, linhas_sincronizadas)
+  if (error) {
+    console.warn('[Supabase] Payload EN falhou, tentando PT:', error.message, error.code);
+    const payloadPT = {
+      ...(validUuid ? { id: validUuid } : {}),
       nome: connection.nome || connection.name || connection.sheetName || 'Planilha',
       tipo: connection.tipo || connection.provider || 'google',
       url: connection.url || connection.sheet_url || connection.sheetUrl || '',
@@ -310,46 +321,27 @@ export async function upsertSheetConnection(connection) {
       auto_sync: connection.autoSync ?? connection.auto_sync ?? true,
       polling_interval: connection.pollingInterval || connection.poll_interval || 60,
       linhas_sincronizadas: connection.linhasSincronizadas || connection.rows_synced || 0,
+      ...(extractSheetId ? { sheet_id: extractSheetId } : {}),
+      ...(connection.googleApiKey || connection.api_key ? { api_key: connection.googleApiKey || connection.api_key } : {}),
+      ...(connection.user_id ? { user_id: connection.user_id } : {}),
     };
-    if (connection.user_id) payloadMin.user_id = connection.user_id;
 
-    const res2 = await supabase
-      .from('sheet_connections')
-      .upsert([dbConnection], { onConflict: 'id' })
-      .select();
-  } else {
-    result = await supabase
-      .from('sheet_connections')
-      .insert([dbConnection])
-      .select();
+    if (validUuid) {
+      const res2 = await supabase.from('sheet_connections').upsert([payloadPT], { onConflict: 'id' }).select();
+      data = res2.data; error = res2.error;
+    } else {
+      const res2 = await supabase.from('sheet_connections').insert([payloadPT]).select();
+      data = res2.data; error = res2.error;
+    }
   }
 
-  // ── Tentativa 3: payload mínimo em inglês (fallback para schema alternativo)
-  if (error && error.code === 'PGRST204') {
-    console.warn('[Supabase] Tentando payload mínimo EN:', error.message);
-    const payloadEN = {
-      id: sheetId,
-      name: connection.name || connection.nome || connection.sheetName || 'Planilha',
-      provider: connection.provider || connection.tipo || 'google',
-      sheet_url: connection.sheet_url || connection.url || connection.sheetUrl || '',
-      status: connection.status || 'aguardando',
-      auto_sync: connection.auto_sync ?? connection.autoSync ?? true,
-      poll_interval: connection.poll_interval || connection.pollingInterval || 60,
-      rows_synced: connection.rows_synced || connection.linhasSincronizadas || 0,
-    };
-    if (connection.user_id) payloadEN.user_id = connection.user_id;
-
-    const res3 = await supabase
-      .from('sheet_connections')
-      .upsert([payloadEN], { onConflict: 'id' })
-      .select()
-      .single();
-
-    data = res3.data;
-    error = res3.error;
+  if (error) {
+    console.error('[Supabase] upsertSheetConnection erro final:', error);
+    return handleError(error);
   }
-  const returnedData = Array.isArray(result.data) ? result.data[0] : result.data;
-  return { data: returnedData || dbConnection, error: null };
+
+  const resultData = Array.isArray(data) ? data[0] : data;
+  return { data: resultData || payloadEN, error: null };
 }
 
 export async function deleteSheetConnection(id) {
