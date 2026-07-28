@@ -1,34 +1,34 @@
 """
 sync_financeiro.py
 ==================
-ETL: Google Sheets → Supabase (full sync com reconciliação)
+ETL: Google Sheets → Supabase (Espelho Inteligente com Reconciliação + Diff + Hash)
 
-Fluxo:
+Arquitetura:
   1. Lê TODAS as linhas da planilha via gspread (Service Account)
-  2. Mapeia cada linha → transação (usando COMANDA como ID único)
-  3. Full sync no Supabase:
-     - upsert de todos os registros
-     - deleta do banco os IDs que não estão mais na planilha
-  4. Registra logs na tabela sync_logs
-  5. Roda em loop (SYNC_INTERVAL segundos)
-
-Estrutura esperada da planilha:
-  Coluna 0: cliente
-  Coluna 1: profissional
-  Coluna 2: CRÉDITO
-  Coluna 3: DÉBITO
-  Coluna 4: DINHEIRO
-  Coluna 5: PIX
-  Coluna 6: (extra / ignorado)  ← ajuste se necessário
-  Coluna 7: COMANDA  (ID único)
-
+  2. Camada de Normalização Inteligente de Colunas (Aliases)
+     - Não depende de posições fixas ou nomes exatos das colunas.
+     - Identifica dinamicamente colunas de cliente, profissional, comanda, e formas de pagamento.
+  3. Identificação Única:
+     - id = String(comanda).trim() (Apenas a comanda é a fonte de ID)
+  4. Detecção Automática de Valor e Pagamento:
+     - Percorre colunas de pagamento (crédito, débito, dinheiro, pix) e detecta o 1º valor > 0.
+  5. Controle de Integridade:
+     - Gera hash MD5 único da linha: hash = md5(cliente + profissional + valor + pagamento)
+  6. Ordem Original:
+     - ordem = posição da linha na planilha (1-indexed)
+  7. Engine de Sync (Full Sync + Diff + Controlled Deletion):
+     - Insere/Atualiza apenas se houver diferença no hash ou na ordem.
+     - Deleta registros órfãos com validação de segurança.
 """
 
 import os
 import sys
 import time
 import logging
-from datetime import datetime, timezone
+import unicodedata
+import re
+import hashlib
+from datetime import datetime
 from decimal import Decimal, InvalidOperation
 
 import gspread
@@ -56,14 +56,16 @@ SHEET_NAME = os.getenv("SHEET_NAME", "").strip()      # nome da aba, ex: "CAIXA 
 SYNC_INTERVAL = int(os.getenv("SYNC_INTERVAL", "30")) # segundos entre cada sync
 CREDENTIALS_FILE = os.getenv("GOOGLE_CREDENTIALS_FILE", "credentials.json").strip()
 
-# Índices de colunas (0-indexado) — ajuste conforme sua planilha
-COL_CLIENTE      = int(os.getenv("COL_CLIENTE", "0"))
-COL_PROFISSIONAL = int(os.getenv("COL_PROFISSIONAL", "1"))
-COL_CREDITO      = int(os.getenv("COL_CREDITO", "2"))
-COL_DEBITO       = int(os.getenv("COL_DEBITO", "3"))
-COL_DINHEIRO     = int(os.getenv("COL_DINHEIRO", "4"))
-COL_PIX          = int(os.getenv("COL_PIX", "5"))
-COL_COMANDA      = int(os.getenv("COL_COMANDA", "7"))  # ID único
+# Dicionário de Aliases para Normalização Inteligente
+ALIASES = {
+    "credito": ["credito", "crédito", "cred", "cartao_credito", "cartao credito", "cartao de credito", "cartão de crédito"],
+    "debito": ["debito", "débito", "cartao_debito", "deb", "cartao debito", "cartão de débito"],
+    "dinheiro": ["dinheiro", "cash", "especie", "espécie"],
+    "pix": ["pix", "transferencia", "transferência", "qr", "transf"],
+    "cliente": ["cliente", "client", "nome", "paciente"],
+    "profissional": ["profissional", "atendente", "barbeiro", "cabeleireiro", "medico", "medica", "médico", "médica", "funcionario", "pro"],
+    "comanda": ["comanda", "id", "ticket", "codigo", "código", "num_comanda", "numero_comanda"],
+}
 
 # ─── Inicializar clientes ────────────────────────────────────────────────────
 def init_supabase() -> Client:
@@ -82,12 +84,22 @@ def init_gspread():
     return gc
 
 
-# ─── Helpers ─────────────────────────────────────────────────────────────────
+# ─── Helpers de Normalização e Sanitização ──────────────────────────────────
+def normalizar_texto(texto: str) -> str:
+    """Normaliza texto removendo acentos, espaços extras e convertendo para minúsculo."""
+    if not texto:
+        return ""
+    nfkd = unicodedata.normalize('NFD', str(texto))
+    sem_acento = u"".join([c for c in nfkd if not unicodedata.combining(c)])
+    limpo = sem_acento.lower().strip()
+    limpo = re.sub(r'[\s_\-]+', '_', limpo)
+    return limpo
+
+
 def parse_value(raw) -> float:
     """Converte uma célula da planilha para float. Retorna 0.0 se inválido."""
     if raw is None or str(raw).strip() == "":
         return 0.0
-    # Remove R$, espaços, converte vírgula para ponto
     cleaned = (
         str(raw)
         .strip()
@@ -103,26 +115,6 @@ def parse_value(raw) -> float:
         return 0.0
 
 
-def detectar_pagamento(row: list) -> tuple[float, str]:
-    """
-    Detecta o valor e a forma de pagamento da linha.
-    Regra: primeiro campo > 0 dentre CRÉDITO, DÉBITO, DINHEIRO, PIX.
-    Retorna (valor, forma_pagamento).
-    """
-    colunas = [
-        (COL_CREDITO,  "credito"),
-        (COL_DEBITO,   "debito"),
-        (COL_DINHEIRO, "dinheiro"),
-        (COL_PIX,      "pix"),
-    ]
-    for col_idx, nome in colunas:
-        if col_idx < len(row):
-            v = parse_value(row[col_idx])
-            if v > 0:
-                return v, nome
-    return 0.0, "pix"
-
-
 def safe_get(row: list, idx: int, default: str = "") -> str:
     """Retorna o valor de uma coluna ou default se fora do range."""
     try:
@@ -132,20 +124,82 @@ def safe_get(row: list, idx: int, default: str = "") -> str:
         return default
 
 
-def linha_e_cabecalho(row: list) -> bool:
-    """Detecta se a linha é um cabeçalho (ex: 'CLIENTE', 'PROFISSIONAL')."""
-    if not row:
-        return True
-    primeiro = safe_get(row, COL_CLIENTE).upper()
-    return primeiro in ("CLIENTE", "PACIENTE", "", "--")
+def gerar_hash_linha(cliente: str, profissional: str, valor: float, pagamento: str) -> str:
+    """
+    Gera um hash MD5 único da linha para controle de integridade:
+    hash = md5(cliente + profissional + valor + pagamento)
+    """
+    conteudo = f"{cliente.strip().lower()}|{profissional.strip().lower()}|{valor:.2f}|{pagamento.strip().lower()}"
+    return hashlib.md5(conteudo.encode("utf-8")).hexdigest()
 
 
-# ─── Leitura da planilha ─────────────────────────────────────────────────────
+# ─── Reconhecimento Inteligente de Colunas ───────────────────────────────────
+def mapear_colunas(rows: list[list]) -> tuple[dict[str, int], int]:
+    """
+    Detecta dinamicamente as colunas com base nos aliases.
+    Retorna (mapa_colunas, indice_linha_cabecalho).
+    """
+    for row_idx in range(min(5, len(rows))):
+        row = rows[row_idx]
+        col_map = {}
+        row_norm = [normalizar_texto(cell) for cell in row]
+
+        for col_idx, cell_text in enumerate(row_norm):
+            if not cell_text:
+                continue
+            for key, alias_list in ALIASES.items():
+                if key in col_map:
+                    continue
+                for alias in alias_list:
+                    alias_norm = normalizar_texto(alias)
+                    if cell_text == alias_norm or alias_norm in cell_text or cell_text in alias_norm:
+                        col_map[key] = col_idx
+                        break
+
+        # Se encontrou a comanda e pelo menos uma outra coluna relevante, valida como cabeçalho
+        if "comanda" in col_map and ("cliente" in col_map or "credito" in col_map or "pix" in col_map):
+            log.info(f"Cabeçalho normalizado detectado na linha {row_idx + 1}: {col_map}")
+            return col_map, row_idx
+
+    # Fallback para índices padrões/env se a detecção não for conclusiva
+    log.warning("Cabeçalho inteligente não identificado com certeza nas primeiras 5 linhas. Usando mapeamento fallback.")
+    fallback_map = {
+        "cliente": int(os.getenv("COL_CLIENTE", "0")),
+        "profissional": int(os.getenv("COL_PROFISSIONAL", "1")),
+        "credito": int(os.getenv("COL_CREDITO", "2")),
+        "debito": int(os.getenv("COL_DEBITO", "3")),
+        "dinheiro": int(os.getenv("COL_DINHEIRO", "4")),
+        "pix": int(os.getenv("COL_PIX", "5")),
+        "comanda": int(os.getenv("COL_COMANDA", "7")),
+    }
+    return fallback_map, 0
+
+
+def detectar_pagamento_dinamico(row: list, col_map: dict[str, int]) -> tuple[float, str]:
+    """
+    Percorre colunas de pagamento (crédito, débito, dinheiro, pix)
+    Identifica o primeiro valor > 0.
+    Retorna (valor, forma_pagamento).
+    """
+    formas = [
+        ("credito", "credito"),
+        ("debito", "debito"),
+        ("dinheiro", "dinheiro"),
+        ("pix", "pix"),
+    ]
+    for key, nome in formas:
+        if key in col_map:
+            idx = col_map[key]
+            if idx < len(row):
+                v = parse_value(row[idx])
+                if v > 0:
+                    return v, nome
+    return 0.0, "pix"
+
+
+# ─── Leitura e Mapeamento da Planilha ────────────────────────────────────────
 def ler_planilha(gc, sheet_id: str, sheet_name: str) -> list[list]:
-    """
-    Abre a planilha e retorna todas as linhas como lista de listas.
-    Se sheet_name estiver vazio, usa a primeira aba.
-    """
+    """Abre a planilha e retorna todas as linhas como lista de listas."""
     spreadsheet = gc.open_by_key(sheet_id)
     if sheet_name:
         worksheet = spreadsheet.worksheet(sheet_name)
@@ -156,92 +210,93 @@ def ler_planilha(gc, sheet_id: str, sheet_name: str) -> list[list]:
     return rows
 
 
-# ─── Mapeamento de linhas ────────────────────────────────────────────────────
 def mapear_linhas(rows: list[list]) -> list[dict]:
     """
-    Converte as linhas da planilha em transações prontas para o Supabase.
-    Retorna lista de dicts com schema da tabela 'transactions'.
+    Converte linhas da planilha em transações normalizadas com Hash e ID único (Comanda).
     """
+    if not rows:
+        return []
+
+    col_map, header_idx = mapear_colunas(rows)
     transactions = []
     data_hoje = datetime.now().strftime("%d/%m/%Y")
 
-    for i, row in enumerate(rows):
-        # Ignorar cabeçalho e linhas vazias
-        if linha_e_cabecalho(row):
+    for i in range(header_idx + 1, len(rows)):
+        row = rows[i]
+        if not row or all(str(cell).strip() == "" for cell in row):
             continue
 
-        comanda_raw = safe_get(row, COL_COMANDA)
+        # ID = exclusivamente o valor da comanda limpo
+        comanda_idx = col_map.get("comanda", 7)
+        comanda_raw = safe_get(row, comanda_idx)
         if not comanda_raw:
-            # Sem comanda = sem ID único, ignorar linha
             continue
 
-        comanda_id = comanda_raw.strip()
+        comanda_id = str(comanda_raw).strip()
+        # Ignora rótulos de cabeçalho repetidos ou palavras chave inválidas
+        if not comanda_id or comanda_id.lower() in ("comanda", "id", "ticket", "código", "codigo", "--", "total"):
+            continue
 
-        cliente     = safe_get(row, COL_CLIENTE) or "—"
-        profissional = safe_get(row, COL_PROFISSIONAL) or "—"
+        cliente_idx = col_map.get("cliente", 0)
+        prof_idx = col_map.get("profissional", 1)
 
-        valor, pagamento = detectar_pagamento(row)
+        cliente = safe_get(row, cliente_idx) or "—"
+        profissional = safe_get(row, prof_idx) or "—"
 
-        # Ignorar linhas sem valor
+        valor, pagamento = detectar_pagamento_dinamico(row, col_map)
         if valor == 0.0:
             continue
 
+        # Ordem original da linha na planilha (começando em 1)
+        ordem = i - header_idx
+
+        # Hash da linha para detecção de integridade
+        line_hash = gerar_hash_linha(cliente, profissional, valor, pagamento)
+
         transactions.append({
-            "id":               comanda_id,      # PK: exclusivamente a comanda
-            "cliente":          cliente,
-            "profissional":     profissional_nome(profissional),
-            "valor":            valor,
-            "total":            valor,
-            "pagamento":        pagamento,
-            "forma_pagamento":  pagamento,
-            "comanda":          comanda_id,
-            "ordem":            i + 1,            # preserva ordem da planilha
-            "tipo":             "receita",
-            "status":           "paid",
-            "origem":           "planilha",
-            "data":             data_hoje,
-            # descricao e profissional_nome extras para compatibilidade
-            "descricao":        cliente,
+            "id": comanda_id,                # PRIMARY KEY: comanda
+            "comanda": comanda_id,
+            "cliente": cliente,
+            "profissional": profissional,
             "profissional_nome": profissional,
+            "valor": valor,
+            "total": valor,
+            "pagamento": pagamento,
+            "forma_pagamento": pagamento,
+            "ordem": ordem,
+            "hash": line_hash,
+            "tipo": "receita",
+            "status": "paid",
+            "origem": "planilha",
+            "data": data_hoje,
+            "descricao": f"{cliente} - {profissional}",
         })
 
     return transactions
 
 
-def profissional_nome(val: str) -> float:
-    """
-    Compatibilidade com o schema: campo 'profissional' no banco é numérico (repasse).
-    Retorna 0 — o nome vai em 'profissional_nome'.
-    """
-    return 0.0
-
-
-# ─── Full sync Supabase ───────────────────────────────────────────────────────
-def buscar_ids_banco(sb: Client) -> set[str]:
-    """Retorna todos os IDs de origem 'planilha' que estão no banco."""
-    resultado = sb.table("transactions").select("id").eq("origem", "planilha").execute()
+# ─── Operações no Supabase ───────────────────────────────────────────────────
+def buscar_dados_banco(sb: Client) -> dict[str, dict]:
+    """Retorna dict { id: { 'hash': str, 'ordem': int } } dos registros de origem 'planilha'."""
+    resultado = sb.table("transactions").select("id, hash, ordem").eq("origem", "planilha").execute()
     if resultado.data:
-        return {str(row["id"]) for row in resultado.data}
-    return set()
+        return {str(row["id"]): row for row in resultado.data}
+    return {}
 
 
 def upsert_batch(sb: Client, records: list[dict]) -> int:
-    """Faz upsert em lotes de 100 registros. Retorna quantos foram upseridos."""
+    """Faz upsert em lotes de 100 registros utilizando onConflict='id'."""
     BATCH_SIZE = 100
     total = 0
     for i in range(0, len(records), BATCH_SIZE):
         batch = records[i : i + BATCH_SIZE]
-        resultado = (
-            sb.table("transactions")
-            .upsert(batch, on_conflict="id")
-            .execute()
-        )
+        sb.table("transactions").upsert(batch, on_conflict="id").execute()
         total += len(batch)
     return total
 
 
 def deletar_orfaos(sb: Client, ids_para_deletar: set[str]) -> int:
-    """Deleta registros do banco que não existem mais na planilha."""
+    """Deleta registros do banco que foram removidos da planilha."""
     if not ids_para_deletar:
         return 0
     lista = list(ids_para_deletar)
@@ -264,13 +319,13 @@ def registrar_log(sb: Client, event: str, status: str, details: str):
         log.warning(f"Falha ao registrar log: {e}")
 
 
-# ─── Ciclo de sync ────────────────────────────────────────────────────────────
+# ─── Ciclo de Sync Inteligente ────────────────────────────────────────────────
 def executar_sync(sb: Client, gc, sheet_id: str, sheet_name: str) -> dict:
     """
-    Executa um ciclo completo de sync. Retorna dict com métricas.
+    Executa um ciclo completo de sincronização inteligente com diff + hash.
     """
     inicio = time.time()
-    log.info("▶ Iniciando ciclo de sync...")
+    log.info("▶ Iniciando ciclo de sync inteligente...")
 
     # 1. Ler planilha
     try:
@@ -281,33 +336,48 @@ def executar_sync(sb: Client, gc, sheet_id: str, sheet_name: str) -> dict:
         registrar_log(sb, "sync", "error", msg)
         return {"ok": False, "error": str(e)}
 
-    # 2. Mapear linhas → transações
+    # 2. Mapear linhas normalizadas
     transactions = mapear_linhas(rows)
-    log.info(f"Transações mapeadas: {len(transactions)}")
+    log.info(f"Transações mapeadas da planilha: {len(transactions)}")
 
-    # Proteção: se a leitura retornou 0 transações e a planilha tinha linhas,
-    # pode ser um erro de parsing — não apaga o banco.
-    if len(rows) > 5 and len(transactions) == 0:
-        msg = "Proteção ativada: planilha com linhas mas sem transações mapeadas. Sync abortado."
+    # Proteção de deleção controlada: nunca apagar se a leitura for inválida ou zerada sem motivo
+    if len(rows) > 3 and len(transactions) == 0:
+        msg = "Proteção ativada: planilha com linhas mas nenhuma transação válida encontrada. Sync abortado."
         log.warning(msg)
         registrar_log(sb, "sync", "warning", msg)
         return {"ok": False, "error": msg}
 
-    # 3. Buscar IDs existentes no banco (apenas os de origem 'planilha')
-    ids_banco = buscar_ids_banco(sb)
+    # 3. Buscar dados atuais do banco
+    banco_map = buscar_dados_banco(sb)
+    ids_banco = set(banco_map.keys())
     ids_planilha = {t["id"] for t in transactions}
 
-    # 4. Identificar órfãos (existem no banco mas não na planilha)
+    # 4. Filtrar quais transações realmente precisam de upsert (novas ou com hash/ordem alterado)
+    para_upsert = []
+    for tx in transactions:
+        tx_id = tx["id"]
+        if tx_id not in banco_map:
+            para_upsert.append(tx)
+        else:
+            db_row = banco_map[tx_id]
+            if db_row.get("hash") != tx["hash"] or db_row.get("ordem") != tx["ordem"]:
+                para_upsert.append(tx)
+
+    # 5. Identificar removidos (deleção controlada de órfãos)
     ids_para_deletar = ids_banco - ids_planilha
 
-    # 5. Deletar órfãos
-    deletados = deletar_orfaos(sb, ids_para_deletar)
+    log.info(f"Diff apurado: {len(para_upsert)} para atualizar/inserir, {len(ids_para_deletar)} para deletar")
 
-    # 6. Upsert de todos os registros
+    # 6. Deletar órfãos se a planilha for válida
+    deletados = 0
+    if ids_para_deletar:
+        deletados = deletar_orfaos(sb, ids_para_deletar)
+
+    # 7. Upsert de alterações/novidades
     upseridos = 0
-    if transactions:
+    if para_upsert:
         try:
-            upseridos = upsert_batch(sb, transactions)
+            upseridos = upsert_batch(sb, para_upsert)
         except Exception as e:
             msg = f"Erro no upsert: {e}"
             log.error(msg)
@@ -317,8 +387,8 @@ def executar_sync(sb: Client, gc, sheet_id: str, sheet_name: str) -> dict:
     duracao = round(time.time() - inicio, 2)
     msg = (
         f"✅ Sync concluído em {duracao}s — "
-        f"{upseridos} upseridos, {deletados} deletados, "
-        f"total na planilha: {len(transactions)}"
+        f"{upseridos} atualizados/inseridos, {deletados} deletados, "
+        f"total de {len(transactions)} transações espelhadas"
     )
     log.info(msg)
     registrar_log(sb, "sync", "success", msg)
@@ -332,13 +402,12 @@ def executar_sync(sb: Client, gc, sheet_id: str, sheet_name: str) -> dict:
     }
 
 
-# ─── Ponto de entrada ─────────────────────────────────────────────────────────
+# ─── Ponto de Entrada ─────────────────────────────────────────────────────────
 def main():
     log.info("=" * 60)
-    log.info("  SYNC FINANCEIRO — Google Sheets → Supabase")
+    log.info("  SYNC FINANCEIRO — Google Sheets → Supabase (Espelho Inteligente)")
     log.info("=" * 60)
 
-    # Validações
     if not SHEET_ID:
         log.error("SHEET_ID não configurado no .env")
         sys.exit(1)
@@ -349,11 +418,10 @@ def main():
     log.info(f"Supabase : {SUPABASE_URL}")
     log.info("")
 
-    # Inicializar clientes
     sb = init_supabase()
     gc = init_gspread()
 
-    log.info("Clientes inicializados com sucesso. Iniciando loop de sync...")
+    log.info("Clientes inicializados com sucesso. Loop de sincronização ativo.")
     log.info("")
 
     ciclo = 0
@@ -364,7 +432,7 @@ def main():
             resultado = executar_sync(sb, gc, SHEET_ID, SHEET_NAME)
             if resultado["ok"]:
                 log.info(
-                    f"✔ Sucesso: {resultado['upseridos']} upseridos, "
+                    f"✔ Sucesso: {resultado['upseridos']} alterados, "
                     f"{resultado['deletados']} deletados"
                 )
             else:

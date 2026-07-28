@@ -1,13 +1,14 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import {
   DollarSign, Plus, XCircle, FileSpreadsheet, Link2, Wallet,
   Printer, Lock, Unlock, AlertTriangle, Clock, CheckCircle, X,
   CreditCard, Banknote, Landmark, TrendingUp, TrendingDown,
   ArrowUpRight, ArrowDownLeft, User, Percent, Edit3, Trash2,
-  Filter, Minus, Receipt
+  Filter, Minus, Receipt, ShieldCheck, Calculator, RefreshCw
 } from 'lucide-react';
 import { useSync } from '../contexts/SyncContext';
 import { paymentMethods, calcularSplit } from '../mocks/financial';
+import { fetchDailyReports } from '../services/supabaseService';
 
 const TABS = [
   { key: 'caixa', label: 'Caixa' },
@@ -50,6 +51,7 @@ export default function Financial() {
     dailySheet,
     pythonSyncStatus,
     lastSyncAt, syncedRowCount,
+    saveDailyReport,
   } = useSync();
 
   const [activeTab, setActiveTab] = useState('caixa');
@@ -64,6 +66,21 @@ export default function Financial() {
   const [despesaForm, setDespesaForm] = useState({ descricao: '', categoria: '', valor: '', metodoPagamento: 'Pix' });
   const [txFiltroStatus, setTxFiltroStatus] = useState('todos');
   const [expFiltroCat, setExpFiltroCat] = useState('todos');
+
+  // Estados do Sistema de Caixa (Validação Financeira)
+  const [fundoInicialInput, setFundoInicialInput] = useState('0');
+  const [fundoFinalRealInput, setFundoFinalRealInput] = useState('0');
+  const [reportsHistory, setReportsHistory] = useState([]);
+  const [savingReport, setSavingReport] = useState(false);
+
+  const loadReports = useCallback(async () => {
+    const { data } = await fetchDailyReports(30);
+    if (data) setReportsHistory(data);
+  }, []);
+
+  useEffect(() => {
+    loadReports();
+  }, [loadReports]);
 
   // ─── Caixa confirmation handlers ────────────────────────────
   const handlePromptAbrirCaixa = () => {
@@ -159,6 +176,58 @@ export default function Financial() {
       pct: Math.round(((counts[(pm.nome || '').toLowerCase()] || counts[pm.id] || 0) / total) * 100),
     }));
   }, [txsHoje]);
+
+  // Cálculo das variáveis do Sistema de Caixa (Daily Reports)
+  const totalsCaixa = useMemo(() => {
+    let dinheiro = 0;
+    let pix = 0;
+    let credito = 0;
+    let debito = 0;
+
+    txsHoje.forEach(t => {
+      const v = Number(t.total ?? t.valor ?? 0);
+      const pg = String(t.pagamento || t.forma_pagamento || '').toLowerCase();
+      if (pg.includes('dinheiro') || pg.includes('cash') || pg.includes('especie')) dinheiro += v;
+      else if (pg.includes('pix') || pg.includes('transf')) pix += v;
+      else if (pg.includes('credito')) credito += v;
+      else if (pg.includes('debito')) debito += v;
+      else pix += v;
+    });
+
+    const fundoInicial = parseFloat(fundoInicialInput) || 0;
+    const fundoFinalReal = parseFloat(fundoFinalRealInput) || 0;
+    const fundoFinalCalculado = fundoInicial + dinheiro;
+    const diferenca = fundoFinalReal - fundoFinalCalculado;
+    const status = diferenca === 0 ? 'ok' : 'erro';
+
+    return {
+      dinheiro,
+      pix,
+      credito,
+      debito,
+      fundoInicial,
+      fundoFinalReal,
+      fundoFinalCalculado,
+      diferenca,
+      status,
+    };
+  }, [txsHoje, fundoInicialInput, fundoFinalRealInput]);
+
+  const handleSaveDailyReport = async () => {
+    setSavingReport(true);
+    const result = await saveDailyReport({
+      fundo_inicial: totalsCaixa.fundoInicial,
+      fundo_final_real: totalsCaixa.fundoFinalReal,
+      data: hoje(),
+    });
+    setSavingReport(false);
+    if (result && !result.error) {
+      alert(`Relatório do caixa salvo com sucesso no Supabase! Status: ${totalsCaixa.status.toUpperCase()}`);
+      loadReports();
+    } else {
+      alert(`Erro ao salvar relatório: ${result?.error || 'Erro desconhecido'}`);
+    }
+  };
 
   // Transações filtradas: fonte única = Supabase (mantido em espelho pelo Python sync)
   const txFiltradas = useMemo(() => {
@@ -773,6 +842,147 @@ export default function Financial() {
               )}
             </div>
           </div>
+
+          {/* Sistema de Caixa — Validação Financeira (daily_reports) */}
+          <div className="card section-gap" style={{ marginTop: 20 }}>
+            <div className="card-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <ShieldCheck style={{ width: 18, height: 18, color: totalsCaixa.status === 'ok' ? 'var(--success)' : 'var(--danger)' }} />
+                Sistema de Caixa — Validação Financeira Diária
+              </span>
+              <span className="badge" style={{
+                fontSize: 12,
+                fontWeight: 700,
+                background: totalsCaixa.status === 'ok' ? 'var(--success-bg)' : 'var(--danger-bg)',
+                color: totalsCaixa.status === 'ok' ? 'var(--success)' : 'var(--danger)',
+                padding: '4px 10px',
+                borderRadius: 99,
+              }}>
+                STATUS: {totalsCaixa.status === 'ok' ? 'OK (Caixa Batido)' : 'ERRO (Diferença)'}
+              </span>
+            </div>
+
+            <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: -6, marginBottom: 16 }}>
+              O sistema calcula o <strong>Fundo Final Calculado</strong> (<code>Fundo Inicial + Total Dinheiro</code>) e compara com o <strong>Fundo Final Real</strong> físico para validação.
+            </p>
+
+            <div className="grid-4" style={{ gap: 12, marginBottom: 16 }}>
+              <div className="form-group" style={{ margin: 0 }}>
+                <label className="form-label" style={{ fontSize: 11 }}>Fundo Inicial (R$)</label>
+                <input
+                  className="form-input"
+                  type="number"
+                  step="0.01"
+                  value={fundoInicialInput}
+                  onChange={e => setFundoInicialInput(e.target.value)}
+                  placeholder="0,00"
+                />
+              </div>
+
+              <div className="form-group" style={{ margin: 0 }}>
+                <label className="form-label" style={{ fontSize: 11 }}>Total Dinheiro Entradas (R$)</label>
+                <input className="form-input" value={fmtCurrency(totalsCaixa.dinheiro)} disabled style={{ background: 'var(--bg-main)', fontWeight: 700 }} />
+              </div>
+
+              <div className="form-group" style={{ margin: 0 }}>
+                <label className="form-label" style={{ fontSize: 11 }}>Fundo Final Calculado (R$)</label>
+                <input className="form-input" value={fmtCurrency(totalsCaixa.fundoFinalCalculado)} disabled style={{ background: 'var(--bg-main)', fontWeight: 800, color: 'var(--color-primary)' }} />
+              </div>
+
+              <div className="form-group" style={{ margin: 0 }}>
+                <label className="form-label" style={{ fontSize: 11 }}>Fundo Final Real Físico (R$)</label>
+                <input
+                  className="form-input"
+                  type="number"
+                  step="0.01"
+                  value={fundoFinalRealInput}
+                  onChange={e => setFundoFinalRealInput(e.target.value)}
+                  placeholder="0,00"
+                  style={{ borderColor: totalsCaixa.status === 'ok' ? 'var(--success)' : 'var(--danger)' }}
+                />
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12, paddingTop: 12, borderTop: '1px solid var(--border-color)' }}>
+              <div>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                  Diferença: <strong style={{ color: totalsCaixa.diferenca === 0 ? 'var(--success)' : 'var(--danger)', fontSize: 14 }}>{fmtCurrency(totalsCaixa.diferenca)}</strong>
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                  PIX: {fmtCurrency(totalsCaixa.pix)} • Crédito: {fmtCurrency(totalsCaixa.credito)} • Débito: {fmtCurrency(totalsCaixa.debito)}
+                </div>
+              </div>
+
+              <button
+                className="btn btn-primary"
+                onClick={handleSaveDailyReport}
+                disabled={savingReport || !supabaseConnected}
+                style={{
+                  background: totalsCaixa.status === 'ok' ? 'var(--success)' : 'var(--danger)',
+                  borderColor: totalsCaixa.status === 'ok' ? 'var(--success)' : 'var(--danger)',
+                }}
+              >
+                {savingReport ? 'Salvando...' : <><ShieldCheck style={{ width: 14, height: 14 }} />Gravar Validação de Caixa</>}
+              </button>
+            </div>
+          </div>
+
+          {/* Histórico de Fechamentos (daily_reports) */}
+          <div className="card" style={{ marginTop: 20, padding: 0, overflow: 'hidden' }}>
+            <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-dark)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Calculator style={{ width: 16, height: 16, color: 'var(--color-primary)' }} />
+                Histórico de Validações de Caixa (daily_reports)
+              </span>
+              <button className="btn btn-ghost btn-sm" onClick={loadReports}>
+                <RefreshCw style={{ width: 12, height: 12 }} />Atualizar
+              </button>
+            </div>
+            <div className="table-wrapper">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Data</th>
+                    <th style={{ textAlign: 'right' }}>Fundo Inicial</th>
+                    <th style={{ textAlign: 'right' }}>Dinheiro</th>
+                    <th style={{ textAlign: 'right' }}>Calculado</th>
+                    <th style={{ textAlign: 'right' }}>Real Físico</th>
+                    <th style={{ textAlign: 'right' }}>Diferença</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {reportsHistory.map((rep, idx) => (
+                    <tr key={rep.id || idx}>
+                      <td style={{ fontWeight: 600, fontSize: 12 }}>{rep.data || rep.data_caixa}</td>
+                      <td style={{ textAlign: 'right', fontSize: 12 }}>{fmtCurrency(rep.fundo_inicial)}</td>
+                      <td style={{ textAlign: 'right', fontSize: 12 }}>{fmtCurrency(rep.total_dinheiro)}</td>
+                      <td style={{ textAlign: 'right', fontSize: 12, fontWeight: 600 }}>{fmtCurrency(rep.fundo_final_calculado)}</td>
+                      <td style={{ textAlign: 'right', fontSize: 12, fontWeight: 600 }}>{fmtCurrency(rep.fundo_final_real)}</td>
+                      <td style={{ textAlign: 'right', fontSize: 12, fontWeight: 700, color: Number(rep.diferenca ?? 0) === 0 ? 'var(--success)' : 'var(--danger)' }}>
+                        {fmtCurrency(rep.diferenca)}
+                      </td>
+                      <td>
+                        <span className="badge" style={{
+                          fontSize: 10,
+                          fontWeight: 700,
+                          background: (rep.status === 'ok' || Number(rep.diferenca ?? 0) === 0) ? 'var(--success-bg)' : 'var(--danger-bg)',
+                          color: (rep.status === 'ok' || Number(rep.diferenca ?? 0) === 0) ? 'var(--success)' : 'var(--danger)',
+                        }}>
+                          {(rep.status || 'ok').toUpperCase()}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {reportsHistory.length === 0 && (
+                <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: 12, padding: 30 }}>
+                  Nenhum registro de fechamento em daily_reports
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       )}
 
@@ -782,7 +992,7 @@ export default function Financial() {
           <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
             <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-dark)', display: 'flex', alignItems: 'center', gap: 8 }}>
               <Receipt style={{ width: 16, height: 16, color: 'var(--color-primary)' }} />
-              Transações
+              Transações (Espelho Inteligente com Hash e Ordem Preservada)
             </span>
             <div className="tabs">
               {[{ k: 'todos', l: 'Todos' }, { k: 'paid', l: 'Pagos' }, { k: 'pending', l: 'Pendentes' }, { k: 'cancelled', l: 'Cancelados' }].map(({ k, l }) => (
@@ -794,24 +1004,46 @@ export default function Financial() {
             <table>
               <thead>
                 <tr>
+                  <th style={{ width: 60 }}>Ordem</th>
+                  <th>Comanda (ID)</th>
                   <th>Cliente</th>
-                  <th>Procedimento</th>
+                  <th>Profissional</th>
                   <th style={{ textAlign: 'right' }}>Valor</th>
                   <th>Pagamento</th>
-                  <th>Profissional</th>
-                  <th>Comanda</th>
+                  <th>Hash Integridade</th>
                   <th>Origem</th>
                 </tr>
               </thead>
               <tbody>
-                {txFiltradas.map(t => (
-                  <tr key={t.id}>
+                {txFiltradas.map((t, idx) => (
+                  <tr key={t.id || idx}>
+                    <td>
+                      <span className="badge badge-neutral" style={{ fontSize: 11, fontWeight: 700 }}>
+                        #{t.ordem || idx + 1}
+                      </span>
+                    </td>
+                    <td>
+                      <span className="badge" style={{ fontSize: 11, background: '#E8F5E9', color: '#2E7D32', fontWeight: 700 }}>
+                        {t.comanda || t.id}
+                      </span>
+                    </td>
                     <td style={{ fontWeight: 500, fontSize: 13 }}>{t.cliente}</td>
-                    <td style={{ fontSize: 13, color: 'var(--text-medium)' }}>{t.procedimento}</td>
+                    <td style={{ fontWeight: 500, fontSize: 12 }}>{t.profissional || t.profissionalNome || '—'}</td>
                     <td style={{ textAlign: 'right', fontWeight: 700, fontSize: 13 }}>{fmtCurrency(t.total)}</td>
-                    <td><span className="badge badge-neutral" style={{ fontSize: 10 }}>{t.pagamento}</span></td>
-                    <td style={{ fontWeight: 500, fontSize: 12 }}>{t.profissionalNome || '—'}</td>
-                    <td><span className="badge" style={{ fontSize: 10, background: '#E8F5E9', color: '#2E7D32' }}>{t.comanda || '—'}</span></td>
+                    <td>
+                      <span className="badge badge-neutral" style={{ fontSize: 10, textTransform: 'uppercase' }}>
+                        {t.pagamento}
+                      </span>
+                    </td>
+                    <td>
+                      {t.hash ? (
+                        <span title={t.hash} style={{ fontFamily: 'monospace', fontSize: 10, color: 'var(--text-muted)', background: 'var(--bg-main)', padding: '2px 6px', borderRadius: 4 }}>
+                          {t.hash.substring(0, 8)}...
+                        </span>
+                      ) : (
+                        <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>—</span>
+                      )}
+                    </td>
                     <td>
                       <span className={`origem-badge ${t.origem === 'planilha' ? 'origem-planilha' : 'origem-manual'}`} style={{ fontSize: 10 }}>
                         {t.origem === 'planilha' ? <><FileSpreadsheet style={{ width: 10, height: 10 }} />Planilha</> : 'Manual'}

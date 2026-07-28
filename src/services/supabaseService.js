@@ -58,13 +58,14 @@ export async function upsertTransaction(tx) {
     cliente: tx.cliente || null,
     procedimento: tx.procedimento || null,
     clinica: Number(tx.clinica ?? 0),
-    profissional: Number(tx.profissional ?? 0),
+    profissional: (typeof tx.profissional === 'string' ? tx.profissional : tx.profissionalNome || tx.profissional_nome) || null,
     pagamento: tx.pagamento || tx.formaPagamento || tx.forma_pagamento || 'pix',
     forma_pagamento: tx.forma_pagamento || tx.formaPagamento || tx.pagamento || null,
     status: tx.status || 'paid',
-    profissional_nome: tx.profissionalNome || tx.profissional_nome || null,
+    profissional_nome: tx.profissionalNome || tx.profissional_nome || (typeof tx.profissional === 'string' ? tx.profissional : null),
     comanda: comandaId,
     ordem: Number(tx.ordem ?? 0),
+    hash: tx.hash || null,
     user_id: tx.user_id || null,
   };
 
@@ -382,18 +383,40 @@ export function unsubscribeChannel(channel) {
 export async function insertDailyReport(report) {
   if (!isSupabaseConfigured()) return handleError('Supabase not configured');
 
-  // Remover user_id se nao for fornecido (coluna nullable)
-  const dbReport = { ...report };
-  if (!dbReport.user_id) delete dbReport.user_id;
-  // Remover id para deixar o banco gerar UUID automaticamente
-  if (!dbReport.id) delete dbReport.id;
+  const dataStr = report.data || report.data_caixa || new Date().toLocaleDateString('pt-BR');
+  
+  const dbReport = {
+    data: dataStr,
+    data_caixa: report.data_caixa || (dataStr.includes('/') ? dataStr.split('/').reverse().join('-') : dataStr),
+    fundo_inicial: Number(report.fundo_inicial ?? 0),
+    total_dinheiro: Number(report.total_dinheiro ?? 0),
+    total_pix: Number(report.total_pix ?? 0),
+    total_credito: Number(report.total_credito ?? 0),
+    total_debito: Number(report.total_debito ?? 0),
+    fundo_final_calculado: Number(report.fundo_final_calculado ?? (Number(report.fundo_inicial ?? 0) + Number(report.total_dinheiro ?? 0))),
+    fundo_final_real: Number(report.fundo_final_real ?? report.fundo_final ?? 0),
+    diferenca: Number(report.diferenca ?? (Number(report.fundo_final_real ?? report.fundo_final ?? 0) - (Number(report.fundo_inicial ?? 0) + Number(report.total_dinheiro ?? 0)))),
+    status: report.status || (Number(report.diferenca ?? 0) === 0 ? 'ok' : 'erro'),
+    observacoes: report.observacoes || null,
+    sheet_snapshot: report.sheet_snapshot || null,
+  };
 
-  // Usar onConflict apenas em data_caixa (user_id pode ser null)
-  const { data, error } = await supabase
+  if (report.user_id) dbReport.user_id = report.user_id;
+
+  // Tentativa 1: upsert normal
+  let { data, error } = await supabase
     .from('daily_reports')
-    .upsert([dbReport], { onConflict: 'data_caixa' })
+    .upsert([dbReport])
     .select()
     .single();
+
+  if (error) {
+    console.warn('[Supabase] insertDailyReport warning, tentando insert simples:', error.message);
+    const res = await supabase.from('daily_reports').insert([dbReport]).select().single();
+    data = res.data;
+    error = res.error;
+  }
+
   if (error) {
     console.error('[Supabase] insertDailyReport error:', error);
     return handleError(error);
@@ -406,7 +429,7 @@ export async function fetchDailyReports(limit = 30) {
   const { data, error } = await supabase
     .from('daily_reports')
     .select('*')
-    .order('data_caixa', { ascending: false })
+    .order('created_at', { ascending: false })
     .limit(limit);
   if (error) return handleError(error, []);
   return { data: data || [], error: null };
@@ -417,8 +440,8 @@ export async function fetchDailyReportByDate(dateStr) {
   const { data, error } = await supabase
     .from('daily_reports')
     .select('*')
-    .eq('data_caixa', dateStr)
-    .single();
+    .or(`data.eq.${dateStr},data_caixa.eq.${dateStr}`)
+    .maybeSingle();
   if (error) return handleError(error);
   return { data, error: null };
 }

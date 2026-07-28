@@ -341,51 +341,66 @@ export function SyncProvider({ children }) {
     setDailySheet(sheetData);
   }, []);
 
-  // ─── Save Daily Report to Supabase (only on fecharCaixa) ────
-  const saveDailyReport = useCallback(async () => {
-    if (!dailySheet) {
-      console.warn('[SyncContext] No daily sheet data to save');
-      return { data: null, error: 'Sem dados da planilha para salvar' };
-    }
+  // ─── Save Daily Report to Supabase (Sistema de Caixa) ────
+  const saveDailyReport = useCallback(async (customData = {}) => {
+    const hojeStr = new Date().toLocaleDateString('pt-BR');
+    const dataRef = customData.data || dailySheet?.dataCaixa || hojeStr;
 
-    // Convert DD/MM/YYYY to YYYY-MM-DD for database
-    const dateParts = dailySheet.dataCaixa.split('/');
-    const dataCaixaISO = dateParts.length === 3
-      ? `${dateParts[2]}-${dateParts[1].padStart(2, '0')}-${dateParts[0].padStart(2, '0')}`
-      : new Date().toISOString().split('T')[0];
+    // Filtrar transações para a data
+    const txsDoDia = transactions.filter(t => (t.data === dataRef || !t.data || t.data === hojeStr));
+
+    let totalDinheiro = 0;
+    let totalPix = 0;
+    let totalCredito = 0;
+    let totalDebito = 0;
+
+    txsDoDia.forEach(t => {
+      const v = Number(t.total ?? t.valor ?? 0);
+      const pg = String(t.pagamento || t.forma_pagamento || '').toLowerCase();
+      if (pg.includes('dinheiro') || pg.includes('cash') || pg.includes('especie')) totalDinheiro += v;
+      else if (pg.includes('pix') || pg.includes('transf')) totalPix += v;
+      else if (pg.includes('credito')) totalCredito += v;
+      else if (pg.includes('debito')) totalDebito += v;
+      else totalPix += v;
+    });
+
+    const fundoInicial = Number(customData.fundo_inicial ?? customData.fundoInicial ?? dailySheet?.fundoInicial ?? 0);
+    const fundoFinalReal = Number(customData.fundo_final_real ?? customData.fundoFinalReal ?? customData.fundoFinal ?? dailySheet?.fundoFinal ?? 0);
+    const fundoFinalCalculado = fundoInicial + totalDinheiro;
+    const diferenca = fundoFinalReal - fundoFinalCalculado;
+    const status = diferenca === 0 ? 'ok' : 'erro';
 
     const report = {
-      data_caixa: dataCaixaISO,
-      fundo_inicial: dailySheet.fundoInicial,
-      fundo_final: dailySheet.fundoFinal,
-      total_pix: dailySheet.totalPix,
-      total_credito: dailySheet.totalCredito,
-      total_debito: dailySheet.totalDebito,
-      total_dinheiro: dailySheet.totalDinheiro,
-      total_repasse: dailySheet.totalRepasse,
-      faturamento_bruto: dailySheet.faturamentoBruto,
-      total_despesas: 0,
-      total_transacoes: dailySheet.totalTransacoes,
-      status: 'fechado',
-      sheet_snapshot: dailySheet.rows,
+      data: dataRef,
+      data_caixa: dataRef.includes('/') ? dataRef.split('/').reverse().join('-') : dataRef,
+      fundo_inicial: fundoInicial,
+      total_dinheiro: totalDinheiro,
+      total_pix: totalPix,
+      total_credito: totalCredito,
+      total_debito: totalDebito,
+      fundo_final_calculado: fundoFinalCalculado,
+      fundo_final_real: fundoFinalReal,
+      diferenca: diferenca,
+      status: status,
+      sheet_snapshot: dailySheet?.rows || txsDoDia,
     };
 
-    console.log('[SyncContext] Saving daily report:', report);
+    console.log('[SyncContext] Salvando relatório do caixa:', report);
 
     if (isSupabaseConfigured() && supabaseReady) {
       const result = await sbInsertDailyReport(report);
       if (result.error) {
         console.error('[SyncContext] Failed to save daily report:', result.error);
-        addLog('error', `Falha ao salvar relatório diário: ${result.error}`);
+        addLog('error', `Falha ao salvar relatório do caixa: ${result.error}`);
       } else {
-        addLog('success', `Relatório diário salvo: R$ ${dailySheet.faturamentoBruto.toFixed(2)}`);
+        addLog('success', `Relatório do caixa salvo com status [${status.toUpperCase()}]: Diferença R$ ${diferenca.toFixed(2)}`);
       }
       return result;
     } else {
       addLog('warning', 'Supabase não disponível — relatório salvo apenas localmente');
       return { data: report, error: null };
     }
-  }, [dailySheet, supabaseReady, addLog]);
+  }, [dailySheet, transactions, supabaseReady, addLog]);
 
   const fecharCaixa = useCallback(async () => {
     if (!requireConnection('fechar caixa')) return { success: false, error: 'Supabase desconectado' };
