@@ -3,13 +3,12 @@ import {
   RefreshCw, Table2, Clock, AlertTriangle, Plus, Trash2,
   Copy, ToggleLeft, ToggleRight, Link2, FileSpreadsheet,
   CheckCircle, XCircle, WifiOff,
-  ScrollText, BarChart3, ArrowRightLeft, Zap, Loader2
+  ScrollText, BarChart3, Zap, Loader2
 } from 'lucide-react';
 import { useSync } from '../contexts/SyncContext';
 import useSheetSync from '../hooks/useSheetSync';
 import AddSheetModal from '../components/integration/AddSheetModal';
 import AuthorizeConnectionModal from '../components/integration/AuthorizeConnectionModal';
-import ColumnMappingEditor from '../components/integration/ColumnMappingEditor';
 import SyncLogPanel from '../components/integration/SyncLogPanel';
 import {
   getMarketingEngineStatus, setMarketingEngineEnabled,
@@ -35,19 +34,19 @@ const defaultSheet = {
 function mapFromSupabase(conn) {
   return {
     id: conn.id,
-    sheetId: conn.sheet_id,
-    url: conn.sheet_url,
-    api_key: conn.api_key,
-    range: conn.range,
-    nome: conn.name || (conn.sheet_id ? `Planilha ${conn.sheet_id.substring(0, 8)}...` : 'Nova Planilha'),
-    tipo: conn.provider || 'google',
-    tipoLabel: conn.provider === 'excel' ? 'Excel Online (Microsoft 365)' : 'Google Sheets',
+    sheetId: conn.sheet_id || conn.sheetId,
+    url: conn.url || conn.sheet_url || conn.sheetUrl || '',
+    api_key: conn.api_key || conn.googleApiKey,
+    range: conn.range || 'A1:Z1000',
+    nome: conn.nome || conn.name || (conn.sheet_id ? `Planilha ${conn.sheet_id.substring(0, 8)}...` : 'Nova Planilha'),
+    tipo: conn.tipo || conn.provider || 'google',
+    tipoLabel: (conn.tipo === 'excel' || conn.provider === 'excel') ? 'Excel Online (Microsoft 365)' : 'Google Sheets',
     status: conn.status || 'aguardando',
-    autoSync: conn.auto_sync ?? true,
-    pollingInterval: conn.poll_interval || 60,
-    tags: conn.columns || ['Ativo'],
-    linhasSincronizadas: conn.rows_synced || 0,
-    ultimoSync: conn.last_sync ? new Date(conn.last_sync).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : null,
+    autoSync: conn.auto_sync ?? conn.autoSync ?? true,
+    pollingInterval: conn.polling_interval || conn.poll_interval || 60,
+    tags: conn.tags || conn.columns || ['Ativo'],
+    linhasSincronizadas: conn.linhas_sincronizadas || conn.rows_synced || 0,
+    ultimoSync: conn.ultimo_sync || conn.last_sync ? new Date(conn.ultimo_sync || conn.last_sync).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : null,
   };
 }
 
@@ -73,7 +72,7 @@ function mapToSupabase(sheet) {
 }
 
 export default function Integration() {
-  const { syncStatus, syncConfig, syncLogs, transactions, lastSyncAt, syncedRowCount, addLog } = useSync();
+  const { syncStatus, syncConfig, syncLogs, transactions, lastSyncAt, syncedRowCount, addLog, pythonSyncStatus } = useSync();
   const { connect, disconnect } = useSheetSync();
 
   const [authorizeSheet, setAuthorizeSheet] = useState(null);
@@ -119,46 +118,49 @@ export default function Integration() {
   }, []);
 
   // Fetch initial WhatsApp connection status and subscribe to realtime updates
+  // Runs whenever the 'motor' tab is activated
   useEffect(() => {
+    if (activeTab !== 'motor') return;
+
+    console.log('[DEBUG] Buscando status WA...');
+
     let active = true;
 
     const fetchWaStatus = async () => {
-      try {
-        const { data, error } = await supabase
-          .from('whatsapp_connection_status')
-          .select('*')
-          .eq('id', 1)
-          .single();
-        
-        if (error) throw error;
-        if (active && data) {
-          setWaStatus(data);
-        }
-      } catch (err) {
-        console.error('Erro ao buscar status inicial do WhatsApp:', err);
+      const { data, error } = await supabase
+        .from('whatsapp_connection_status')
+        .select('*')
+        .eq('id', 1)
+        .single();
+      console.log('[DEBUG] Status recebido:', data, error);
+      if (active && data) {
+        setWaStatus(data);
       }
     };
 
     fetchWaStatus();
 
     const channel = supabase
-      .channel('whatsapp-status')
+      .channel('wa-status-' + Date.now())
       .on('postgres_changes', {
-        event: 'UPDATE',
+        event: '*',
         schema: 'public',
         table: 'whatsapp_connection_status'
       }, (payload) => {
-        if (active && payload.new) {
-          setWaStatus(payload.new);
-        }
+        console.log('[DEBUG] Realtime recebido:', payload.new);
+        if (active) setWaStatus(payload.new);
       })
-      .subscribe();
+      .subscribe((status) => {
+        console.log('[DEBUG] Subscription status:', status);
+      });
 
     return () => {
       active = false;
       supabase.removeChannel(channel);
     };
-  }, []);
+  }, [activeTab]);
+
+  console.log('[DEBUG] waStatus atual:', waStatus);
 
   const isSheetConnected = syncStatus === 'connected' || syncStatus === 'connecting';
 
@@ -227,9 +229,9 @@ export default function Integration() {
 
   const tabs = [
     { key: 'conexoes', label: 'Conexões', icon: Link2 },
+    { key: 'python', label: 'Python Sync', icon: Zap },
     { key: 'log', label: 'Log de Sync', icon: ScrollText },
     { key: 'relatorios', label: 'Relatórios', icon: BarChart3 },
-    { key: 'mapeamento', label: 'Mapeamento', icon: ArrowRightLeft },
     { key: 'motor', label: 'Motor Marketing', icon: Zap },
   ];
 
@@ -564,6 +566,165 @@ export default function Integration() {
         </div>
       )}
 
+      {/* Tab Content: Python Sync */}
+      {activeTab === 'python' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+          {/* Status Card */}
+          <div className="card" style={{ padding: '24px 28px' }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16 }}>
+              {/* Status icon */}
+              <div style={{
+                width: 52, height: 52, borderRadius: 14, flexShrink: 0,
+                background: pythonSyncStatus?.status === 'success' ? 'var(--success-bg)'
+                  : pythonSyncStatus?.status === 'error' ? 'var(--danger-bg)'
+                  : '#F39C1218',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}>
+                {pythonSyncStatus?.status === 'success' && <CheckCircle style={{ width: 26, height: 26, color: 'var(--success)' }} />}
+                {pythonSyncStatus?.status === 'error' && <XCircle style={{ width: 26, height: 26, color: 'var(--danger)' }} />}
+                {!pythonSyncStatus && <Loader2 style={{ width: 26, height: 26, color: '#F39C12' }} />}
+                {pythonSyncStatus && !['success','error'].includes(pythonSyncStatus.status) && <RefreshCw style={{ width: 26, height: 26, color: '#F39C12' }} />}
+              </div>
+
+              <div style={{ flex: 1 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
+                  <span style={{ fontWeight: 700, fontSize: 16, color: 'var(--text-dark)' }}>Python Sync — ETL Automático</span>
+                  <span className="badge" style={{
+                    background: pythonSyncStatus?.status === 'success' ? 'var(--success-bg)'
+                      : pythonSyncStatus?.status === 'error' ? 'var(--danger-bg)'
+                      : '#F39C121d',
+                    color: pythonSyncStatus?.status === 'success' ? 'var(--success)'
+                      : pythonSyncStatus?.status === 'error' ? 'var(--danger)'
+                      : '#F39C12',
+                    fontSize: 10,
+                  }}>
+                    {pythonSyncStatus?.status === 'success' ? <><CheckCircle style={{ width: 10, height: 10 }} />Sincronizado</> :
+                     pythonSyncStatus?.status === 'error' ? <><XCircle style={{ width: 10, height: 10 }} />Erro</> :
+                     pythonSyncStatus ? <><RefreshCw style={{ width: 10, height: 10 }} />Rodando</> :
+                     <><Clock style={{ width: 10, height: 10 }} />Aguardando Python</>}
+                  </span>
+                </div>
+
+                {pythonSyncStatus ? (
+                  <>
+                    <p style={{ fontSize: 13, color: 'var(--text-medium)', margin: '0 0 8px', lineHeight: 1.6 }}>
+                      {pythonSyncStatus.message}
+                    </p>
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                      Último sync recebido: <strong>{pythonSyncStatus.lastSync}</strong>
+                    </div>
+                  </>
+                ) : (
+                  <p style={{ fontSize: 13, color: 'var(--text-medium)', margin: 0, lineHeight: 1.6 }}>
+                    Nenhum evento recebido ainda. O script Python ainda não rodou ou não está conectado ao Supabase.
+                    Veja as instruções abaixo para iniciar o sync.
+                  </p>
+                )}
+
+                {/* Stats row */}
+                <div style={{ display: 'flex', gap: 24, marginTop: 16 }}>
+                  <div style={{ textAlign: 'center' }}>
+                    <div style={{ fontSize: 24, fontWeight: 800, color: 'var(--color-primary)' }}>{syncedRowCount}</div>
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Linhas no banco</div>
+                  </div>
+                  <div style={{ textAlign: 'center' }}>
+                    <div style={{ fontSize: 24, fontWeight: 800, color: 'var(--success)' }}>
+                      {syncLogs.filter(l => l.type === 'success').length}
+                    </div>
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Syncs com sucesso</div>
+                  </div>
+                  <div style={{ textAlign: 'center' }}>
+                    <div style={{ fontSize: 24, fontWeight: 800, color: 'var(--text-medium)' }}>
+                      {lastSyncAt || '—'}
+                    </div>
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Último update</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* How it works */}
+          <div className="card">
+            <div className="card-header">
+              <span className="card-title"><Zap />Como funciona o Python Sync</span>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16, marginTop: 8 }}>
+              {[
+                { n: '1', title: 'Python lê a planilha', desc: 'O script sync_financeiro.py lê todas as linhas do Google Sheets via Service Account a cada 30 segundos.', color: '#6C63FF' },
+                { n: '2', title: 'Full sync no Supabase', desc: 'Faz upsert de todos os registros (ID = comanda) e deleta automaticamente os que foram removidos da planilha.', color: '#2ECC71' },
+                { n: '3', title: 'Frontend atualiza sozinho', desc: 'O ERP escuta as mudanças via Supabase Realtime (WebSocket). Nenhum F5 necessário.', color: '#F39C12' },
+              ].map(step => (
+                <div key={step.n} style={{ padding: 16, background: 'var(--bg-main)', borderRadius: 10, borderTop: `3px solid ${step.color}` }}>
+                  <div style={{ width: 28, height: 28, borderRadius: '50%', background: step.color + '20', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 10 }}>
+                    <span style={{ fontWeight: 800, fontSize: 13, color: step.color }}>{step.n}</span>
+                  </div>
+                  <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--text-dark)', marginBottom: 6 }}>{step.title}</div>
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.6 }}>{step.desc}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Setup instructions */}
+          <div className="card">
+            <div className="card-header">
+              <span className="card-title"><FileSpreadsheet />Como iniciar o sync</span>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 8 }}>
+              {[
+                { cmd: 'cd sync_financeiro', desc: 'Entre na pasta do script' },
+                { cmd: 'cp .env.example .env', desc: 'Crie o arquivo de configuração' },
+                { cmd: '# Edite o .env: SHEET_ID, SHEET_NAME, SUPABASE_KEY, GOOGLE_CREDENTIALS_FILE', desc: 'Configure as credenciais' },
+                { cmd: 'pip install -r requirements.txt', desc: 'Instale as dependências Python' },
+                { cmd: 'python sync_financeiro.py', desc: 'Inicie o sync (mantendo o terminal aberto)' },
+              ].map((item, i) => (
+                <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+                  <div style={{ width: 22, height: 22, borderRadius: '50%', background: 'var(--bg-main)', border: '1.5px solid var(--border-color)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, fontSize: 11, fontWeight: 700, color: 'var(--text-muted)' }}>{i+1}</div>
+                  <div>
+                    <div style={{ fontFamily: 'monospace', fontSize: 12, background: 'var(--bg-main)', padding: '4px 10px', borderRadius: 6, color: 'var(--color-primary)', marginBottom: 3, wordBreak: 'break-all' }}>{item.cmd}</div>
+                    <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{item.desc}</div>
+                  </div>
+                </div>
+              ))}
+              <div style={{ marginTop: 8, padding: '12px 16px', background: '#FFF8E1', borderLeft: '3px solid #FFD966', borderRadius: 6, fontSize: 12, color: '#8B6914' }}>
+                <strong>Dica:</strong> O arquivo <code style={{ background: '#FFE57F40', padding: '1px 4px', borderRadius: 3 }}>credentials.json</code> da Service Account do Google deve estar dentro da pasta <code style={{ background: '#FFE57F40', padding: '1px 4px', borderRadius: 3 }}>sync_financeiro/</code>. Veja o <strong>README.md</strong> para instruções completas.
+              </div>
+            </div>
+          </div>
+
+          {/* Recent sync logs */}
+          <div className="card">
+            <div className="card-header">
+              <span className="card-title"><ScrollText />Últimos eventos do Python Sync</span>
+            </div>
+            <div style={{ marginTop: 8 }}>
+              {syncLogs.slice(0, 15).map(log => (
+                <div key={log.id} style={{
+                  display: 'flex', alignItems: 'flex-start', gap: 10,
+                  padding: '8px 12px', borderRadius: 6, marginBottom: 4,
+                  background: log.type === 'success' ? 'var(--success-bg)'
+                    : log.type === 'error' ? 'var(--danger-bg)'
+                    : log.type === 'warning' ? 'var(--warning-bg)'
+                    : 'var(--info-bg)',
+                  fontSize: 12,
+                }}>
+                  <span style={{ color: 'var(--text-muted)', fontSize: 10, flexShrink: 0, paddingTop: 2 }}>{log.timestamp}</span>
+                  <span style={{ color: 'var(--text-dark)', fontWeight: 500, lineHeight: 1.5 }}>{log.message}</span>
+                </div>
+              ))}
+              {syncLogs.length === 0 && (
+                <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: 12, padding: 24 }}>
+                  Nenhum log ainda. Inicie o <strong>sync_financeiro.py</strong> para ver os eventos aqui em tempo real.
+                </div>
+              )}
+            </div>
+          </div>
+
+        </div>
+      )}
+
       {/* Tab Content: Log de Sync */}
       {activeTab === 'log' && (
         <SyncLogPanel />
@@ -633,11 +794,6 @@ export default function Integration() {
             )}
           </div>
         </div>
-      )}
-
-      {/* Tab Content: Mapeamento */}
-      {activeTab === 'mapeamento' && (
-        <ColumnMappingEditor />
       )}
 
       {/* Tab Content: Motor Marketing */}

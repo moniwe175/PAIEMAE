@@ -1,13 +1,14 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import {
   DollarSign, Plus, XCircle, FileSpreadsheet, Link2, Wallet,
   Printer, Lock, Unlock, AlertTriangle, Clock, CheckCircle, X,
   CreditCard, Banknote, Landmark, TrendingUp, TrendingDown,
   ArrowUpRight, ArrowDownLeft, User, Percent, Edit3, Trash2,
-  Filter, Minus, Receipt
+  Filter, Minus, Receipt, ShieldCheck, Calculator, RefreshCw
 } from 'lucide-react';
 import { useSync } from '../contexts/SyncContext';
 import { paymentMethods, calcularSplit } from '../mocks/financial';
+import { fetchDailyReports } from '../services/supabaseService';
 
 const TABS = [
   { key: 'caixa', label: 'Caixa' },
@@ -48,6 +49,9 @@ export default function Financial() {
     syncStatus, addLog,
     supabaseConnected, connectionError,
     dailySheet,
+    pythonSyncStatus,
+    lastSyncAt, syncedRowCount,
+    saveDailyReport,
   } = useSync();
 
   const [activeTab, setActiveTab] = useState('caixa');
@@ -62,6 +66,21 @@ export default function Financial() {
   const [despesaForm, setDespesaForm] = useState({ descricao: '', categoria: '', valor: '', metodoPagamento: 'Pix' });
   const [txFiltroStatus, setTxFiltroStatus] = useState('todos');
   const [expFiltroCat, setExpFiltroCat] = useState('todos');
+
+  // Estados do Sistema de Caixa (Validação Financeira)
+  const [fundoInicialInput, setFundoInicialInput] = useState('0');
+  const [fundoFinalRealInput, setFundoFinalRealInput] = useState('0');
+  const [reportsHistory, setReportsHistory] = useState([]);
+  const [savingReport, setSavingReport] = useState(false);
+
+  const loadReports = useCallback(async () => {
+    const { data } = await fetchDailyReports(30);
+    if (data) setReportsHistory(data);
+  }, []);
+
+  useEffect(() => {
+    loadReports();
+  }, [loadReports]);
 
   // ─── Caixa confirmation handlers ────────────────────────────
   const handlePromptAbrirCaixa = () => {
@@ -137,80 +156,86 @@ export default function Financial() {
     return transactions.map(normalizeTx).filter(t => t.data === hoje() && t.status === 'paid');
   }, [transactions]);
 
-  // Use dailySheet data when available (from Google Sheets), fallback to transactions
-  const faturamentoHoje = dailySheet ? dailySheet.faturamentoBruto : txsHoje.reduce((a, t) => a + t.total, 0);
-  const ticketMedio = dailySheet
-    ? (dailySheet.totalTransacoes > 0 ? dailySheet.faturamentoBruto / dailySheet.totalTransacoes : 0)
-    : (txsHoje.length > 0 ? faturamentoHoje / txsHoje.length : 0);
+  // Calcular totais direto das transactions do Supabase (espelho exato da planilha)
+  const faturamentoHoje = txsHoje.reduce((a, t) => a + t.total, 0);
+  const ticketMedio = txsHoje.length > 0 ? faturamentoHoje / txsHoje.length : 0;
   const aReceber = transactions.map(normalizeTx).filter(t => t.status === 'pending').reduce((a, t) => a + t.total, 0);
   const pendentesCount = transactions.map(normalizeTx).filter(t => t.status === 'pending').length;
 
-  // Payment methods: use dailySheet totals when available
+  // Formas de pagamento calculadas direto do Supabase
   const formasPagamento = useMemo(() => {
-    if (dailySheet) {
-      const total = dailySheet.totalPix + dailySheet.totalCredito + dailySheet.totalDebito + dailySheet.totalDinheiro || 1;
-      return paymentMethods.map(pm => {
-        const valorMap = { Pix: dailySheet.totalPix, Crédito: dailySheet.totalCredito, Débito: dailySheet.totalDebito, Dinheiro: dailySheet.totalDinheiro };
-        const valor = valorMap[pm.nome] || 0;
-        return { ...pm, valor, pct: Math.round((valor / total) * 100) };
-      });
-    }
     const counts = {};
-    txsHoje.forEach(t => { counts[t.pagamento] = (counts[t.pagamento] || 0) + t.total; });
+    txsHoje.forEach(t => {
+      const pg = (t.pagamento || 'pix').toLowerCase();
+      counts[pg] = (counts[pg] || 0) + t.total;
+    });
     const total = Object.values(counts).reduce((a, v) => a + v, 0) || 1;
     return paymentMethods.map(pm => ({
       ...pm,
-      valor: counts[pm.nome] || 0,
-      pct: Math.round(((counts[pm.nome] || 0) / total) * 100),
+      valor: counts[(pm.nome || '').toLowerCase()] || counts[pm.id] || 0,
+      pct: Math.round(((counts[(pm.nome || '').toLowerCase()] || counts[pm.id] || 0) / total) * 100),
     }));
-  }, [txsHoje, dailySheet]);
+  }, [txsHoje]);
 
-  const txFiltradas = useMemo(() => {
-    const supabaseTxs = transactions.map(normalizeTx);
+  // Cálculo das variáveis do Sistema de Caixa (Daily Reports)
+  const totalsCaixa = useMemo(() => {
+    let dinheiro = 0;
+    let pix = 0;
+    let credito = 0;
+    let debito = 0;
 
-    // Map por id/comanda para priorizar transações persistidas no Supabase
-    const txMap = new Map();
-    supabaseTxs.forEach(t => {
-      const key = String(t.id || t.comanda || '').trim();
-      if (key) txMap.set(key, t);
+    txsHoje.forEach(t => {
+      const v = Number(t.total ?? t.valor ?? 0);
+      const pg = String(t.pagamento || t.forma_pagamento || '').toLowerCase();
+      if (pg.includes('dinheiro') || pg.includes('cash') || pg.includes('especie')) dinheiro += v;
+      else if (pg.includes('pix') || pg.includes('transf')) pix += v;
+      else if (pg.includes('credito')) credito += v;
+      else if (pg.includes('debito')) debito += v;
+      else pix += v;
     });
 
-    if (dailySheet?.rows) {
-      dailySheet.rows.forEach(r => {
-        const comandaId = r.comanda ? String(r.comanda).trim() : null;
-        if (comandaId && !txMap.has(comandaId)) {
-          const total = r.credito + r.debito + r.dinheiro + r.pix;
-          let pagamento = 'pix';
-          if (r.pix > 0) pagamento = 'pix';
-          else if (r.credito > 0) pagamento = 'credito';
-          else if (r.debito > 0) pagamento = 'debito';
-          else if (r.dinheiro > 0) pagamento = 'dinheiro';
+    const fundoInicial = parseFloat(fundoInicialInput) || 0;
+    const fundoFinalReal = parseFloat(fundoFinalRealInput) || 0;
+    const fundoFinalCalculado = fundoInicial + dinheiro;
+    const diferenca = fundoFinalReal - fundoFinalCalculado;
+    const status = diferenca === 0 ? 'ok' : 'erro';
 
-          txMap.set(comandaId, {
-            id: comandaId,
-            tipo: 'receita',
-            desc: r.cliente,
-            cliente: r.cliente,
-            procedimento: r.profissional || '—',
-            total,
-            valor: total,
-            data: dailySheet?.dataCaixa || '--',
-            hora: dailySheet?.lastUpdated || '--:--',
-            pagamento,
-            status: 'paid',
-            profissionalNome: r.profNome || '—',
-            comanda: comandaId,
-            origem: 'planilha',
-            clinica: total - (r.repasse || 0),
-            profissional: r.repasse || 0,
-          });
-        }
-      });
+    return {
+      dinheiro,
+      pix,
+      credito,
+      debito,
+      fundoInicial,
+      fundoFinalReal,
+      fundoFinalCalculado,
+      diferenca,
+      status,
+    };
+  }, [txsHoje, fundoInicialInput, fundoFinalRealInput]);
+
+  const handleSaveDailyReport = async () => {
+    setSavingReport(true);
+    const result = await saveDailyReport({
+      fundo_inicial: totalsCaixa.fundoInicial,
+      fundo_final_real: totalsCaixa.fundoFinalReal,
+      data: hoje(),
+    });
+    setSavingReport(false);
+    if (result && !result.error) {
+      alert(`Relatório do caixa salvo com sucesso no Supabase! Status: ${totalsCaixa.status.toUpperCase()}`);
+      loadReports();
+    } else {
+      alert(`Erro ao salvar relatório: ${result?.error || 'Erro desconhecido'}`);
     }
+  };
 
-    const all = Array.from(txMap.values()).sort((a, b) => (Number(a.ordem ?? 0) - Number(b.ordem ?? 0)));
+  // Transações filtradas: fonte única = Supabase (mantido em espelho pelo Python sync)
+  const txFiltradas = useMemo(() => {
+    const all = transactions
+      .map(normalizeTx)
+      .sort((a, b) => Number(a.ordem ?? 0) - Number(b.ordem ?? 0));
     return all.filter(t => txFiltroStatus === 'todos' || t.status === txFiltroStatus);
-  }, [transactions, dailySheet, txFiltroStatus]);
+  }, [transactions, txFiltroStatus]);
 
   const expFiltradas = useMemo(() => {
     // Merge Supabase expenses + sheet expense rows
@@ -582,6 +607,51 @@ export default function Financial() {
         </div>
       )}
 
+      {/* Python Sync status banner */}
+      {supabaseConnected && (
+        <div style={{
+          background: pythonSyncStatus?.status === 'success' ? 'var(--success-bg)'
+            : pythonSyncStatus?.status === 'error' ? 'var(--danger-bg)'
+            : '#FFF8E1',
+          border: `1px solid ${
+            pythonSyncStatus?.status === 'success' ? 'var(--success)'
+            : pythonSyncStatus?.status === 'error' ? 'var(--danger)'
+            : '#FFD966'}`,
+          borderLeft: `4px solid ${
+            pythonSyncStatus?.status === 'success' ? 'var(--success)'
+            : pythonSyncStatus?.status === 'error' ? 'var(--danger)'
+            : '#FFD966'}`,
+          borderRadius: 'var(--radius-sm)',
+          padding: '10px 16px',
+          marginBottom: 20,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+          fontSize: 12,
+        }}>
+          <span style={{
+            width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
+            background: pythonSyncStatus?.status === 'success' ? 'var(--success)'
+              : pythonSyncStatus?.status === 'error' ? 'var(--danger)'
+              : '#E6A800',
+            boxShadow: pythonSyncStatus?.status === 'success' ? '0 0 0 3px rgba(46,204,113,0.2)' : 'none',
+          }} />
+          <span style={{ color: 'var(--text-dark)', fontWeight: 600 }}>
+            {pythonSyncStatus?.status === 'success' ? 'Python Sync ativo'
+              : pythonSyncStatus?.status === 'error' ? 'Python Sync com erro'
+              : 'Aguardando Python Sync'}
+          </span>
+          <span style={{ color: 'var(--text-muted)' }}>
+            {pythonSyncStatus?.message || 'Inicie o sync_financeiro.py no computador da clínica para sincronizar a planilha automaticamente.'}
+          </span>
+          {lastSyncAt && (
+            <span style={{ marginLeft: 'auto', color: 'var(--text-muted)', flexShrink: 0 }}>
+              Último update: {lastSyncAt} • {syncedRowCount} linhas
+            </span>
+          )}
+        </div>
+      )}
+
       {/* KPI Cards */}
       <div className="grid-4 section-gap">
         {/* Caixa do Dia - Dark Green */}
@@ -631,11 +701,11 @@ export default function Financial() {
             <TrendingUp style={{ color: 'var(--success)' }} />
           </div>
           <div className="stat-value" style={{ color: 'var(--success)' }}>
-            {isConnected ? fmtCurrency(faturamentoHoje) : 'R$ --'}
+            {fmtCurrency(faturamentoHoje)}
           </div>
           <div className="stat-label">Faturamento Hoje</div>
           <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
-            {isConnected ? 'Da planilha Excel' : 'Aguardando planilha'}
+            {syncedRowCount > 0 ? `${syncedRowCount} transações no banco` : 'Aguardando Python Sync'}
           </div>
         </div>
 
@@ -772,6 +842,147 @@ export default function Financial() {
               )}
             </div>
           </div>
+
+          {/* Sistema de Caixa — Validação Financeira (daily_reports) */}
+          <div className="card section-gap" style={{ marginTop: 20 }}>
+            <div className="card-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <ShieldCheck style={{ width: 18, height: 18, color: totalsCaixa.status === 'ok' ? 'var(--success)' : 'var(--danger)' }} />
+                Sistema de Caixa — Validação Financeira Diária
+              </span>
+              <span className="badge" style={{
+                fontSize: 12,
+                fontWeight: 700,
+                background: totalsCaixa.status === 'ok' ? 'var(--success-bg)' : 'var(--danger-bg)',
+                color: totalsCaixa.status === 'ok' ? 'var(--success)' : 'var(--danger)',
+                padding: '4px 10px',
+                borderRadius: 99,
+              }}>
+                STATUS: {totalsCaixa.status === 'ok' ? 'OK (Caixa Batido)' : 'ERRO (Diferença)'}
+              </span>
+            </div>
+
+            <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: -6, marginBottom: 16 }}>
+              O sistema calcula o <strong>Fundo Final Calculado</strong> (<code>Fundo Inicial + Total Dinheiro</code>) e compara com o <strong>Fundo Final Real</strong> físico para validação.
+            </p>
+
+            <div className="grid-4" style={{ gap: 12, marginBottom: 16 }}>
+              <div className="form-group" style={{ margin: 0 }}>
+                <label className="form-label" style={{ fontSize: 11 }}>Fundo Inicial (R$)</label>
+                <input
+                  className="form-input"
+                  type="number"
+                  step="0.01"
+                  value={fundoInicialInput}
+                  onChange={e => setFundoInicialInput(e.target.value)}
+                  placeholder="0,00"
+                />
+              </div>
+
+              <div className="form-group" style={{ margin: 0 }}>
+                <label className="form-label" style={{ fontSize: 11 }}>Total Dinheiro Entradas (R$)</label>
+                <input className="form-input" value={fmtCurrency(totalsCaixa.dinheiro)} disabled style={{ background: 'var(--bg-main)', fontWeight: 700 }} />
+              </div>
+
+              <div className="form-group" style={{ margin: 0 }}>
+                <label className="form-label" style={{ fontSize: 11 }}>Fundo Final Calculado (R$)</label>
+                <input className="form-input" value={fmtCurrency(totalsCaixa.fundoFinalCalculado)} disabled style={{ background: 'var(--bg-main)', fontWeight: 800, color: 'var(--color-primary)' }} />
+              </div>
+
+              <div className="form-group" style={{ margin: 0 }}>
+                <label className="form-label" style={{ fontSize: 11 }}>Fundo Final Real Físico (R$)</label>
+                <input
+                  className="form-input"
+                  type="number"
+                  step="0.01"
+                  value={fundoFinalRealInput}
+                  onChange={e => setFundoFinalRealInput(e.target.value)}
+                  placeholder="0,00"
+                  style={{ borderColor: totalsCaixa.status === 'ok' ? 'var(--success)' : 'var(--danger)' }}
+                />
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12, paddingTop: 12, borderTop: '1px solid var(--border-color)' }}>
+              <div>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                  Diferença: <strong style={{ color: totalsCaixa.diferenca === 0 ? 'var(--success)' : 'var(--danger)', fontSize: 14 }}>{fmtCurrency(totalsCaixa.diferenca)}</strong>
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                  PIX: {fmtCurrency(totalsCaixa.pix)} • Crédito: {fmtCurrency(totalsCaixa.credito)} • Débito: {fmtCurrency(totalsCaixa.debito)}
+                </div>
+              </div>
+
+              <button
+                className="btn btn-primary"
+                onClick={handleSaveDailyReport}
+                disabled={savingReport || !supabaseConnected}
+                style={{
+                  background: totalsCaixa.status === 'ok' ? 'var(--success)' : 'var(--danger)',
+                  borderColor: totalsCaixa.status === 'ok' ? 'var(--success)' : 'var(--danger)',
+                }}
+              >
+                {savingReport ? 'Salvando...' : <><ShieldCheck style={{ width: 14, height: 14 }} />Gravar Validação de Caixa</>}
+              </button>
+            </div>
+          </div>
+
+          {/* Histórico de Fechamentos (daily_reports) */}
+          <div className="card" style={{ marginTop: 20, padding: 0, overflow: 'hidden' }}>
+            <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-dark)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Calculator style={{ width: 16, height: 16, color: 'var(--color-primary)' }} />
+                Histórico de Validações de Caixa (daily_reports)
+              </span>
+              <button className="btn btn-ghost btn-sm" onClick={loadReports}>
+                <RefreshCw style={{ width: 12, height: 12 }} />Atualizar
+              </button>
+            </div>
+            <div className="table-wrapper">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Data</th>
+                    <th style={{ textAlign: 'right' }}>Fundo Inicial</th>
+                    <th style={{ textAlign: 'right' }}>Dinheiro</th>
+                    <th style={{ textAlign: 'right' }}>Calculado</th>
+                    <th style={{ textAlign: 'right' }}>Real Físico</th>
+                    <th style={{ textAlign: 'right' }}>Diferença</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {reportsHistory.map((rep, idx) => (
+                    <tr key={rep.id || idx}>
+                      <td style={{ fontWeight: 600, fontSize: 12 }}>{rep.data || rep.data_caixa}</td>
+                      <td style={{ textAlign: 'right', fontSize: 12 }}>{fmtCurrency(rep.fundo_inicial)}</td>
+                      <td style={{ textAlign: 'right', fontSize: 12 }}>{fmtCurrency(rep.total_dinheiro)}</td>
+                      <td style={{ textAlign: 'right', fontSize: 12, fontWeight: 600 }}>{fmtCurrency(rep.fundo_final_calculado)}</td>
+                      <td style={{ textAlign: 'right', fontSize: 12, fontWeight: 600 }}>{fmtCurrency(rep.fundo_final_real)}</td>
+                      <td style={{ textAlign: 'right', fontSize: 12, fontWeight: 700, color: Number(rep.diferenca ?? 0) === 0 ? 'var(--success)' : 'var(--danger)' }}>
+                        {fmtCurrency(rep.diferenca)}
+                      </td>
+                      <td>
+                        <span className="badge" style={{
+                          fontSize: 10,
+                          fontWeight: 700,
+                          background: (rep.status === 'ok' || Number(rep.diferenca ?? 0) === 0) ? 'var(--success-bg)' : 'var(--danger-bg)',
+                          color: (rep.status === 'ok' || Number(rep.diferenca ?? 0) === 0) ? 'var(--success)' : 'var(--danger)',
+                        }}>
+                          {(rep.status || 'ok').toUpperCase()}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {reportsHistory.length === 0 && (
+                <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: 12, padding: 30 }}>
+                  Nenhum registro de fechamento em daily_reports
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       )}
 
@@ -781,7 +992,7 @@ export default function Financial() {
           <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
             <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-dark)', display: 'flex', alignItems: 'center', gap: 8 }}>
               <Receipt style={{ width: 16, height: 16, color: 'var(--color-primary)' }} />
-              Transações
+              Transações (Espelho Inteligente com Hash e Ordem Preservada)
             </span>
             <div className="tabs">
               {[{ k: 'todos', l: 'Todos' }, { k: 'paid', l: 'Pagos' }, { k: 'pending', l: 'Pendentes' }, { k: 'cancelled', l: 'Cancelados' }].map(({ k, l }) => (
@@ -793,24 +1004,46 @@ export default function Financial() {
             <table>
               <thead>
                 <tr>
+                  <th style={{ width: 60 }}>Ordem</th>
+                  <th>Comanda (ID)</th>
                   <th>Cliente</th>
-                  <th>Procedimento</th>
+                  <th>Profissional</th>
                   <th style={{ textAlign: 'right' }}>Valor</th>
                   <th>Pagamento</th>
-                  <th>Profissional</th>
-                  <th>Comanda</th>
+                  <th>Hash Integridade</th>
                   <th>Origem</th>
                 </tr>
               </thead>
               <tbody>
-                {txFiltradas.map(t => (
-                  <tr key={t.id}>
+                {txFiltradas.map((t, idx) => (
+                  <tr key={t.id || idx}>
+                    <td>
+                      <span className="badge badge-neutral" style={{ fontSize: 11, fontWeight: 700 }}>
+                        #{t.ordem || idx + 1}
+                      </span>
+                    </td>
+                    <td>
+                      <span className="badge" style={{ fontSize: 11, background: '#E8F5E9', color: '#2E7D32', fontWeight: 700 }}>
+                        {t.comanda || t.id}
+                      </span>
+                    </td>
                     <td style={{ fontWeight: 500, fontSize: 13 }}>{t.cliente}</td>
-                    <td style={{ fontSize: 13, color: 'var(--text-medium)' }}>{t.procedimento}</td>
+                    <td style={{ fontWeight: 500, fontSize: 12 }}>{t.profissional || t.profissionalNome || '—'}</td>
                     <td style={{ textAlign: 'right', fontWeight: 700, fontSize: 13 }}>{fmtCurrency(t.total)}</td>
-                    <td><span className="badge badge-neutral" style={{ fontSize: 10 }}>{t.pagamento}</span></td>
-                    <td style={{ fontWeight: 500, fontSize: 12 }}>{t.profissionalNome || '—'}</td>
-                    <td><span className="badge" style={{ fontSize: 10, background: '#E8F5E9', color: '#2E7D32' }}>{t.comanda || '—'}</span></td>
+                    <td>
+                      <span className="badge badge-neutral" style={{ fontSize: 10, textTransform: 'uppercase' }}>
+                        {t.pagamento}
+                      </span>
+                    </td>
+                    <td>
+                      {t.hash ? (
+                        <span title={t.hash} style={{ fontFamily: 'monospace', fontSize: 10, color: 'var(--text-muted)', background: 'var(--bg-main)', padding: '2px 6px', borderRadius: 4 }}>
+                          {t.hash.substring(0, 8)}...
+                        </span>
+                      ) : (
+                        <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>—</span>
+                      )}
+                    </td>
                     <td>
                       <span className={`origem-badge ${t.origem === 'planilha' ? 'origem-planilha' : 'origem-manual'}`} style={{ fontSize: 10 }}>
                         {t.origem === 'planilha' ? <><FileSpreadsheet style={{ width: 10, height: 10 }} />Planilha</> : 'Manual'}
