@@ -51,6 +51,8 @@ function mapFromSupabase(conn) {
   };
 }
 
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
 function mapToSupabase(sheet) {
   const payload = {
     provider: sheet.tipo || 'google',
@@ -65,7 +67,8 @@ function mapToSupabase(sheet) {
     api_key: sheet.googleApiKey || sheet.api_key || null,
     range: sheet.range || 'A1:Z1000'
   };
-  if (sheet.id) payload.id = sheet.id;
+  // Só inclui id se for UUID válido — strings como 'sheet_XYZ' causam erro 400 no Supabase
+  if (sheet.id && UUID_REGEX.test(sheet.id)) payload.id = sheet.id;
   return payload;
 }
 
@@ -214,8 +217,12 @@ export default function Integration() {
   };
 
   const handleAddSheet = async (newSheet) => {
+    // Adiciona imediatamente para feedback visual
+    const tempId = newSheet.id;
+    setSheets(prev => [...prev, newSheet]);
+    // Persiste no Supabase e atualiza com id real (UUID)
     const persisted = await persistSheet(newSheet);
-    setSheets(prev => [...prev, persisted]);
+    setSheets(prev => prev.map(s => s.id === tempId ? persisted : s));
   };
 
   const tabs = [

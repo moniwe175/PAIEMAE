@@ -300,21 +300,20 @@ export async function upsertSheetConnection(connection) {
     result = await supabase
       .from('sheet_connections')
       .upsert([dbConnection], { onConflict: 'id' })
-      .select()
-      .single();
+      .select();
   } else {
     result = await supabase
       .from('sheet_connections')
       .insert([dbConnection])
-      .select()
-      .single();
+      .select();
   }
 
   if (result.error) {
     console.error('[Supabase] upsertSheetConnection error:', result.error);
     return handleError(result.error);
   }
-  return { data: result.data, error: null };
+  const returnedData = Array.isArray(result.data) ? result.data[0] : result.data;
+  return { data: returnedData || dbConnection, error: null };
 }
 
 export async function deleteSheetConnection(id) {
