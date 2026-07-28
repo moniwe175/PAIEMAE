@@ -196,13 +196,33 @@ export async function fetchCashierState() {
 
 export async function upsertCashierState(state) {
   if (!isSupabaseConfigured()) return handleError('Supabase not configured');
+
+  // Normaliza camelCase → snake_case para coincidir com o schema real da tabela
+  const dbState = {
+    status: state.status || 'fechado',
+    saldo: Number(state.saldo ?? 0),
+    hora_abertura: state.hora_abertura || state.horaAbertura || null,
+    data_abertura: state.data_abertura || state.dataAbertura || null,
+    sangrias: Array.isArray(state.sangrias) ? state.sangrias : [],
+    ...(state.user_id ? { user_id: state.user_id } : {}),
+  };
+
   const { data: existing } = await supabase.from('cashier_state').select('id').maybeSingle();
   if (existing?.id) {
-    const { data, error } = await supabase.from('cashier_state').update(state).eq('id', existing.id).select().single();
+    const { data, error } = await supabase
+      .from('cashier_state')
+      .update(dbState)
+      .eq('id', existing.id)
+      .select()
+      .maybeSingle();
     if (error) return handleError(error);
     return { data, error: null };
   }
-  const { data, error } = await supabase.from('cashier_state').insert([state]).select().single();
+  const { data, error } = await supabase
+    .from('cashier_state')
+    .insert([dbState])
+    .select()
+    .maybeSingle();
   if (error) return handleError(error);
   return { data, error: null };
 }
