@@ -197,6 +197,9 @@ export async function fetchCashierState() {
 export async function upsertCashierState(state) {
   if (!isSupabaseConfigured()) return handleError('Supabase not configured');
 
+  const user = await getCurrentUser();
+  const userId = state.user_id || user?.id || null;
+
   // Normaliza camelCase → snake_case para coincidir com o schema real da tabela
   const dbState = {
     status: state.status || 'fechado',
@@ -204,7 +207,7 @@ export async function upsertCashierState(state) {
     hora_abertura: state.hora_abertura || state.horaAbertura || null,
     data_abertura: state.data_abertura || state.dataAbertura || null,
     sangrias: Array.isArray(state.sangrias) ? state.sangrias : [],
-    ...(state.user_id ? { user_id: state.user_id } : {}),
+    ...(userId ? { user_id: userId } : {}),
   };
 
   const { data: existing } = await supabase.from('cashier_state').select('id').maybeSingle();

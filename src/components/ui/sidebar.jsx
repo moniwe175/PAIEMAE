@@ -20,6 +20,7 @@ import {
   ClipboardCheck,
   Target
 } from 'lucide-react';
+import { useAuth } from '../../contexts/AuthContext';
 import { fetchQueuePendingCount } from '../../services/supabaseService';
 
 const menuItems = [
@@ -43,6 +44,7 @@ const menuItems = [
 
 const Sidebar = () => {
   const navigate = useNavigate();
+  const { user, signOut } = useAuth();
   const [pendingCount, setPendingCount] = useState(0);
 
   // Poll pending messages count every 30s
@@ -59,10 +61,11 @@ const Sidebar = () => {
     return () => { cancelled = true; clearInterval(interval); };
   }, []);
 
-  const handleLogout = (e) => {
+  const handleLogout = async (e) => {
     e.preventDefault();
     if (window.confirm('Deseja realmente sair do sistema?')) {
-      navigate('/');
+      await signOut();
+      navigate('/login');
     }
   };
 
@@ -118,6 +121,24 @@ const Sidebar = () => {
 
       {/* Navigation Bottom Items */}
       <div className="sidebar-bottom">
+        {user && (
+          <div style={{
+            padding: '8px 12px',
+            marginBottom: 8,
+            borderRadius: 8,
+            background: 'rgba(255, 255, 255, 0.05)',
+            border: '1px solid rgba(255, 255, 255, 0.08)',
+            fontSize: 11,
+            color: 'rgba(249, 241, 236, 0.8)',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap'
+          }}>
+            <div style={{ fontSize: 9, textTransform: 'uppercase', color: '#EC4899', fontWeight: 700, letterSpacing: 0.5 }}>Conectado como</div>
+            <div style={{ fontWeight: 600, marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis' }}>{user.email}</div>
+          </div>
+        )}
+
         <NavLink
           to="/client-booking"
           className={({ isActive }) => `sidebar-item sidebar-item-featured${isActive ? ' active' : ''}`}
