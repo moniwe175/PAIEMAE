@@ -13,12 +13,13 @@ export default function ProtectedRoute({ children }) {
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        background: 'var(--bg-main, #0B0F17)',
-        color: '#FFFFFF'
+        background: '#F6F1EE',
+        color: '#432F2D',
+        fontFamily: "'Inter', system-ui, sans-serif"
       }}>
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
-          <Loader2 style={{ width: 32, height: 32, animation: 'spin 1s linear infinite', color: '#EC4899' }} />
-          <span style={{ fontSize: 14, color: 'var(--text-muted, #94A3B8)' }}>Carregando autenticação...</span>
+          <Loader2 style={{ width: 32, height: 32, animation: 'spin 1s linear infinite', color: '#88594E' }} />
+          <span style={{ fontSize: 13, fontWeight: 500, color: '#8C7573' }}>Verificando autenticação...</span>
         </div>
       </div>
     );

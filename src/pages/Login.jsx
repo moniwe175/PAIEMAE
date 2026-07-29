@@ -55,7 +55,7 @@ export default function Login() {
           if (data?.user?.identities?.length === 0) {
             setErrorMsg('Este e-mail já está cadastrado. Tente fazer login.');
           } else {
-            setSuccessMsg('Conta criada com sucesso! Caso a confirmação de e-mail esteja ativada no Supabase, verifique sua caixa de entrada.');
+            setSuccessMsg('Conta criada com sucesso! Você já pode acessar o sistema.');
             setTimeout(() => {
               navigate(from, { replace: true });
             }, 1500);
@@ -76,40 +76,71 @@ export default function Login() {
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
-      background: 'linear-gradient(135deg, #0F172A 0%, #1E293B 100%)',
-      padding: '20px',
-      color: '#F8FAFC',
-      fontFamily: 'Inter, system-ui, sans-serif'
+      background: 'radial-gradient(circle at 50% 30%, #FDFBF9 0%, #F6F1EE 60%, #EFE7E2 100%)',
+      padding: '24px 20px',
+      color: '#432F2D',
+      fontFamily: "'Inter', system-ui, -apple-system, sans-serif"
     }}>
+      {/* Container Card */}
       <div style={{
         width: '100%',
         maxWidth: 440,
-        background: 'rgba(30, 41, 59, 0.75)',
-        backdropFilter: 'blur(16px)',
-        border: '1px solid rgba(255, 255, 255, 0.1)',
-        borderRadius: 20,
-        padding: '36px 32px',
-        boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)'
+        background: '#FFFFFF',
+        border: '1px solid #DFC8C3',
+        borderRadius: 24,
+        padding: '40px 36px',
+        boxShadow: '0 20px 50px rgba(136, 89, 78, 0.12), 0 4px 12px rgba(67, 47, 45, 0.04)',
+        position: 'relative',
+        overflow: 'hidden'
       }}>
+        {/* Top Decorative Line */}
+        <div style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          height: 4,
+          background: 'linear-gradient(90deg, #88594E 0%, #B3857A 50%, #C8A26A 100%)'
+        }} />
+
         {/* Logo / Header */}
-        <div style={{ textAlign: 'center', marginBottom: 28 }}>
+        <div style={{ textAlign: 'center', marginBottom: 32 }}>
           <div style={{
-            width: 52,
-            height: 52,
-            borderRadius: 14,
-            background: 'linear-gradient(135deg, #EC4899 0%, #8B5CF6 100%)',
+            width: 56,
+            height: 56,
+            borderRadius: 16,
+            background: 'linear-gradient(135deg, #88594E 0%, #B3857A 100%)',
             display: 'inline-flex',
             alignItems: 'center',
             justifyContent: 'center',
-            marginBottom: 12,
-            boxShadow: '0 10px 25px -5px rgba(236, 72, 153, 0.4)'
+            marginBottom: 14,
+            boxShadow: '0 8px 20px rgba(136, 89, 78, 0.28)'
           }}>
-            <Sparkles style={{ width: 26, height: 26, color: '#FFFFFF' }} />
+            <Sparkles style={{ width: 28, height: 28, color: '#F9F1EC' }} />
           </div>
-          <h1 style={{ fontSize: 22, fontWeight: 700, margin: 0, color: '#FFFFFF' }}>
-            Evelyn Esthetic Center
+          
+          <h1 style={{
+            fontSize: 26,
+            fontWeight: 400,
+            fontFamily: "'Italiana', Georgia, serif",
+            margin: 0,
+            color: '#432F2D',
+            letterSpacing: '0.5px'
+          }}>
+            Evelyn
           </h1>
-          <p style={{ fontSize: 13, color: '#94A3B8', marginTop: 4 }}>
+          <div style={{
+            fontSize: 11,
+            fontWeight: 700,
+            textTransform: 'uppercase',
+            letterSpacing: '2px',
+            color: '#C8A26A',
+            marginTop: 2
+          }}>
+            Esthetic Center
+          </div>
+
+          <p style={{ fontSize: 13, color: '#8C7573', marginTop: 8 }}>
             Sistema Integrado de Gestão & Financeiro
           </p>
         </div>
@@ -117,11 +148,11 @@ export default function Login() {
         {/* Tab Toggle */}
         <div style={{
           display: 'flex',
-          background: 'rgba(15, 23, 42, 0.6)',
+          background: '#F6F1EE',
           padding: 4,
           borderRadius: 12,
           marginBottom: 24,
-          border: '1px solid rgba(255, 255, 255, 0.05)'
+          border: '1px solid #DFC8C3'
         }}>
           <button
             type="button"
@@ -135,8 +166,9 @@ export default function Login() {
               fontWeight: 600,
               cursor: 'pointer',
               transition: 'all 0.2s',
-              background: mode === 'signin' ? 'linear-gradient(135deg, #EC4899 0%, #8B5CF6 100%)' : 'transparent',
-              color: mode === 'signin' ? '#FFFFFF' : '#94A3B8'
+              background: mode === 'signin' ? '#88594E' : 'transparent',
+              color: mode === 'signin' ? '#FFFFFF' : '#8C7573',
+              boxShadow: mode === 'signin' ? '0 2px 8px rgba(136, 89, 78, 0.25)' : 'none'
             }}
           >
             Entrar
@@ -153,8 +185,9 @@ export default function Login() {
               fontWeight: 600,
               cursor: 'pointer',
               transition: 'all 0.2s',
-              background: mode === 'signup' ? 'linear-gradient(135deg, #EC4899 0%, #8B5CF6 100%)' : 'transparent',
-              color: mode === 'signup' ? '#FFFFFF' : '#94A3B8'
+              background: mode === 'signup' ? '#88594E' : 'transparent',
+              color: mode === 'signup' ? '#FFFFFF' : '#8C7573',
+              boxShadow: mode === 'signup' ? '0 2px 8px rgba(136, 89, 78, 0.25)' : 'none'
             }}
           >
             Criar Conta
@@ -167,12 +200,12 @@ export default function Login() {
             display: 'flex',
             alignItems: 'center',
             gap: 10,
-            background: 'rgba(239, 68, 68, 0.15)',
-            border: '1px solid rgba(239, 68, 68, 0.3)',
+            background: '#FCEEF0',
+            border: '1px solid #F5C2C7',
             borderRadius: 10,
             padding: '12px 14px',
             marginBottom: 20,
-            color: '#FCA5A5',
+            color: '#DC2828',
             fontSize: 13
           }}>
             <AlertCircle style={{ width: 18, height: 18, flexShrink: 0 }} />
@@ -185,12 +218,12 @@ export default function Login() {
             display: 'flex',
             alignItems: 'center',
             gap: 10,
-            background: 'rgba(34, 197, 94, 0.15)',
-            border: '1px solid rgba(34, 197, 94, 0.3)',
+            background: '#EFF7F2',
+            border: '1px solid #C3E6CB',
             borderRadius: 10,
             padding: '12px 14px',
             marginBottom: 20,
-            color: '#86EFAC',
+            color: '#6B9B7A',
             fontSize: 13
           }}>
             <CheckCircle2 style={{ width: 18, height: 18, flexShrink: 0 }} />
@@ -199,41 +232,44 @@ export default function Login() {
         )}
 
         {/* Form */}
-        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
           {mode === 'signup' && (
             <div>
-              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#CBD5E1', marginBottom: 6 }}>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#584341', marginBottom: 6 }}>
                 Nome Completo
               </label>
               <div style={{ position: 'relative' }}>
-                <User style={{ position: 'absolute', left: 12, top: 12, width: 16, height: 16, color: '#64748B' }} />
+                <User style={{ position: 'absolute', left: 14, top: 13, width: 16, height: 16, color: '#B3857A' }} />
                 <input
                   type="text"
-                  placeholder="Seu nome"
+                  placeholder="Seu nome completo"
                   value={fullName}
                   onChange={(e) => setFullName(e.target.value)}
                   style={{
                     width: '100%',
-                    padding: '10px 12px 10px 38px',
+                    padding: '11px 12px 11px 40px',
                     borderRadius: 10,
-                    border: '1px solid rgba(255, 255, 255, 0.1)',
-                    background: 'rgba(15, 23, 42, 0.6)',
-                    color: '#F8FAFC',
+                    border: '1px solid #DFC8C3',
+                    background: '#FFFFFF',
+                    color: '#432F2D',
                     fontSize: 14,
                     outline: 'none',
-                    boxSizing: 'border-box'
+                    boxSizing: 'border-box',
+                    transition: 'border-color 0.2s'
                   }}
+                  onFocus={(e) => e.target.style.borderColor = '#88594E'}
+                  onBlur={(e) => e.target.style.borderColor = '#DFC8C3'}
                 />
               </div>
             </div>
           )}
 
           <div>
-            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#CBD5E1', marginBottom: 6 }}>
+            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#584341', marginBottom: 6 }}>
               E-mail
             </label>
             <div style={{ position: 'relative' }}>
-              <Mail style={{ position: 'absolute', left: 12, top: 12, width: 16, height: 16, color: '#64748B' }} />
+              <Mail style={{ position: 'absolute', left: 14, top: 13, width: 16, height: 16, color: '#B3857A' }} />
               <input
                 type="email"
                 required
@@ -242,25 +278,28 @@ export default function Login() {
                 onChange={(e) => setEmail(e.target.value)}
                 style={{
                   width: '100%',
-                  padding: '10px 12px 10px 38px',
+                  padding: '11px 12px 11px 40px',
                   borderRadius: 10,
-                  border: '1px solid rgba(255, 255, 255, 0.1)',
-                  background: 'rgba(15, 23, 42, 0.6)',
-                  color: '#F8FAFC',
+                  border: '1px solid #DFC8C3',
+                  background: '#FFFFFF',
+                  color: '#432F2D',
                   fontSize: 14,
                   outline: 'none',
-                  boxSizing: 'border-box'
+                  boxSizing: 'border-box',
+                  transition: 'border-color 0.2s'
                 }}
+                onFocus={(e) => e.target.style.borderColor = '#88594E'}
+                onBlur={(e) => e.target.style.borderColor = '#DFC8C3'}
               />
             </div>
           </div>
 
           <div>
-            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#CBD5E1', marginBottom: 6 }}>
+            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#584341', marginBottom: 6 }}>
               Senha
             </label>
             <div style={{ position: 'relative' }}>
-              <Lock style={{ position: 'absolute', left: 12, top: 12, width: 16, height: 16, color: '#64748B' }} />
+              <Lock style={{ position: 'absolute', left: 14, top: 13, width: 16, height: 16, color: '#B3857A' }} />
               <input
                 type="password"
                 required
@@ -269,15 +308,18 @@ export default function Login() {
                 onChange={(e) => setPassword(e.target.value)}
                 style={{
                   width: '100%',
-                  padding: '10px 12px 10px 38px',
+                  padding: '11px 12px 11px 40px',
                   borderRadius: 10,
-                  border: '1px solid rgba(255, 255, 255, 0.1)',
-                  background: 'rgba(15, 23, 42, 0.6)',
-                  color: '#F8FAFC',
+                  border: '1px solid #DFC8C3',
+                  background: '#FFFFFF',
+                  color: '#432F2D',
                   fontSize: 14,
                   outline: 'none',
-                  boxSizing: 'border-box'
+                  boxSizing: 'border-box',
+                  transition: 'border-color 0.2s'
                 }}
+                onFocus={(e) => e.target.style.borderColor = '#88594E'}
+                onBlur={(e) => e.target.style.borderColor = '#DFC8C3'}
               />
             </div>
           </div>
@@ -286,21 +328,21 @@ export default function Login() {
             type="submit"
             disabled={loading}
             style={{
-              marginTop: 8,
-              padding: '12px 16px',
+              marginTop: 6,
+              padding: '13px 16px',
               borderRadius: 10,
               border: 'none',
-              background: 'linear-gradient(135deg, #EC4899 0%, #8B5CF6 100%)',
+              background: 'linear-gradient(135deg, #88594E 0%, #B3857A 100%)',
               color: '#FFFFFF',
               fontSize: 14,
-              fontWeight: 700,
+              fontWeight: 600,
               cursor: loading ? 'not-allowed' : 'pointer',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               gap: 8,
-              boxShadow: '0 4px 15px rgba(236, 72, 153, 0.3)',
-              transition: 'opacity 0.2s'
+              boxShadow: '0 6px 18px rgba(136, 89, 78, 0.28)',
+              transition: 'all 0.2s'
             }}
           >
             {loading ? (
@@ -322,8 +364,8 @@ export default function Login() {
           </button>
         </form>
 
-        <div style={{ marginTop: 24, textAlign: 'center', fontSize: 12, color: '#64748B' }}>
-          Protegido por Supabase Auth & RLS
+        <div style={{ marginTop: 28, textAlign: 'center', fontSize: 11, color: '#8C7573' }}>
+          Ambiente Seguro — Evelyn Esthetic Center
         </div>
       </div>
     </div>
