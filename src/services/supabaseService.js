@@ -864,3 +864,55 @@ export async function discardMessage(id) {
   if (error) return handleError(error);
   return { data, error: null };
 }
+
+// ─── Access Requests (Aprovação de novos usuários) ───────────────
+
+export async function requestAccess({ userId, email, fullName }) {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured');
+  const payload = {
+    user_id: userId || null,
+    email: email.trim().toLowerCase(),
+    full_name: fullName.trim(),
+    status: 'pending'
+  };
+  const { data, error } = await supabase
+    .from('user_access_requests')
+    .upsert([payload], { onConflict: 'email' })
+    .select();
+  if (error) return handleError(error);
+  const result = Array.isArray(data) ? data[0] : data;
+  return { data: result, error: null };
+}
+
+export async function checkUserAccessStatus(email) {
+  if (!isSupabaseConfigured()) return { data: { status: 'approved' }, error: null };
+  const { data, error } = await supabase
+    .from('user_access_requests')
+    .select('status, full_name')
+    .eq('email', email.trim().toLowerCase())
+    .maybeSingle();
+  if (error) return { data: null, error };
+  return { data, error: null };
+}
+
+export async function fetchAccessRequests() {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured', []);
+  const { data, error } = await supabase
+    .from('user_access_requests')
+    .select('*')
+    .order('created_at', { ascending: false });
+  if (error) return handleError(error, []);
+  return { data: data || [], error: null };
+}
+
+export async function updateAccessRequestStatus(id, status) {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured');
+  const { data, error } = await supabase
+    .from('user_access_requests')
+    .update({ status, updated_at: new Date().toISOString() })
+    .eq('id', id)
+    .select();
+  if (error) return handleError(error);
+  const result = Array.isArray(data) ? data[0] : data;
+  return { data: result, error: null };
+}

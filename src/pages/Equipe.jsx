@@ -1,10 +1,11 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   Zap, Plus, XCircle, Phone, Mail, Award, Calendar,
-  Edit3, Trash2, CheckCircle, Scissors, X, ChevronDown
+  Edit3, Trash2, CheckCircle, Scissors, X, ChevronDown, UserCheck, Clock
 } from 'lucide-react';
 import { useProfissionais, CORES_AVATAR } from '../lib/profissionais';
 import { useServicos } from '../lib/servicos';
+import { fetchAccessRequests, updateAccessRequestStatus } from '../services/supabaseService';
 
 // ─── Edit / Create Modal ────────────────────────────────────
 function ProfissionalModal({ onClose, onSave, profissional }) {
@@ -212,6 +213,124 @@ function ServiceManager({ profissional, onAdd, onRemove, catalogoServicos }) {
   );
 }
 
+// ─── Componente de Solicitações de Acesso (Aprovação de Login) ───
+function AccessRequestsManager() {
+  const [requests, setRequests] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  const loadRequests = async () => {
+    setLoading(true);
+    const { data } = await fetchAccessRequests();
+    if (data) setRequests(data);
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    loadRequests();
+  }, []);
+
+  const handleUpdateStatus = async (id, status) => {
+    await updateAccessRequestStatus(id, status);
+    loadRequests();
+  };
+
+  const pendingRequests = requests.filter(r => r.status === 'pending');
+
+  if (requests.length === 0 && !loading) return null;
+
+  return (
+    <div className="card" style={{ marginBottom: 24, border: '1px solid #DFC8C3', background: '#FFFFFF' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+        <div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 700, fontSize: 16, color: '#432F2D' }}>
+            <UserCheck style={{ width: 20, height: 20, color: '#88594E' }} />
+            Solicitações de Acesso ao Sistema
+            {pendingRequests.length > 0 && (
+              <span className="badge badge-warning" style={{ background: '#FDF3EB', color: '#D4956A', border: '1px solid #D4956A' }}>
+                {pendingRequests.length} pendente(s)
+              </span>
+            )}
+          </div>
+          <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '4px 0 0 0' }}>
+            Aprove ou rejeite o cadastro de novos usuários no ERP
+          </p>
+        </div>
+        <button className="btn btn-ghost btn-sm" onClick={loadRequests}>
+          <Clock style={{ width: 14, height: 14 }} />Atualizar
+        </button>
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {requests.map(req => (
+          <div key={req.id} style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '12px 16px',
+            borderRadius: 12,
+            background: req.status === 'pending' ? '#FDFBF9' : 'var(--bg-main)',
+            border: `1px solid ${req.status === 'pending' ? '#DFC8C3' : 'transparent'}`,
+            flexWrap: 'wrap',
+            gap: 12
+          }}>
+            <div>
+              <div style={{ fontWeight: 600, fontSize: 14, color: '#432F2D' }}>
+                {req.full_name}
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
+                <Mail style={{ width: 12, height: 12 }} />{req.email}
+                <span>•</span>
+                <span>Solicitado em: {new Date(req.created_at).toLocaleDateString('pt-BR')}</span>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              {req.status === 'pending' && (
+                <span className="badge" style={{ background: '#FDF3EB', color: '#D4956A' }}>Aguardando aceite</span>
+              )}
+              {req.status === 'approved' && (
+                <span className="badge badge-success">Aprovado</span>
+              )}
+              {req.status === 'rejected' && (
+                <span className="badge badge-danger">Recusado</span>
+              )}
+
+              {req.status === 'pending' && (
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button
+                    className="btn btn-sm"
+                    style={{ background: '#6B9B7A', color: '#fff', border: 'none' }}
+                    onClick={() => handleUpdateStatus(req.id, 'approved')}
+                  >
+                    <CheckCircle style={{ width: 14, height: 14 }} /> Aceitar Acesso
+                  </button>
+                  <button
+                    className="btn btn-sm"
+                    style={{ background: '#FCEEF0', color: '#DC2828', border: '1px solid #F5C2C7' }}
+                    onClick={() => handleUpdateStatus(req.id, 'rejected')}
+                  >
+                    <XCircle style={{ width: 14, height: 14 }} /> Recusar
+                  </button>
+                </div>
+              )}
+
+              {req.status !== 'pending' && (
+                <button
+                  className="btn btn-ghost btn-sm"
+                  style={{ fontSize: 11, color: 'var(--text-muted)' }}
+                  onClick={() => handleUpdateStatus(req.id, req.status === 'approved' ? 'rejected' : 'approved')}
+                >
+                  Alterar para {req.status === 'approved' ? 'Recusado' : 'Aprovado'}
+                </button>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ─── Main Component ─────────────────────────────────────────
 export default function Equipe() {
   const {
@@ -263,6 +382,9 @@ export default function Equipe() {
           <Plus />Novo Profissional
         </button>
       </div>
+
+      {/* Gerenciador de Solicitações de Acesso Pendentes */}
+      <AccessRequestsManager />
 
       {/* Cards grid */}
       <div className="grid-3 section-gap">
