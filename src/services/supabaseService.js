@@ -880,3 +880,35 @@ export async function updateAccessRequestStatus(id, status) {
     .eq('id', id);
   return { data, error };
 }
+
+// ─── Auth Access Requests (Login flow) ───────────────────────
+
+export async function requestAccess({ userId, email, fullName }) {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured');
+  const { data, error } = await supabase
+    .from('user_access_requests')
+    .upsert(
+      {
+        user_id: userId || null,
+        email,
+        full_name: fullName,
+        status: 'pending',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: 'email' }
+    )
+    .select()
+    .single();
+  return { data, error };
+}
+
+export async function checkUserAccessStatus(email) {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured', null);
+  const { data, error } = await supabase
+    .from('user_access_requests')
+    .select('status')
+    .eq('email', email)
+    .maybeSingle();
+  return { data: data ?? null, error };
+}
