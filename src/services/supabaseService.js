@@ -860,3 +860,23 @@ export async function discardMessage(id) {
   if (error) return handleError(error);
   return { data, error: null };
 }
+
+// ─── Access Requests ──────────────────────────────────────────
+
+export async function fetchAccessRequests() {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured', []);
+  const { data, error } = await supabase
+    .from('user_access_requests')
+    .select('*')
+    .order('created_at', { ascending: false });
+  return { data: data ?? [], error };
+}
+
+export async function updateAccessRequestStatus(id, status) {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured');
+  const { data, error } = await supabase
+    .from('user_access_requests')
+    .update({ status, updated_at: new Date().toISOString() })
+    .eq('id', id);
+  return { data, error };
+}
