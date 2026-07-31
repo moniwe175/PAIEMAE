@@ -90,6 +90,8 @@ export default function Integration() {
 
   // WhatsApp Connection Status state
   const [waStatus, setWaStatus] = useState(null);
+  const [qrCountdown, setQrCountdown] = useState(60);
+  const [fetchWaStatusFn, setFetchWaStatusFn] = useState(null);
 
   const loadSheets = async () => {
     setLoading(true);
@@ -126,7 +128,7 @@ export default function Integration() {
 
     let active = true;
 
-    const fetchWaStatus = async () => {
+    const doFetch = async () => {
       const { data, error } = await supabase
         .from('whatsapp_connection_status')
         .select('*')
@@ -135,10 +137,16 @@ export default function Integration() {
       console.log('[DEBUG] Status recebido:', data, error);
       if (active && data) {
         setWaStatus(data);
+        // Reset countdown whenever new QR data arrives
+        if (data.status === 'qr_ready') {
+          setQrCountdown(60);
+        }
       }
     };
 
-    fetchWaStatus();
+    doFetch();
+    // Expose fetch fn so the countdown timer can trigger it
+    setFetchWaStatusFn(() => doFetch);
 
     const channel = supabase
       .channel('wa-status-' + Date.now())
@@ -148,7 +156,12 @@ export default function Integration() {
         table: 'whatsapp_connection_status'
       }, (payload) => {
         console.log('[DEBUG] Realtime recebido:', payload.new);
-        if (active) setWaStatus(payload.new);
+        if (active) {
+          setWaStatus(payload.new);
+          if (payload.new?.status === 'qr_ready') {
+            setQrCountdown(60);
+          }
+        }
       })
       .subscribe((status) => {
         console.log('[DEBUG] Subscription status:', status);
@@ -157,8 +170,29 @@ export default function Integration() {
     return () => {
       active = false;
       supabase.removeChannel(channel);
+      setFetchWaStatusFn(null);
     };
   }, [activeTab]);
+
+  // QR code countdown timer — ticks every second; re-fetches when it reaches 0
+  useEffect(() => {
+    if (waStatus?.status !== 'qr_ready') return;
+
+    setQrCountdown(60);
+    const interval = setInterval(() => {
+      setQrCountdown(prev => {
+        if (prev <= 1) {
+          // Time's up — re-fetch to get a fresh QR
+          if (fetchWaStatusFn) fetchWaStatusFn();
+          return 60;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(interval);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [waStatus?.status]);
 
   console.log('[DEBUG] waStatus atual:', waStatus);
 
@@ -888,8 +922,8 @@ export default function Integration() {
             </div>
           </div>
 
-          {/* Card 2: Conexão WhatsApp */}
-          <div className="card" style={{ padding: '24px 28px' }}>
+          {/* Card 2: Conexão WhatsApp — only shown while engine is enabled */}
+          {engineEnabled && <div className="card" style={{ padding: '24px 28px' }}>
             <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16 }}>
               {/* Icon status container */}
               <div style={{
@@ -1001,7 +1035,9 @@ export default function Integration() {
                     </div>
 
                     <p style={{ fontSize: 12, color: '#E6A800', fontWeight: 600, margin: 0 }}>
-                      ⚠️ O QR Code expira em 60 segundos. Se expirar, o worker vai gerar um novo automaticamente.
+                      ⚠️ O QR Code expira em{' '}
+                      <span style={{ fontVariantNumeric: 'tabular-nums' }}>{qrCountdown}s</span>.
+                      {' '}Buscando novo QR automaticamente ao expirar.
                     </p>
                   </div>
                 )}
@@ -1035,7 +1071,7 @@ export default function Integration() {
                 )}
               </div>
             </div>
-          </div>
+          </div>}
         </div>
       )}
     </div>

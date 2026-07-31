@@ -196,36 +196,13 @@ export async function fetchCashierState() {
 
 export async function upsertCashierState(state) {
   if (!isSupabaseConfigured()) return handleError('Supabase not configured');
-
-  const user = await getCurrentUser();
-  const userId = state.user_id || user?.id || null;
-
-  // Normaliza camelCase → snake_case para coincidir com o schema real da tabela
-  const dbState = {
-    status: state.status || 'fechado',
-    saldo: Number(state.saldo ?? 0),
-    hora_abertura: state.hora_abertura || state.horaAbertura || null,
-    data_abertura: state.data_abertura || state.dataAbertura || null,
-    sangrias: Array.isArray(state.sangrias) ? state.sangrias : [],
-    ...(userId ? { user_id: userId } : {}),
-  };
-
   const { data: existing } = await supabase.from('cashier_state').select('id').maybeSingle();
   if (existing?.id) {
-    const { data, error } = await supabase
-      .from('cashier_state')
-      .update(dbState)
-      .eq('id', existing.id)
-      .select()
-      .maybeSingle();
+    const { data, error } = await supabase.from('cashier_state').update(state).eq('id', existing.id).select().single();
     if (error) return handleError(error);
     return { data, error: null };
   }
-  const { data, error } = await supabase
-    .from('cashier_state')
-    .insert([dbState])
-    .select()
-    .maybeSingle();
+  const { data, error } = await supabase.from('cashier_state').insert([state]).select().single();
   if (error) return handleError(error);
   return { data, error: null };
 }
@@ -286,6 +263,22 @@ export async function clearSyncLogs() {
 
 // ─── Sheet Connections ────────────────────────────────────────
 
+// Helpers de validação e geração de UUID
+function isUuid(str) {
+  return typeof str === 'string' && /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(str);
+}
+
+function generateUuidFromSeed(seedStr) {
+  if (isUuid(seedStr)) return seedStr;
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    try { return crypto.randomUUID(); } catch (e) {}
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    const r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+}
+
 export async function fetchSheetConnections() {
   if (!isSupabaseConfigured()) return handleError('Supabase not configured', []);
   const { data, error } = await supabase.from('sheet_connections').select('*');
@@ -296,47 +289,36 @@ export async function fetchSheetConnections() {
 export async function upsertSheetConnection(connection) {
   if (!isSupabaseConfigured()) return handleError('Supabase not configured');
 
-  // Só usa id existente se for UUID válido
-  const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-  const validUuid = connection.id && UUID_REGEX.test(connection.id) ? connection.id : undefined;
+  const rawId = (connection.id || connection.sheet_id || '').toString();
+  const uuid = generateUuidFromSeed(rawId);
+  const extractSheetId = connection.sheetId || connection.sheet_id || connection.url?.match(/spreadsheets\/d\/([a-zA-Z0-9-_]+)/)?.[1] || connection.sheet_url?.match(/spreadsheets\/d\/([a-zA-Z0-9-_]+)/)?.[1] || null;
 
-  const extractSheetId = connection.sheetId || connection.sheet_id
-    || connection.url?.match(/spreadsheets\/d\/([a-zA-Z0-9-_]+)/)?.[1]
-    || connection.sheet_url?.match(/spreadsheets\/d\/([a-zA-Z0-9-_]+)/)?.[1]
-    || null;
-
-  // ── Payload EN (schema do iury2: name, provider, sheet_url, poll_interval, rows_synced)
+  // ── Tentativa 1: Payload EN com UUID (schema padrão Supabase)
   const payloadEN = {
-    ...(validUuid ? { id: validUuid } : {}),
-    provider: connection.provider || connection.tipo || 'google',
+    id: uuid,
     name: connection.name || connection.nome || connection.sheetName || 'Planilha',
+    provider: connection.provider || connection.tipo || 'google',
     sheet_url: connection.url || connection.sheet_url || connection.sheetUrl || '',
     status: connection.status || 'aguardando',
-    sync_mode: connection.sync_mode || connection.syncMode || (connection.pollingInterval <= 15 ? 'realtime' : `polling${connection.pollingInterval || 60}`),
-    poll_interval: connection.pollingInterval || connection.poll_interval || 60,
     auto_sync: connection.auto_sync ?? connection.autoSync ?? true,
+    poll_interval: connection.pollingInterval || connection.poll_interval || 60,
     rows_synced: connection.linhasSincronizadas || connection.rows_synced || 0,
     sheet_id: extractSheetId,
     api_key: connection.googleApiKey || connection.api_key || null,
     range: connection.range || 'A1:Z1000',
-    ...(connection.user_id ? { user_id: connection.user_id } : {}),
   };
+  if (connection.user_id) payloadEN.user_id = connection.user_id;
 
-  let data, error;
+  let { data, error } = await supabase
+    .from('sheet_connections')
+    .upsert([payloadEN], { onConflict: 'id' })
+    .select();
 
-  if (validUuid) {
-    const res = await supabase.from('sheet_connections').upsert([payloadEN], { onConflict: 'id' }).select();
-    data = res.data; error = res.error;
-  } else {
-    const res = await supabase.from('sheet_connections').insert([payloadEN]).select();
-    data = res.data; error = res.error;
-  }
-
-  // ── Fallback PT (schema antigo: nome, tipo, url, polling_interval, linhas_sincronizadas)
+  // ── Tentativa 2: Payload PT com UUID (caso a tabela use nomes em português)
   if (error) {
-    console.warn('[Supabase] Payload EN falhou, tentando PT:', error.message, error.code);
+    console.warn('[Supabase] Tentativa EN falhou, tentando Payload PT:', error.message);
     const payloadPT = {
-      ...(validUuid ? { id: validUuid } : {}),
+      id: uuid,
       nome: connection.nome || connection.name || connection.sheetName || 'Planilha',
       tipo: connection.tipo || connection.provider || 'google',
       url: connection.url || connection.sheet_url || connection.sheetUrl || '',
@@ -344,18 +326,32 @@ export async function upsertSheetConnection(connection) {
       auto_sync: connection.autoSync ?? connection.auto_sync ?? true,
       polling_interval: connection.pollingInterval || connection.poll_interval || 60,
       linhas_sincronizadas: connection.linhasSincronizadas || connection.rows_synced || 0,
-      ...(extractSheetId ? { sheet_id: extractSheetId } : {}),
-      ...(connection.googleApiKey || connection.api_key ? { api_key: connection.googleApiKey || connection.api_key } : {}),
-      ...(connection.user_id ? { user_id: connection.user_id } : {}),
+      sheet_id: extractSheetId,
+      api_key: connection.googleApiKey || connection.api_key || null,
+      range: connection.range || 'A1:Z1000',
     };
+    if (connection.user_id) payloadPT.user_id = connection.user_id;
 
-    if (validUuid) {
-      const res2 = await supabase.from('sheet_connections').upsert([payloadPT], { onConflict: 'id' }).select();
-      data = res2.data; error = res2.error;
-    } else {
-      const res2 = await supabase.from('sheet_connections').insert([payloadPT]).select();
-      data = res2.data; error = res2.error;
-    }
+    const res2 = await supabase
+      .from('sheet_connections')
+      .upsert([payloadPT], { onConflict: 'id' })
+      .select();
+
+    data = res2.data;
+    error = res2.error;
+  }
+
+  // ── Tentativa 3: Se o id na tabela for do tipo TEXT (e não UUID), tenta com rawId original
+  if (error && rawId && !isUuid(rawId)) {
+    console.warn('[Supabase] Tentativa com UUID falhou, tentando string rawId:', error.message);
+    const payloadText = { ...payloadEN, id: rawId };
+    const res3 = await supabase
+      .from('sheet_connections')
+      .upsert([payloadText], { onConflict: 'id' })
+      .select();
+
+    data = res3.data;
+    error = res3.error;
   }
 
   if (error) {
@@ -863,56 +859,4 @@ export async function discardMessage(id) {
     .single();
   if (error) return handleError(error);
   return { data, error: null };
-}
-
-// ─── Access Requests (Aprovação de novos usuários) ───────────────
-
-export async function requestAccess({ userId, email, fullName }) {
-  if (!isSupabaseConfigured()) return handleError('Supabase not configured');
-  const payload = {
-    user_id: userId || null,
-    email: email.trim().toLowerCase(),
-    full_name: fullName.trim(),
-    status: 'pending'
-  };
-  const { data, error } = await supabase
-    .from('user_access_requests')
-    .upsert([payload], { onConflict: 'email' })
-    .select();
-  if (error) return handleError(error);
-  const result = Array.isArray(data) ? data[0] : data;
-  return { data: result, error: null };
-}
-
-export async function checkUserAccessStatus(email) {
-  if (!isSupabaseConfigured()) return { data: { status: 'approved' }, error: null };
-  const { data, error } = await supabase
-    .from('user_access_requests')
-    .select('status, full_name')
-    .eq('email', email.trim().toLowerCase())
-    .maybeSingle();
-  if (error) return { data: null, error };
-  return { data, error: null };
-}
-
-export async function fetchAccessRequests() {
-  if (!isSupabaseConfigured()) return handleError('Supabase not configured', []);
-  const { data, error } = await supabase
-    .from('user_access_requests')
-    .select('*')
-    .order('created_at', { ascending: false });
-  if (error) return handleError(error, []);
-  return { data: data || [], error: null };
-}
-
-export async function updateAccessRequestStatus(id, status) {
-  if (!isSupabaseConfigured()) return handleError('Supabase not configured');
-  const { data, error } = await supabase
-    .from('user_access_requests')
-    .update({ status, updated_at: new Date().toISOString() })
-    .eq('id', id)
-    .select();
-  if (error) return handleError(error);
-  const result = Array.isArray(data) ? data[0] : data;
-  return { data: result, error: null };
 }
