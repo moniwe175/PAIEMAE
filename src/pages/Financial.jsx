@@ -1,14 +1,13 @@
-import { useState, useMemo, useEffect, useCallback } from 'react';
+import { useState, useMemo } from 'react';
 import {
   DollarSign, Plus, XCircle, FileSpreadsheet, Link2, Wallet,
   Printer, Lock, Unlock, AlertTriangle, Clock, CheckCircle, X,
   CreditCard, Banknote, Landmark, TrendingUp, TrendingDown,
   ArrowUpRight, ArrowDownLeft, User, Percent, Edit3, Trash2,
-  Filter, Minus, Receipt, ShieldCheck, Calculator, RefreshCw
+  Filter, Minus, Receipt
 } from 'lucide-react';
 import { useSync } from '../contexts/SyncContext';
 import { paymentMethods, calcularSplit } from '../mocks/financial';
-import { fetchDailyReports } from '../services/supabaseService';
 
 const TABS = [
   { key: 'caixa', label: 'Caixa' },
@@ -51,7 +50,6 @@ export default function Financial() {
     dailySheet,
     pythonSyncStatus,
     lastSyncAt, syncedRowCount,
-    saveDailyReport,
   } = useSync();
 
   const [activeTab, setActiveTab] = useState('caixa');
@@ -67,20 +65,7 @@ export default function Financial() {
   const [txFiltroStatus, setTxFiltroStatus] = useState('todos');
   const [expFiltroCat, setExpFiltroCat] = useState('todos');
 
-  // Estados do Sistema de Caixa (Validação Financeira)
-  const [fundoInicialInput, setFundoInicialInput] = useState('0');
-  const [fundoFinalRealInput, setFundoFinalRealInput] = useState('0');
-  const [reportsHistory, setReportsHistory] = useState([]);
-  const [savingReport, setSavingReport] = useState(false);
 
-  const loadReports = useCallback(async () => {
-    const { data } = await fetchDailyReports(30);
-    if (data) setReportsHistory(data);
-  }, []);
-
-  useEffect(() => {
-    loadReports();
-  }, [loadReports]);
 
   // ─── Caixa confirmation handlers ────────────────────────────
   const handlePromptAbrirCaixa = () => {
@@ -177,57 +162,7 @@ export default function Financial() {
     }));
   }, [txsHoje]);
 
-  // Cálculo das variáveis do Sistema de Caixa (Daily Reports)
-  const totalsCaixa = useMemo(() => {
-    let dinheiro = 0;
-    let pix = 0;
-    let credito = 0;
-    let debito = 0;
 
-    txsHoje.forEach(t => {
-      const v = Number(t.total ?? t.valor ?? 0);
-      const pg = String(t.pagamento || t.forma_pagamento || '').toLowerCase();
-      if (pg.includes('dinheiro') || pg.includes('cash') || pg.includes('especie')) dinheiro += v;
-      else if (pg.includes('pix') || pg.includes('transf')) pix += v;
-      else if (pg.includes('credito')) credito += v;
-      else if (pg.includes('debito')) debito += v;
-      else pix += v;
-    });
-
-    const fundoInicial = parseFloat(fundoInicialInput) || 0;
-    const fundoFinalReal = parseFloat(fundoFinalRealInput) || 0;
-    const fundoFinalCalculado = fundoInicial + dinheiro;
-    const diferenca = fundoFinalReal - fundoFinalCalculado;
-    const status = diferenca === 0 ? 'ok' : 'erro';
-
-    return {
-      dinheiro,
-      pix,
-      credito,
-      debito,
-      fundoInicial,
-      fundoFinalReal,
-      fundoFinalCalculado,
-      diferenca,
-      status,
-    };
-  }, [txsHoje, fundoInicialInput, fundoFinalRealInput]);
-
-  const handleSaveDailyReport = async () => {
-    setSavingReport(true);
-    const result = await saveDailyReport({
-      fundo_inicial: totalsCaixa.fundoInicial,
-      fundo_final_real: totalsCaixa.fundoFinalReal,
-      data: hoje(),
-    });
-    setSavingReport(false);
-    if (result && !result.error) {
-      alert(`Relatório do caixa salvo com sucesso no Supabase! Status: ${totalsCaixa.status.toUpperCase()}`);
-      loadReports();
-    } else {
-      alert(`Erro ao salvar relatório: ${result?.error || 'Erro desconhecido'}`);
-    }
-  };
 
   // Transações filtradas: fonte única = Supabase (mantido em espelho pelo Python sync)
   const txFiltradas = useMemo(() => {
