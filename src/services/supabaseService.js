@@ -111,25 +111,28 @@ export async function fetchSheetTransactions() {
   const { data, error } = await supabase
     .from('sheet_transactions')
     .select('*')
-    .eq('is_metadata', false)
     .is('deleted_at', null)
     .order('date_ref', { ascending: false });
   if (error) return handleError(error, []);
-  return { data: data || [], error: null };
+  const filtered = (data || []).filter(r => {
+    const rt = String(r.row_type || r.tipo || '').toLowerCase().trim();
+    return rt !== 'header' && rt !== 'sumario';
+  });
+  return { data: filtered, error: null };
 }
 
 export async function fetchSheetTransactionsSummary() {
-  if (!isSupabaseConfigured()) return handleError('Supabase not configured', { receitas: 0, despesas: 0, sangrias: 0 });
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured', { receitas: 0, despesas: 0, sangrias: 0, count: { receitas: 0, despesas: 0, sangrias: 0 } });
   const { data, error } = await supabase
     .from('sheet_transactions')
     .select('row_type, tipo, gross')
-    .eq('is_metadata', false)
     .is('deleted_at', null);
-  if (error) return handleError(error, { receitas: 0, despesas: 0, sangrias: 0 });
+  if (error) return handleError(error, { receitas: 0, despesas: 0, sangrias: 0, count: { receitas: 0, despesas: 0, sangrias: 0 } });
   const summary = { receitas: 0, despesas: 0, sangrias: 0, count: { receitas: 0, despesas: 0, sangrias: 0 } };
   (data || []).forEach(row => {
     const v = Number(row.gross) || 0;
     const rt = String(row.row_type || row.tipo || '').toLowerCase().trim();
+    if (rt === 'header' || rt === 'sumario') return;
     if (rt.includes('sangria')) {
       summary.sangrias += v;
       summary.count.sangrias += 1;
@@ -180,7 +183,6 @@ export async function upsertSheetTransaction(st) {
       .from('sheet_transactions')
       .select('id')
       .eq('comanda', comandaStr)
-      .eq('is_metadata', false)
       .is('deleted_at', null)
       .maybeSingle();
 

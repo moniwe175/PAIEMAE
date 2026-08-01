@@ -873,11 +873,23 @@ export default function Financial() {
 
       {/* Tab: Despesas */}
       {activeTab === 'despesas' && (() => {
+        const formatCategory = (cat, proc) => {
+          if (proc && proc !== '—' && proc !== 'null') return proc;
+          if (!cat) return 'Outros';
+          const c = String(cat).trim();
+          if (c.toUpperCase() === 'PASSAGEM') return 'Passagem';
+          if (c.toUpperCase() === 'PRODUTOS') return 'Produtos';
+          if (c.toUpperCase() === 'TRIBUTOS') return 'Tributos';
+          if (c.toUpperCase() === 'OUTRAS SAÍDAS' || c.toUpperCase() === 'OUTRAS SAIDAS') return 'Outras Saídas';
+          if (c.toUpperCase() === 'SANGRIA') return 'Sangria';
+          return c;
+        };
+
         const despesasSheetMapped = despesasSheet.map(e => ({
           id: e.id,
           data: e.date_ref ? new Date(e.date_ref + 'T00:00:00').toLocaleDateString('pt-BR') : '—',
           descricao: (e.client && e.client !== '—' ? e.client : e.procedure && e.procedure !== '—' ? e.procedure : e.comanda || 'DESPESA').toUpperCase(),
-          categoria: e.procedure && e.procedure !== '—' ? e.procedure : e.client && e.client !== '—' ? e.client : 'Outros',
+          categoria: formatCategory(e.client, e.procedure),
           tipo: 'Despesa',
           valor: Number(e.gross) || 0,
           origem: 'Planilha',
