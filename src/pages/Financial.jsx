@@ -134,6 +134,8 @@ export default function Financial() {
     }
   };
 
+  const isConnected = syncStatus === 'connected';
+
   const safeTransactions = Array.isArray(transactions) ? transactions : [];
   const safeExpenses = Array.isArray(expenses) ? expenses : [];
   const safeSplitConfig = Array.isArray(splitConfig) ? splitConfig : [];
