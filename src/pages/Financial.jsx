@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { useSync } from '../contexts/SyncContext';
 import { paymentMethods, calcularSplit } from '../mocks/financial';
+import { syncSheetToSupabase } from '../services/googleSheetsSync';
 
 const TABS = [
   { key: 'transacoes', label: 'Transações' },
@@ -66,6 +67,26 @@ export default function Financial() {
   const [despesaForm, setDespesaForm] = useState({ descricao: '', categoria: '', valor: '', metodoPagamento: 'Pix' });
   const [txFiltroStatus, setTxFiltroStatus] = useState('todos');
   const [expFiltroCat, setExpFiltroCat] = useState('todos');
+  const [syncing, setSyncing] = useState(false);
+
+  const handleManualSync = async () => {
+    setSyncing(true);
+    addLog('info', 'Iniciando sincronização com a planilha Google Sheets...');
+    try {
+      const result = await syncSheetToSupabase();
+      if (result.success) {
+        addLog('success', `Planilha sincronizada com sucesso! ${result.rowCount || 0} registros atualizados.`);
+      } else {
+        addLog('error', `Erro na sincronização: ${result.error}`);
+        alert(`Erro ao sincronizar: ${result.error}`);
+      }
+    } catch (err) {
+      addLog('error', `Erro na sincronização: ${err.message}`);
+      alert(`Erro ao sincronizar: ${err.message}`);
+    } finally {
+      setSyncing(false);
+    }
+  };
 
 
 
@@ -505,8 +526,23 @@ export default function Financial() {
           </p>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          <button className="btn btn-sm" style={{ border: '1px solid #FDE68A', background: '#FFFBEB', color: '#D97706', fontWeight: 600, padding: '8px 16px', borderRadius: 8 }}>
-            <RefreshCw style={{ width: 14, height: 14, marginRight: 6 }} />Sincronizar planilha Excel
+          <button
+            className="btn btn-sm"
+            onClick={handleManualSync}
+            disabled={syncing}
+            style={{
+              border: '1px solid #FDE68A',
+              background: '#FFFBEB',
+              color: '#D97706',
+              fontWeight: 600,
+              padding: '8px 16px',
+              borderRadius: 8,
+              cursor: syncing ? 'wait' : 'pointer',
+              opacity: syncing ? 0.7 : 1,
+            }}
+          >
+            <RefreshCw style={{ width: 14, height: 14, marginRight: 6, animation: syncing ? 'spin 1s linear infinite' : 'none' }} />
+            {syncing ? 'Sincronizando...' : 'Sincronizar planilha Excel'}
           </button>
         </div>
       </div>

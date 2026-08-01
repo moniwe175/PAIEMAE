@@ -1,13 +1,12 @@
 /**
  * googleSheetsSync.js
  * 
- * Sincroniza dados de uma planilha Google Sheets diretamente com o Supabase.
- * Usa a API pública do Google Sheets (gviz/tq) que não requer autenticação
- * desde que a planilha esteja compartilhada como "qualquer pessoa com o link".
+ * Sincroniza dados de uma planilha Google Sheets diretamente com a tabela sheet_transactions do Supabase.
+ * Usa a API pública do Google Sheets (gviz/tq) via fetch no navegador.
  */
 
 import { supabase } from '../lib/supabase';
-import { upsertTransaction, upsertExpense, fetchAllTransactionIds, deleteTransactionsByIds } from './supabaseService';
+import { upsertSheetTransaction } from './supabaseService';
 
 /**
  * Extrai o Sheet ID da URL do Google Sheets
@@ -26,8 +25,44 @@ export function extractGid(url) {
 }
 
 /**
+ * Formata data para YYYY-MM-DD aceito pelo PostgreSQL
+ */
+function formatDateForDb(rawData) {
+  if (!rawData) return new Date().toISOString().split('T')[0];
+  const str = String(rawData).trim();
+  
+  // Formato DD/MM/YYYY
+  const brMatch = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (brMatch) {
+    const day = brMatch[1].padStart(2, '0');
+    const month = brMatch[2].padStart(2, '0');
+    const year = brMatch[3];
+    return `${year}-${month}-${day}`;
+  }
+  
+  // Formato Date(YYYY,M,D) do gviz
+  const gvizMatch = str.match(/Date\((\d+),(\d+),(\d+)\)/);
+  if (gvizMatch) {
+    const y = gvizMatch[1];
+    const m = String(Number(gvizMatch[2]) + 1).padStart(2, '0');
+    const d = String(gvizMatch[3]).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
+
+  try {
+    const parsed = new Date(str);
+    if (!isNaN(parsed.getTime())) {
+      return parsed.toISOString().split('T')[0];
+    }
+  } catch (e) {}
+
+  return new Date().toISOString().split('T')[0];
+}
+
+/**
  * Busca dados da planilha usando a API pública gviz/tq do Google.
- * A planilha precisa estar com acesso "qualquer pessoa com o link pode visualizar".
  */
 export async function fetchSheetData(sheetId, gid = '0', range = '') {
   const rangeParam = range ? `&range=${encodeURIComponent(range)}` : '';
@@ -37,7 +72,6 @@ export async function fetchSheetData(sheetId, gid = '0', range = '') {
   if (!response.ok) throw new Error(`Erro HTTP ${response.status} ao acessar planilha`);
   
   const text = await response.text();
-  // A API retorna JSONP, precisamos extrair o JSON puro
   const jsonMatch = text.match(/google\.visualization\.Query\.setResponse\(([\s\S]*)\)/);
   if (!jsonMatch) throw new Error('Formato de resposta inválido da planilha');
   
@@ -48,34 +82,32 @@ export async function fetchSheetData(sheetId, gid = '0', range = '') {
 }
 
 /**
- * Converte os dados brutos da planilha em transações normalizadas.
- * Detecta automaticamente as colunas pelas cabeçalhos.
+ * Converte os dados brutos da planilha em registros da tabela sheet_transactions.
  */
 function parseSheetRows(table) {
-  if (!table?.cols || !table?.rows) return { transactions: [], expenses: [] };
+  if (!table?.cols || !table?.rows) return { sheetRows: [] };
   
-  // Mapeamento de colunas por nome (case-insensitive)
   const colMap = {};
   table.cols.forEach((col, idx) => {
     const label = (col.label || col.id || '').toLowerCase().trim();
     colMap[label] = idx;
-    // Aliases comuns
     if (/cliente|paciente|nome/.test(label)) colMap._cliente = idx;
     if (/procedimento|servi[çc]|tratamento/.test(label)) colMap._procedimento = idx;
-    if (/valor|pre[çc]o|total/.test(label)) colMap._valor = idx;
+    if (/valor|pre[çc]o|total|bruto|gross/.test(label)) colMap._valor = idx;
     if (/profiss/.test(label)) colMap._profissional = idx;
     if (/comiss/.test(label)) colMap._comissao = idx;
     if (/data|date/.test(label)) colMap._data = idx;
-    if (/forma|pagamento|pix|credito|debito|m[eé]todo/.test(label)) colMap._pagamento = idx;
+    if (/forma|pagamento|m[eé]todo/.test(label)) colMap._pagamento = idx;
     if (/comanda|id|cod/.test(label)) colMap._comanda = idx;
-    if (/tipo|type/.test(label)) colMap._tipo = idx;
-    if (/categ/.test(label)) colMap._categoria = idx;
+    if (/tipo|type|row_type/.test(label)) colMap._tipo = idx;
+    if (/pix/.test(label)) colMap._pix = idx;
+    if (/credito|crédito/.test(label)) colMap._credito = idx;
+    if (/debito|débito/.test(label)) colMap._debito = idx;
+    if (/dinheiro|espécie|especie/.test(label)) colMap._dinheiro = idx;
     if (/repasse/.test(label)) colMap._repasse = idx;
-    if (/origem/.test(label)) colMap._origem = idx;
   });
 
-  const transactions = [];
-  const expenses = [];
+  const sheetRows = [];
   
   table.rows.forEach((row, rowIdx) => {
     const cells = row.c || [];
@@ -86,133 +118,106 @@ function parseSheetRows(table) {
       return cell?.v ?? cell?.f ?? null;
     };
 
-    // Valor
-    const rawValor = get('_valor') ?? get('valor') ?? get('total') ?? get('pre\u00e7o');
-    let valor = 0;
+    const rawValor = get('_valor') ?? get('valor') ?? get('gross') ?? get('total') ?? get('pre\u00e7o');
+    let gross = 0;
     if (rawValor !== null) {
       const cleaned = String(rawValor).replace(/[R$\s.]/g, '').replace(',', '.');
-      valor = parseFloat(cleaned) || 0;
+      gross = parseFloat(cleaned) || 0;
     }
-    if (valor <= 0) return; // Pula linhas sem valor
+    if (gross <= 0) return;
 
-    // Data
     const rawData = get('_data') ?? get('data');
-    let data = '';
-    if (rawData) {
-      if (typeof rawData === 'string') {
-        data = rawData;
-      } else if (rawData instanceof Date) {
-        data = rawData.toLocaleDateString('pt-BR');
-      }
-    }
-    if (!data) data = new Date().toLocaleDateString('pt-BR');
+    const dateRef = formatDateForDb(rawData);
 
-    // Tipo — detecta se é despesa ou receita
-    const rawTipo = get('_tipo') ?? get('tipo') ?? '';
-    const tipStr = String(rawTipo).toLowerCase();
-    const isDespesa = /despesa|saida|sa[íi]da|gasto/.test(tipStr);
-    const isSangria = /sangria/.test(tipStr);
+    const rawTipo = String(get('_tipo') ?? get('tipo') ?? '').toLowerCase();
+    let rowType = 'receita';
+    if (/despesa|saida|sa[íi]da|gasto/.test(rawTipo)) rowType = 'despesa';
+    else if (/sangria/.test(rawTipo)) rowType = 'sangria';
 
-    if (isDespesa || isSangria) {
-      // É uma despesa
-      const descricao = get('_cliente') ?? get('_procedimento') ?? get('descricao') ?? get('descri\u00e7\u00e3o') ?? 'Despesa';
-      const categoria = get('_categoria') ?? get('_tipo') ?? (isSangria ? 'Sangria' : 'Outros');
-      expenses.push({
-        id: `sheet_exp_${rowIdx}_${data.replace(/\//g, '')}`,
-        data,
-        descricao: String(descricao).toUpperCase(),
-        categoria: String(categoria),
-        valor,
-        origem: 'planilha',
-        tipo: isSangria ? 'sangria' : 'despesa',
-        metodo_pagamento: 'Planilha',
-      });
-    } else {
-      // É uma receita/transação
-      const cliente = get('_cliente') ?? get('cliente') ?? '—';
-      const procedimento = get('_procedimento') ?? get('procedimento') ?? '—';
-      const profissional = get('_profissional') ?? get('profissional') ?? '';
-      const pagamento = get('_pagamento') ?? get('pagamento') ?? get('pix') ?? get('credito') ?? get('cr\u00e9dito') ?? 'Pix';
-      const comanda = get('_comanda') ?? get('comanda') ?? `row_${rowIdx}`;
-      const repasse = get('_repasse') ?? get('repasse') ?? 0;
+    const client = String(get('_cliente') ?? get('cliente') ?? '—').trim();
+    const procedure = String(get('_procedimento') ?? get('procedimento') ?? '—').trim();
+    const professional = String(get('_profissional') ?? get('profissional') ?? '—').trim();
+    const paymentMethod = String(get('_pagamento') ?? get('pagamento') ?? 'Pix').trim();
+    const comanda = get('_comanda') ?? get('comanda') ?? `row_${rowIdx + 1}`;
 
-      transactions.push({
-        id: `sheet_${String(comanda).trim() || rowIdx}`,
-        comanda: String(comanda).trim() || `row_${rowIdx}`,
-        ordem: rowIdx,
-        data,
-        cliente: String(cliente).trim(),
-        procedimento: String(procedimento).trim(),
-        profissional: String(profissional).trim(),
-        profissional_nome: String(profissional).trim(),
-        pagamento: String(pagamento).trim(),
-        forma_pagamento: String(pagamento).trim(),
-        valor,
-        total: valor,
-        clinica: valor - (parseFloat(repasse) || 0),
-        tipo: 'receita',
-        status: 'paid',
-        origem: 'planilha',
-        hash: null,
-      });
-    }
+    const parseNum = (v) => {
+      if (v === null || v === undefined) return 0;
+      const c = String(v).replace(/[R$\s.]/g, '').replace(',', '.');
+      return parseFloat(c) || 0;
+    };
+
+    const pix = parseNum(get('_pix') ?? get('pix'));
+    const credito = parseNum(get('_credito') ?? get('credito'));
+    const debito = parseNum(get('_debito') ?? get('debito'));
+    const dinheiro = parseNum(get('_dinheiro') ?? get('dinheiro'));
+    const repasse = parseNum(get('_repasse') ?? get('repasse'));
+    const comissaoVal = parseNum(get('_comissao') ?? get('comissao'));
+
+    sheetRows.push({
+      comanda: String(comanda).trim(),
+      date_ref: dateRef,
+      client,
+      procedure,
+      professional,
+      gross,
+      payment_method: paymentMethod,
+      pix,
+      credito,
+      debito,
+      dinheiro,
+      repasse,
+      commission_value: comissaoVal > 0 ? comissaoVal : null,
+      row_type: rowType,
+      tipo: rowType,
+      origin: 'planilha',
+      is_metadata: false,
+    });
   });
 
-  return { transactions, expenses };
+  return { sheetRows };
 }
 
 /**
- * Sincroniza uma planilha com o Supabase.
- * Retorna { success, rowCount, error }
+ * Sincroniza a planilha Google Sheets diretamente com a tabela sheet_transactions no Supabase.
  */
 export async function syncSheetToSupabase(sheetUrl, options = {}) {
-  const sheetId = extractSheetId(sheetUrl);
+  const defaultUrl = 'https://docs.google.com/spreadsheets/d/1uXB-p9iWev-ID7HVZVUj42FBu2J4PkWMo1cocTW2GXI/edit';
+  const urlToUse = sheetUrl || defaultUrl;
+  const sheetId = extractSheetId(urlToUse);
   if (!sheetId) return { success: false, rowCount: 0, error: 'URL inválida: não foi possível extrair o Sheet ID' };
 
-  const gid = extractGid(sheetUrl);
+  const gid = extractGid(urlToUse);
 
   try {
     const table = await fetchSheetData(sheetId, gid, options.range);
-    const { transactions, expenses } = parseSheetRows(table);
+    const { sheetRows } = parseSheetRows(table);
     
-    if (transactions.length === 0 && expenses.length === 0) {
-      return { success: true, rowCount: 0, error: null, warning: 'Nenhum dado encontrado na planilha. Verifique se a planilha está compartilhada como "qualquer pessoa com o link".' };
+    if (!sheetRows || sheetRows.length === 0) {
+      return { success: true, rowCount: 0, error: null, warning: 'Nenhum dado encontrado na planilha.' };
     }
 
-    // Upsert transactions
-    const txResults = await Promise.allSettled(
-      transactions.map(tx => upsertTransaction(tx))
+    const results = await Promise.allSettled(
+      sheetRows.map(row => upsertSheetTransaction(row))
     );
     
-    // Upsert expenses
-    const expResults = await Promise.allSettled(
-      expenses.map(exp => upsertExpense(exp))
-    );
+    const succeeded = results.filter(r => r.status === 'fulfilled' && !r.value?.error).length;
 
-    const txSuccess = txResults.filter(r => r.status === 'fulfilled' && !r.value?.error).length;
-    const expSuccess = expResults.filter(r => r.status === 'fulfilled' && !r.value?.error).length;
-    const totalSuccess = txSuccess + expSuccess;
-
-    // Log no Supabase
     await supabase.from('sync_logs').insert([{
       event: 'sync_complete',
       status: 'success',
-      details: `Sincronizado ${txSuccess} transações e ${expSuccess} despesas da planilha`,
-      message: `Sync Google Sheets: ${totalSuccess} registros importados`,
+      details: `Sincronizado ${succeeded} registros na tabela sheet_transactions`,
+      message: `Sync Google Sheets (JS): ${succeeded} registros importados`,
       type: 'success',
     }]).catch(() => {});
 
     return {
       success: true,
-      rowCount: totalSuccess,
-      txCount: txSuccess,
-      expCount: expSuccess,
+      rowCount: succeeded,
       error: null,
     };
   } catch (error) {
     console.error('[GoogleSheetsSync] Erro:', error);
     
-    // Log de erro
     await supabase.from('sync_logs').insert([{
       event: 'sync_error',
       status: 'error',
@@ -231,16 +236,11 @@ export async function syncSheetToSupabase(sheetUrl, options = {}) {
 
 /**
  * Inicia polling automático de uma planilha.
- * Retorna função para parar o polling.
  */
 export function startSheetPolling(sheetUrl, intervalSeconds, onSync) {
-  // Sync imediato
   syncSheetToSupabase(sheetUrl).then(onSync).catch(console.error);
-  
-  // Polling periódico
   const timer = setInterval(() => {
     syncSheetToSupabase(sheetUrl).then(onSync).catch(console.error);
-  }, intervalSeconds * 1000);
-  
+  }, (intervalSeconds || 30) * 1000);
   return () => clearInterval(timer);
 }

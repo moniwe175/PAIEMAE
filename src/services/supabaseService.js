@@ -137,6 +137,63 @@ export async function fetchSheetTransactionsSummary() {
   return { data: summary, error: null };
 }
 
+export async function upsertSheetTransaction(st) {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured');
+
+  const comandaStr = st.comanda ? String(st.comanda).trim() : null;
+
+  const payload = {
+    date_ref: st.date_ref || new Date().toISOString().split('T')[0],
+    client: st.client || null,
+    procedure: st.procedure || null,
+    professional: st.professional || null,
+    gross: Number(st.gross || 0),
+    commission_percent: st.commission_percent != null ? Number(st.commission_percent) : null,
+    commission_value: st.commission_value != null ? Number(st.commission_value) : null,
+    payment_method: st.payment_method || 'Pix',
+    pix: Number(st.pix || 0),
+    credito: Number(st.credito || 0),
+    debito: Number(st.debito || 0),
+    dinheiro: Number(st.dinheiro || 0),
+    repasse: Number(st.repasse || 0),
+    comanda: comandaStr,
+    row_type: st.row_type || 'receita',
+    tipo: st.tipo || st.row_type || 'receita',
+    origin: st.origin || 'planilha',
+    is_metadata: false,
+    deleted_at: null,
+  };
+
+  if (st.id) payload.id = st.id;
+  if (st.connection_id) payload.connection_id = st.connection_id;
+
+  // Se não tem ID, tenta encontrar registro existente por comanda
+  if (!payload.id && comandaStr) {
+    const { data: existing } = await supabase
+      .from('sheet_transactions')
+      .select('id')
+      .eq('comanda', comandaStr)
+      .eq('is_metadata', false)
+      .is('deleted_at', null)
+      .maybeSingle();
+
+    if (existing?.id) {
+      payload.id = existing.id;
+    }
+  }
+
+  const { data, error } = await supabase
+    .from('sheet_transactions')
+    .upsert([payload])
+    .select();
+
+  if (error) {
+    console.error('[Supabase] upsertSheetTransaction error:', error);
+    return handleError(error);
+  }
+  return { data: data?.[0] || payload, error: null };
+}
+
 // ─── Expenses ─────────────────────────────────────────────────
 
 export async function fetchExpenses() {
