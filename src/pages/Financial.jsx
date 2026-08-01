@@ -166,21 +166,26 @@ export default function Financial() {
   // Dados reais vindos de sheet_transactions
   const safeSheetTx = Array.isArray(sheetTransactions) ? sheetTransactions : [];
 
-  // ─ KPI Cards: calculados direto do sheetSummary (sheet_transactions) ─
+  // ─ Separação das transações da planilha por row_type ─
+  const receitasSheet = safeSheetTx.filter(t => (t.row_type || t.tipo || 'receita') === 'receita');
+  const despesasSheet = safeSheetTx.filter(t => (t.row_type || t.tipo) === 'despesa');
+  const sangriasSheet = safeSheetTx.filter(t => (t.row_type || t.tipo) === 'sangria');
+
+  // ─ KPI Cards: calculados do sheetSummary (sheet_transactions) ─
   const faturamentoHoje    = Number(sheetSummary?.receitas)  || 0;
   const totalDespesasSheet = Number(sheetSummary?.despesas)  || 0;
   const totalSangriasSheet = Number(sheetSummary?.sangrias)  || 0;
-  const receitasCount      = Number(sheetSummary?.count?.receitas)  || 0;
-  const despesasCountSheet = Number(sheetSummary?.count?.despesas)  || 0;
-  const sangriasCountSheet = Number(sheetSummary?.count?.sangrias)  || 0;
+  const receitasCount      = Number(sheetSummary?.count?.receitas)  || receitasSheet.length;
+  const despesasCountSheet = Number(sheetSummary?.count?.despesas)  || despesasSheet.length;
+  const sangriasCountSheet = Number(sheetSummary?.count?.sangrias)  || sangriasSheet.length;
 
   const ticketMedio = receitasCount > 0 ? faturamentoHoje / receitasCount : 0;
   // Despesas manuais (tabela expenses) — somadas às despesas da planilha
   const despesasFixasHoje = safeExpenses.reduce((a, e) => a + (Number(e.valor) || 0), 0);
   const sangriasHoje      = safeSangrias.reduce((a, s) => a + (Number(s.valor) || 0), 0);
-  const totalDespesasHoje = totalDespesasSheet + despesasFixasHoje + sangriasHoje;
+  const totalDespesasHoje = totalDespesasSheet + totalSangriasSheet + despesasFixasHoje + sangriasHoje;
   // Comissões: soma de commission_value das receitas da planilha
-  const comissoesHoje = safeSheetTx.reduce((a, t) => a + (Number(t.commission_value) || 0), 0);
+  const comissoesHoje = receitasSheet.reduce((a, t) => a + (Number(t.commission_value) || 0), 0);
   const lucroLiquido = faturamentoHoje - totalDespesasHoje - comissoesHoje;
   const despesasCount = safeExpenses.length + despesasCountSheet;
   const sangriasCount = safeSangrias.length  + sangriasCountSheet;
@@ -189,7 +194,7 @@ export default function Financial() {
   // Formas de pagamento calculadas das receitas da planilha (sheet_transactions)
   const formasPagamento = useMemo(() => {
     const counts = {};
-    safeSheetTx.forEach(t => {
+    receitasSheet.forEach(t => {
       // Prioriza colunas individuais (pix, credito, debito, dinheiro) se preenchidas
       if (Number(t.pix) > 0)     counts['pix']      = (counts['pix']     || 0) + Number(t.pix);
       if (Number(t.credito) > 0) counts['crédito']  = (counts['crédito'] || 0) + Number(t.credito);
@@ -208,12 +213,12 @@ export default function Financial() {
       valor: counts[(pm.nome || '').toLowerCase()] || counts[pm.id] || 0,
       pct: Math.round(((counts[(pm.nome || '').toLowerCase()] || counts[pm.id] || 0) / total) * 100),
     }));
-  }, [safeSheetTx]);
+  }, [receitasSheet]);
 
   // Aba Transações: lista de receitas da planilha (sheet_transactions)
   const txFiltradas = useMemo(() => {
-    return safeSheetTx;
-  }, [safeSheetTx]);
+    return receitasSheet;
+  }, [receitasSheet]);
 
   const expFiltradas = useMemo(() => {
     // Merge Supabase expenses + sheet expense rows
@@ -856,10 +861,32 @@ export default function Financial() {
 
       {/* Tab: Despesas */}
       {activeTab === 'despesas' && (() => {
-        const despesasMapped = expFiltradas.map(e => ({
+        const despesasSheetMapped = despesasSheet.map(e => ({
+          id: e.id,
+          data: e.date_ref ? new Date(e.date_ref + 'T00:00:00').toLocaleDateString('pt-BR') : '—',
+          descricao: (e.client && e.client !== '—' ? e.client : e.procedure && e.procedure !== '—' ? e.procedure : e.comanda || 'DESPESA').toUpperCase(),
+          categoria: e.procedure && e.procedure !== '—' ? e.procedure : e.client && e.client !== '—' ? e.client : 'Outros',
+          tipo: 'Despesa',
+          valor: Number(e.gross) || 0,
+          origem: 'Planilha',
+          isFromSheet: true
+        }));
+
+        const sangriasSheetMapped = sangriasSheet.map(s => ({
+          id: s.id,
+          data: s.date_ref ? new Date(s.date_ref + 'T00:00:00').toLocaleDateString('pt-BR') : '—',
+          descricao: (s.client && s.client !== '—' ? s.client : s.procedure && s.procedure !== '—' ? s.procedure : 'SANGRIA').toUpperCase(),
+          categoria: 'Sangria',
+          tipo: 'Sangria',
+          valor: Number(s.gross) || 0,
+          origem: 'Planilha',
+          isFromSheet: true
+        }));
+
+        const despesasManualMapped = safeExpenses.map(e => ({
           id: e.id,
           data: e.data || hoje(),
-          descricao: e.descricao || e.categoria || 'Despesa',
+          descricao: (e.descricao || e.categoria || 'Despesa').toUpperCase(),
           categoria: e.categoria || 'Outros',
           tipo: 'Despesa',
           valor: Number(e.valor) || 0,
@@ -867,18 +894,18 @@ export default function Financial() {
           isFromSheet: e.origem === 'planilha'
         }));
 
-        const sangriasMapped = safeSangrias.map(s => ({
+        const sangriasManualMapped = safeSangrias.map(s => ({
           id: s.id,
           data: s.data || hoje(),
-          descricao: s.motivo || 'SANGRIA',
+          descricao: (s.motivo || 'SANGRIA').toUpperCase(),
           categoria: 'Sangria',
           tipo: 'Sangria',
           valor: Number(s.valor) || 0,
-          origem: 'Planilha',
-          isFromSheet: true
+          origem: 'Manual',
+          isFromSheet: false
         }));
 
-        const listSaidas = [...despesasMapped, ...sangriasMapped];
+        const listSaidas = [...despesasSheetMapped, ...sangriasSheetMapped, ...despesasManualMapped, ...sangriasManualMapped];
         const totalSaidas = listSaidas.reduce((acc, i) => acc + i.valor, 0);
 
         return (

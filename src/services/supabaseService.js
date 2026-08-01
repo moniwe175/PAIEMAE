@@ -113,7 +113,6 @@ export async function fetchSheetTransactions() {
     .select('*')
     .eq('is_metadata', false)
     .is('deleted_at', null)
-    .eq('row_type', 'receita')
     .order('date_ref', { ascending: false });
   if (error) return handleError(error, []);
   return { data: data || [], error: null };

@@ -130,9 +130,15 @@ function parseSheetRows(table) {
     const dateRef = formatDateForDb(rawData);
 
     const rawTipo = String(get('_tipo') ?? get('tipo') ?? '').toLowerCase();
+    const rawCliente = String(get('_cliente') ?? get('cliente') ?? '').toLowerCase();
+    const rawProc = String(get('_procedimento') ?? get('procedimento') ?? '').toLowerCase();
+
     let rowType = 'receita';
-    if (/despesa|saida|sa[íi]da|gasto/.test(rawTipo)) rowType = 'despesa';
-    else if (/sangria/.test(rawTipo)) rowType = 'sangria';
+    if (/sangria/.test(rawTipo) || /sangria/.test(rawCliente) || /sangria/.test(rawProc)) {
+      rowType = 'sangria';
+    } else if (/despesa|saida|sa[íi]da|gasto/.test(rawTipo) || /despesa|saida|sa[íi]da|gasto/.test(rawCliente) || /despesa|saida|sa[íi]da|gasto/.test(rawProc)) {
+      rowType = 'despesa';
+    }
 
     const client = String(get('_cliente') ?? get('cliente') ?? '—').trim();
     const procedure = String(get('_procedimento') ?? get('procedimento') ?? '—').trim();
