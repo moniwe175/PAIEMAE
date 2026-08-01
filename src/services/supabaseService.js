@@ -102,6 +102,41 @@ export async function deleteTransactionsByIds(idsToDelete) {
   return { data: true, error: null };
 }
 
+// ─── Sheet Transactions (fonte real dos dados financeiros) ─────
+// Os dados vêm do readdy.ai sincronizando a planilha Google Sheets.
+// Filtros obrigatórios: is_metadata = false AND deleted_at IS NULL
+
+export async function fetchSheetTransactions() {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured', []);
+  const { data, error } = await supabase
+    .from('sheet_transactions')
+    .select('*')
+    .eq('is_metadata', false)
+    .is('deleted_at', null)
+    .eq('row_type', 'receita')
+    .order('date_ref', { ascending: false });
+  if (error) return handleError(error, []);
+  return { data: data || [], error: null };
+}
+
+export async function fetchSheetTransactionsSummary() {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured', { receitas: 0, despesas: 0, sangrias: 0 });
+  const { data, error } = await supabase
+    .from('sheet_transactions')
+    .select('row_type, gross')
+    .eq('is_metadata', false)
+    .is('deleted_at', null);
+  if (error) return handleError(error, { receitas: 0, despesas: 0, sangrias: 0 });
+  const summary = { receitas: 0, despesas: 0, sangrias: 0, count: { receitas: 0, despesas: 0, sangrias: 0 } };
+  (data || []).forEach(row => {
+    const v = Number(row.gross) || 0;
+    if (row.row_type === 'receita') { summary.receitas += v; summary.count.receitas += 1; }
+    else if (row.row_type === 'despesa') { summary.despesas += v; summary.count.despesas += 1; }
+    else if (row.row_type === 'sangria') { summary.sangrias += v; summary.count.sangrias += 1; }
+  });
+  return { data: summary, error: null };
+}
+
 // ─── Expenses ─────────────────────────────────────────────────
 
 export async function fetchExpenses() {

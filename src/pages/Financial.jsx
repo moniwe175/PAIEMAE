@@ -49,6 +49,9 @@ export default function Financial() {
     supabaseConnected, connectionError,
     dailySheet,
     lastSyncAt, syncedRowCount,
+    // ─ Dados reais da planilha (sheet_transactions) ─
+    sheetTransactions,
+    sheetSummary,
   } = useSync();
 
   const [activeTab, setActiveTab] = useState('transacoes');
@@ -139,33 +142,43 @@ export default function Financial() {
   const safeExpenses = Array.isArray(expenses) ? expenses : [];
   const safeSplitConfig = Array.isArray(splitConfig) ? splitConfig : [];
   const safeSangrias = Array.isArray(cashier?.sangrias) ? cashier.sangrias : [];
+  // Dados reais vindos de sheet_transactions
+  const safeSheetTx = Array.isArray(sheetTransactions) ? sheetTransactions : [];
 
-  const txsHoje = useMemo(() => {
-    return safeTransactions.map(normalizeTx).filter(t => t.data === hoje() && t.status === 'paid');
-  }, [safeTransactions]);
+  // ─ KPI Cards: calculados direto do sheetSummary (sheet_transactions) ─
+  const faturamentoHoje    = Number(sheetSummary?.receitas)  || 0;
+  const totalDespesasSheet = Number(sheetSummary?.despesas)  || 0;
+  const totalSangriasSheet = Number(sheetSummary?.sangrias)  || 0;
+  const receitasCount      = Number(sheetSummary?.count?.receitas)  || 0;
+  const despesasCountSheet = Number(sheetSummary?.count?.despesas)  || 0;
+  const sangriasCountSheet = Number(sheetSummary?.count?.sangrias)  || 0;
 
-  // Calcular totais direto das transactions do Supabase (espelho exato da planilha)
-  const faturamentoHoje = txsHoje.reduce((a, t) => a + t.total, 0);
-  const ticketMedio = txsHoje.length > 0 ? faturamentoHoje / txsHoje.length : 0;
-  const aReceber = safeTransactions.map(normalizeTx).filter(t => t.status === 'pending').reduce((a, t) => a + t.total, 0);
-  const pendentesCount = safeTransactions.map(normalizeTx).filter(t => t.status === 'pending').length;
-
-  const comissoesHoje = txsHoje.reduce((a, t) => a + (Number(t.profissional) || 0), 0);
-  const despesasFixasHoje = safeExpenses.filter(e => e.data === hoje()).reduce((a, e) => a + (Number(e.valor) || 0), 0);
-  const sangriasHoje = safeSangrias.filter(s => s.data === hoje()).reduce((a, s) => a + (Number(s.valor) || 0), 0);
-  const totalDespesasHoje = despesasFixasHoje + sangriasHoje;
+  const ticketMedio = receitasCount > 0 ? faturamentoHoje / receitasCount : 0;
+  // Despesas manuais (tabela expenses) — somadas às despesas da planilha
+  const despesasFixasHoje = safeExpenses.reduce((a, e) => a + (Number(e.valor) || 0), 0);
+  const sangriasHoje      = safeSangrias.reduce((a, s) => a + (Number(s.valor) || 0), 0);
+  const totalDespesasHoje = totalDespesasSheet + despesasFixasHoje + sangriasHoje;
+  // Comissões: soma de commission_value das receitas da planilha
+  const comissoesHoje = safeSheetTx.reduce((a, t) => a + (Number(t.commission_value) || 0), 0);
   const lucroLiquido = faturamentoHoje - totalDespesasHoje - comissoesHoje;
-  const receitasCount = txsHoje.length;
-  const despesasCount = safeExpenses.filter(e => e.data === hoje()).length;
-  const sangriasCount = safeSangrias.filter(s => s.data === hoje()).length;
+  const despesasCount = safeExpenses.length + despesasCountSheet;
+  const sangriasCount = safeSangrias.length  + sangriasCountSheet;
 
 
-  // Formas de pagamento calculadas direto do Supabase
+  // Formas de pagamento calculadas das receitas da planilha (sheet_transactions)
   const formasPagamento = useMemo(() => {
     const counts = {};
-    txsHoje.forEach(t => {
-      const pg = (t.pagamento || 'pix').toLowerCase();
-      counts[pg] = (counts[pg] || 0) + t.total;
+    safeSheetTx.forEach(t => {
+      // Prioriza colunas individuais (pix, credito, debito, dinheiro) se preenchidas
+      if (Number(t.pix) > 0)     counts['pix']      = (counts['pix']     || 0) + Number(t.pix);
+      if (Number(t.credito) > 0) counts['crédito']  = (counts['crédito'] || 0) + Number(t.credito);
+      if (Number(t.debito) > 0)  counts['débito']   = (counts['débito']  || 0) + Number(t.debito);
+      if (Number(t.dinheiro) > 0)counts['dinheiro'] = (counts['dinheiro']|| 0) + Number(t.dinheiro);
+      // Fallback: payment_method genérico
+      if (!Number(t.pix) && !Number(t.credito) && !Number(t.debito) && !Number(t.dinheiro) && t.payment_method) {
+        const pg = (t.payment_method || '').toLowerCase();
+        counts[pg] = (counts[pg] || 0) + (Number(t.gross) || 0);
+      }
     });
     const total = Object.values(counts).reduce((a, v) => a + v, 0) || 1;
     const safeMethods = Array.isArray(paymentMethods) ? paymentMethods : [];
@@ -174,15 +187,12 @@ export default function Financial() {
       valor: counts[(pm.nome || '').toLowerCase()] || counts[pm.id] || 0,
       pct: Math.round(((counts[(pm.nome || '').toLowerCase()] || counts[pm.id] || 0) / total) * 100),
     }));
-  }, [txsHoje]);
+  }, [safeSheetTx]);
 
-  // Transações filtradas: fonte única = Supabase (mantido em espelho pelo Python sync)
+  // Aba Transações: lista de receitas da planilha (sheet_transactions)
   const txFiltradas = useMemo(() => {
-    const all = safeTransactions
-      .map(normalizeTx)
-      .sort((a, b) => Number(a.ordem ?? 0) - Number(b.ordem ?? 0));
-    return all.filter(t => txFiltroStatus === 'todos' || t.status === txFiltroStatus);
-  }, [safeTransactions, txFiltroStatus]);
+    return safeSheetTx;
+  }, [safeSheetTx]);
 
   const expFiltradas = useMemo(() => {
     // Merge Supabase expenses + sheet expense rows
@@ -741,7 +751,7 @@ export default function Financial() {
                 Receitas da Planilha ({txFiltradas.length} registros)
               </span>
               <span style={{ fontSize: 11, color: '#999', marginTop: 2 }}>
-                Total: {fmtCurrency(txFiltradas.reduce((acc, t) => acc + t.total, 0))}
+                Total: {fmtCurrency(txFiltradas.reduce((acc, t) => acc + (Number(t.gross) || 0), 0))}
               </span>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', background: '#fff', border: '1px solid var(--border-color)', borderRadius: 6, padding: '4px 12px' }}>
@@ -767,31 +777,31 @@ export default function Financial() {
                 {txFiltradas.map((t, idx) => (
                   <tr key={t.id || idx} style={{ borderBottom: '1px solid var(--border-light)' }}>
                     <td style={{ color: '#555', fontSize: 13, padding: '16px' }}>
-                      {t.data || hoje()}
+                      {t.date_ref ? new Date(t.date_ref + 'T00:00:00').toLocaleDateString('pt-BR') : '—'}
                     </td>
                     <td style={{ fontWeight: 600, fontSize: 13, color: '#334155', padding: '16px' }}>
-                      {t.cliente}
+                      {t.client || '—'}
                     </td>
                     <td style={{ fontSize: 13, color: '#555', padding: '16px' }}>
-                      {t.procedimento}
+                      {t.procedure || '—'}
                     </td>
                     <td style={{ fontSize: 13, color: '#555', padding: '16px', textTransform: 'uppercase' }}>
-                      {t.profissional || t.profissionalNome || '—'}
+                      {t.professional || '—'}
                     </td>
                     <td style={{ textAlign: 'center', fontWeight: 700, fontSize: 13, color: '#10B981', padding: '16px' }}>
-                      {fmtCurrency(t.total)}
+                      {fmtCurrency(Number(t.gross) || 0)}
                     </td>
                     <td style={{ textAlign: 'center', fontWeight: 700, fontSize: 13, color: '#D97706', padding: '16px' }}>
-                      --
+                      {t.commission_value != null ? fmtCurrency(Number(t.commission_value)) : '—'}
                     </td>
                     <td style={{ textAlign: 'center', padding: '16px' }}>
                       <span style={{ fontSize: 11, fontWeight: 600, color: '#10B981', background: '#D1FAE5', padding: '4px 10px', borderRadius: 99 }}>
-                        {t.pagamento}
+                        {t.payment_method || '—'}
                       </span>
                     </td>
                     <td style={{ textAlign: 'right', padding: '16px' }}>
                       <span style={{ fontSize: 10, fontWeight: 600, color: '#10B981', background: '#D1FAE5', padding: '4px 8px', borderRadius: 4, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                        {t.origem === 'planilha' ? <><FileSpreadsheet style={{ width: 10, height: 10 }} />Planilha</> : 'Manual'}
+                        <FileSpreadsheet style={{ width: 10, height: 10 }} />Planilha
                       </span>
                     </td>
                   </tr>

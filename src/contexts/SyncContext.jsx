@@ -12,6 +12,8 @@ import {
   insertSyncLog as sbInsertLog, clearSyncLogs as sbClearLogs, fetchSyncLogs,
   insertDailyReport as sbInsertDailyReport, fetchDailyReports as sbFetchDailyReports,
   fetchSheetConnections, upsertSheetConnection as sbUpsertSheetConnection,
+  fetchSheetTransactions as sbFetchSheetTransactions,
+  fetchSheetTransactionsSummary as sbFetchSheetSummary,
 } from '../services/supabaseService';
 import { defaultCashier, defaultSplitConfig } from '../mocks/financial';
 import { syncSheetToSupabase } from '../services/googleSheetsSync';
@@ -46,6 +48,9 @@ export function SyncProvider({ children }) {
   const [supabaseConnected, setSupabaseConnected] = useState(false);
   const [connectionError, setConnectionError] = useState(null);
   const [dailySheet, setDailySheet] = useState(null);
+  // ─── sheet_transactions: fonte real dos dados financeiros ───
+  const [sheetTransactions, setSheetTransactions] = useState([]);
+  const [sheetSummary, setSheetSummary] = useState({ receitas: 0, despesas: 0, sangrias: 0, count: { receitas: 0, despesas: 0, sangrias: 0 } });
 
 
   const pollTimerRef = useRef(null);
@@ -81,7 +86,7 @@ export function SyncProvider({ children }) {
       if (!connected) return;
 
       try {
-        const [txRes, expRes, comRes, cashRes, splitRes, logsRes, sheetsRes] = await Promise.all([
+        const [txRes, expRes, comRes, cashRes, splitRes, logsRes, sheetsRes, stRes, summaryRes] = await Promise.all([
           fetchTransactions(),
           fetchExpenses(),
           fetchComissoes(),
@@ -89,10 +94,15 @@ export function SyncProvider({ children }) {
           fetchSplitConfig(),
           fetchSyncLogs(50),
           fetchSheetConnections(),
+          sbFetchSheetTransactions(),
+          sbFetchSheetSummary(),
         ]);
 
         if (txRes.data?.length > 0) setTransactions(txRes.data);
         if (expRes.data?.length > 0) setExpenses(expRes.data);
+        // Carregar dados reais da planilha (sheet_transactions)
+        if (stRes.data?.length > 0) setSheetTransactions(stRes.data);
+        if (summaryRes.data) setSheetSummary(summaryRes.data);
         if (comRes.data?.length > 0) setComissoes(comRes.data);
         if (cashRes.data) setCashier({ sangrias: [], ...cashRes.data, sangrias: Array.isArray(cashRes.data.sangrias) ? cashRes.data.sangrias : [] });
         if (splitRes.data?.length > 0) setSplitConfig(splitRes.data);
@@ -222,6 +232,39 @@ export function SyncProvider({ children }) {
       });
 
     realtimeChannelRef.current = channel;
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
+
+  // ─── Supabase Realtime: escuta mudanças na tabela sheet_transactions ──
+  useEffect(() => {
+    if (!isSupabaseConfigured()) return;
+
+    const channel = supabase
+      .channel('sheet-transactions-realtime')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'sheet_transactions' },
+        async () => {
+          try {
+            const [stRes, summaryRes] = await Promise.all([
+              sbFetchSheetTransactions(),
+              sbFetchSheetSummary(),
+            ]);
+            if (!stRes.error && stRes.data) setSheetTransactions(stRes.data);
+            if (!summaryRes.error && summaryRes.data) setSheetSummary(summaryRes.data);
+          } catch (e) {
+            console.warn('[SyncContext] Realtime sheet_transactions rehydrate error:', e);
+          }
+        }
+      )
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          console.log('[SyncContext] Realtime: subscrito na tabela sheet_transactions');
+        }
+      });
 
     return () => {
       supabase.removeChannel(channel);
@@ -668,6 +711,9 @@ export function SyncProvider({ children }) {
 
   const value = {
     transactions, setTransactions,
+    // ─ sheet_transactions: fonte real dos dados financeiros ─
+    sheetTransactions, setSheetTransactions,
+    sheetSummary, setSheetSummary,
     expenses, setExpenses,
     comissoes, setComissoes,
     cashier, setCashier,
