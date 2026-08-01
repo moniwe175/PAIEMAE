@@ -236,7 +236,9 @@ function parseSheetRows(table) {
 }
 
 /**
- * Sincroniza a planilha Google Sheets diretamente com a tabela sheet_transactions no Supabase.
+ * Sincroniza a planilha Google Sheets com a tabela sheet_transactions no Supabase.
+ * Tenta primeiro invocar a Edge Function sync-google-sheet.
+ * Caso falhe ou esteja offline, executa a sincronização direta em JavaScript no navegador.
  */
 export async function syncSheetToSupabase(sheetUrl, options = {}) {
   const defaultUrl = 'https://docs.google.com/spreadsheets/d/1uXB-p9iWev-ID7HVZVUj42FBu2J4PkWMo1cocTW2GXI/edit';
@@ -244,6 +246,29 @@ export async function syncSheetToSupabase(sheetUrl, options = {}) {
   const sheetId = extractSheetId(urlToUse);
   if (!sheetId) return { success: false, rowCount: 0, error: 'URL inválida: não foi possível extrair o Sheet ID' };
 
+  const connectionId = options.connectionId || options.id;
+
+  // 1. Tentar Edge Function sync-google-sheet do Supabase primeiro
+  if (connectionId) {
+    try {
+      const { data, error } = await supabase.functions.invoke('sync-google-sheet', {
+        body: { connection_id: connectionId }
+      });
+      if (!error && data?.success) {
+        console.log('[GoogleSheetsSync] Sincronização via Edge Function executada com sucesso:', data);
+        return {
+          success: true,
+          rowCount: data.rowsProcessed || data.rowsInserted || 0,
+          error: null,
+          isEdgeFunction: true,
+        };
+      }
+    } catch (edgeErr) {
+      console.warn('[GoogleSheetsSync] Edge Function inacessível ou falhou, executando fallback JS:', edgeErr.message);
+    }
+  }
+
+  // 2. Fallback: Sincronização direta via gviz/tq
   const gid = extractGid(urlToUse);
 
   try {
@@ -259,6 +284,17 @@ export async function syncSheetToSupabase(sheetUrl, options = {}) {
     );
     
     const succeeded = results.filter(r => r.status === 'fulfilled' && !r.value?.error).length;
+
+    // Espelhamento perfeito: deletar registros de planilha que foram removidos do Google Sheets
+    const activeComandas = sheetRows.map(r => r.comanda).filter(Boolean);
+    if (activeComandas.length > 0) {
+      await supabase
+        .from('sheet_transactions')
+        .delete()
+        .eq('origin', 'planilha')
+        .not('comanda', 'in', `(${activeComandas.map(c => `"${c}"`).join(',')})`)
+        .catch(err => console.warn('[GoogleSheetsSync] Aviso na remoção de itens apagados:', err.message));
+    }
 
     await supabase.from('sync_logs').insert([{
       event: 'sync_complete',
@@ -298,7 +334,9 @@ export async function syncSheetToSupabase(sheetUrl, options = {}) {
 export function startSheetPolling(sheetUrl, intervalSeconds, onSync) {
   syncSheetToSupabase(sheetUrl).then(onSync).catch(console.error);
   const timer = setInterval(() => {
-    syncSheetToSupabase(sheetUrl).then(onSync).catch(console.error);
-  }, (intervalSeconds || 30) * 1000);
+    if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+      syncSheetToSupabase(sheetUrl).then(onSync).catch(console.error);
+    }
+  }, (intervalSeconds || 120) * 1000);
   return () => clearInterval(timer);
 }

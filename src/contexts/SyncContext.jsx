@@ -173,29 +173,40 @@ export function SyncProvider({ children }) {
       console.log(`[SyncContext] Iniciando sheet polling a cada ${interval / 1000}s para: ${sheetUrl}`);
 
       const doSync = async () => {
+        if (typeof document !== 'undefined' && document.visibilityState !== 'visible') {
+          return; // Só sincroniza se a aba estiver visível
+        }
         try {
-          const result = await syncSheetToSupabase(sheetUrl);
-          if (result.success && result.rowCount > 0) {
-            console.log(`[SyncContext] Auto-sync: ${result.rowCount} registros importados`);
+          const result = await syncSheetToSupabase(sheetUrl, { connectionId: syncConfig?.id });
+          if (result.success) {
+            console.log(`[SyncContext] Auto-sync concluído: ${result.rowCount || 0} registros processados`);
             setLastSyncAt(new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }));
-            setSyncedRowCount(result.rowCount);
-            // O Supabase Realtime já vai atualizar as transactions automaticamente via subscription
+            setSyncedRowCount(result.rowCount || 0);
+
+            // Atualização imediata do estado local com os dados mais recentes do Supabase
+            const [stRes, summaryRes] = await Promise.all([
+              sbFetchSheetTransactions(),
+              sbFetchSheetSummary(),
+            ]);
+            if (!stRes.error && stRes.data) setSheetTransactions(stRes.data);
+            if (!summaryRes.error && summaryRes.data) setSheetSummary(summaryRes.data);
           }
         } catch (e) {
           console.warn('[SyncContext] Erro no sheet polling:', e);
         }
       };
 
-      // Sync imediato ao conectar
+      // Sync imediato ao carregar/conectar
       doSync();
-      // Polling periódico
-      sheetPollTimerRef.current = setInterval(doSync, interval);
+
+      // Polling periódico a cada intervalo (padrão: 2 minutos / 120s)
+      sheetPollTimerRef.current = setInterval(doSync, interval || 120000);
     }
 
     return () => {
       // Não limpa aqui — o cleanup só acontece quando a URL ou status muda (acima)
     };
-  }, [syncConfig?.sheet_url, syncStatus, syncConfig?.pollingInterval]);
+  }, [syncConfig?.sheet_url, syncConfig?.id, syncStatus, syncConfig?.pollingInterval]);
 
   // ─── Supabase Realtime: escuta mudanças na tabela transactions ──
   // Quando o Python sync faz upsert/delete, o frontend atualiza automaticamente
