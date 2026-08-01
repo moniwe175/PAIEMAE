@@ -83,98 +83,150 @@ export async function fetchSheetData(sheetId, gid = '0', range = '') {
 
 /**
  * Converte os dados brutos da planilha em registros da tabela sheet_transactions.
+ * Reconhece a estrutura específica do CAIXA (Receitas na tabela superior, Despesas nas linhas inferiores).
  */
 function parseSheetRows(table) {
   if (!table?.cols || !table?.rows) return { sheetRows: [] };
-  
-  const colMap = {};
-  table.cols.forEach((col, idx) => {
-    const label = (col.label || col.id || '').toLowerCase().trim();
-    colMap[label] = idx;
-    if (/cliente|paciente|nome/.test(label)) colMap._cliente = idx;
-    if (/procedimento|servi[çc]|tratamento/.test(label)) colMap._procedimento = idx;
-    if (/valor|pre[çc]o|total|bruto|gross/.test(label)) colMap._valor = idx;
-    if (/profiss/.test(label)) colMap._profissional = idx;
-    if (/comiss/.test(label)) colMap._comissao = idx;
-    if (/data|date/.test(label)) colMap._data = idx;
-    if (/forma|pagamento|m[eé]todo/.test(label)) colMap._pagamento = idx;
-    if (/comanda|id|cod/.test(label)) colMap._comanda = idx;
-    if (/tipo|type|row_type/.test(label)) colMap._tipo = idx;
-    if (/pix/.test(label)) colMap._pix = idx;
-    if (/credito|crédito/.test(label)) colMap._credito = idx;
-    if (/debito|débito/.test(label)) colMap._debito = idx;
-    if (/dinheiro|espécie|especie/.test(label)) colMap._dinheiro = idx;
-    if (/repasse/.test(label)) colMap._repasse = idx;
+
+  const rows = table.rows;
+
+  // 1. Encontrar a linha de cabeçalho das receitas (ex: linha que contém "CLIENTE", "PROCEDIMENTO", "PROFISSIONAL")
+  let headerRowIdx = -1;
+  let colMap = {
+    cliente: 0,
+    credito: 1,
+    debito: 2,
+    dinheiro: 3,
+    pix: 4,
+    gross: 5,
+    procedimento: 6,
+    profissional: 7,
+    comanda: 8,
+  };
+
+  rows.forEach((row, idx) => {
+    const cells = (row.c || []).map(c => c ? String(c.v ?? c.f ?? '').toUpperCase().trim() : '');
+    if (cells.includes('CLIENTE') || cells.includes('PROCEDIMENTO') || cells.includes('PROFISSIONAL')) {
+      headerRowIdx = idx;
+      cells.forEach((cellText, cIdx) => {
+        if (/CLIENTE|PACIENTE|NOME/.test(cellText)) colMap.cliente = cIdx;
+        if (/CREDITO|CRÉDITO/.test(cellText)) colMap.credito = cIdx;
+        if (/DEBITO|DÉBITO/.test(cellText)) colMap.debito = cIdx;
+        if (/DINHEIRO/.test(cellText)) colMap.dinheiro = cIdx;
+        if (/PIX/.test(cellText)) colMap.pix = cIdx;
+        if (/PROCEDIMENTO/.test(cellText)) colMap.procedimento = cIdx;
+        if (/PROFISSIONAL/.test(cellText)) colMap.profissional = cIdx;
+        if (/COMANDA|ID|TICKET|CODIGO/.test(cellText)) colMap.comanda = cIdx;
+      });
+    }
   });
 
+  const parseNum = (v) => {
+    if (v === null || v === undefined) return 0;
+    const c = String(v).replace(/[R$\s.]/g, '').replace(',', '.');
+    return parseFloat(c) || 0;
+  };
+
+  // 2. Extrair data de referência do título (R0) se presente
+  let dateRef = new Date().toISOString().split('T')[0];
+  if (rows[0]?.c?.[0]?.v) {
+    const headerTitle = String(rows[0].c[0].v);
+    const dateMatch = headerTitle.match(/(\d{1,2}\/\d{1,2}\/\d{4})/);
+    if (dateMatch) {
+      dateRef = formatDateForDb(dateMatch[1]);
+    }
+  }
+
   const sheetRows = [];
-  
-  table.rows.forEach((row, rowIdx) => {
-    const cells = row.c || [];
-    const get = (key) => {
-      const idx = colMap[key];
-      if (idx === undefined || idx === null) return null;
-      const cell = cells[idx];
-      return cell?.v ?? cell?.f ?? null;
-    };
 
-    const rawValor = get('_valor') ?? get('valor') ?? get('gross') ?? get('total') ?? get('pre\u00e7o');
-    let gross = 0;
-    if (rawValor !== null) {
-      const cleaned = String(rawValor).replace(/[R$\s.]/g, '').replace(',', '.');
-      gross = parseFloat(cleaned) || 0;
+  // 3. Processar linhas
+  rows.forEach((row, rowIdx) => {
+    const cells = (row.c || []).map(c => c ? (c.v ?? c.f ?? null) : null);
+
+    if (rowIdx <= headerRowIdx || !cells.some(v => v !== null)) return;
+
+    const col0Str = String(cells[0] || '').trim().toUpperCase();
+
+    // ─── A) Despesas e Sangrias por categoria fixa ───
+    const isPassagem = col0Str.includes('PASSAGEM');
+    const isProdutos = col0Str.includes('PRODUTOS');
+    const isTributos = col0Str.includes('TRIBUTOS');
+    const isOutrasSaidas = col0Str.includes('OUTRAS SAÍDAS') || col0Str.includes('OUTRAS SAIDAS');
+    const isSangriaRow = col0Str.includes('SANGRIA');
+    const isTotalRow = col0Str.includes('TOTAL');
+
+    if (isTotalRow) return;
+
+    if (isPassagem || isProdutos || isTributos || isOutrasSaidas || isSangriaRow) {
+      const valor = parseNum(cells[1]); // Coluna B
+      const rowType = isSangriaRow ? 'sangria' : 'despesa';
+      const catName = isPassagem ? 'Passagem' : isProdutos ? 'Produtos' : isTributos ? 'Tributos' : isOutrasSaidas ? 'Outras Saídas' : 'Sangria';
+      const descName = isPassagem ? 'PASSAGEM' : isProdutos ? 'PRODUTOS' : isTributos ? 'TRIBUTOS' : isOutrasSaidas ? 'OUTRAS SAÍDAS' : 'SANGRIA';
+      const comandaKey = `despesa_${descName.toLowerCase().replace(/[^a-z0-9]/g, '_')}`;
+
+      sheetRows.push({
+        comanda: comandaKey,
+        date_ref: dateRef,
+        client: descName,
+        procedure: catName,
+        professional: '—',
+        gross: valor,
+        payment_method: 'Planilha',
+        pix: 0,
+        credito: 0,
+        debito: 0,
+        dinheiro: 0,
+        repasse: 0,
+        commission_value: null,
+        row_type: rowType,
+        tipo: rowType,
+        origin: 'planilha',
+        is_metadata: false,
+      });
+      return;
     }
-    if (gross <= 0) return;
 
-    const rawData = get('_data') ?? get('data');
-    const dateRef = formatDateForDb(rawData);
+    // ─── B) Receitas / Transações de Clientes ───
+    const clienteVal = cells[colMap.cliente] ?? cells[0];
+    const procVal = cells[colMap.procedimento] ?? cells[6];
+    const profVal = cells[colMap.profissional] ?? cells[7];
+    const comandaVal = cells[colMap.comanda] ?? cells[8];
 
-    const rawTipo = String(get('_tipo') ?? get('tipo') ?? '').toLowerCase();
-    const rawCliente = String(get('_cliente') ?? get('cliente') ?? '').toLowerCase();
-    const rawProc = String(get('_procedimento') ?? get('procedimento') ?? '').toLowerCase();
+    const credito = parseNum(cells[colMap.credito] ?? cells[1]);
+    const debito = parseNum(cells[colMap.debito] ?? cells[2]);
+    const dinheiro = parseNum(cells[colMap.dinheiro] ?? cells[3]);
+    const pix = parseNum(cells[colMap.pix] ?? cells[4]);
 
-    let rowType = 'receita';
-    if (/sangria/.test(rawTipo) || /sangria/.test(rawCliente) || /sangria/.test(rawProc)) {
-      rowType = 'sangria';
-    } else if (/despesa|saida|sa[íi]da|gasto/.test(rawTipo) || /despesa|saida|sa[íi]da|gasto/.test(rawCliente) || /despesa|saida|sa[íi]da|gasto/.test(rawProc)) {
-      rowType = 'despesa';
-    }
+    const grossCalculated = credito + debito + dinheiro + pix;
+    const grossRaw = parseNum(cells[colMap.gross] ?? cells[5]);
+    const gross = grossCalculated > 0 ? grossCalculated : grossRaw;
 
-    const client = String(get('_cliente') ?? get('cliente') ?? '—').trim();
-    const procedure = String(get('_procedimento') ?? get('procedimento') ?? '—').trim();
-    const professional = String(get('_profissional') ?? get('profissional') ?? '—').trim();
-    const paymentMethod = String(get('_pagamento') ?? get('pagamento') ?? 'Pix').trim();
-    const comanda = get('_comanda') ?? get('comanda') ?? `row_${rowIdx + 1}`;
+    if (gross <= 0 || !clienteVal || String(clienteVal).trim() === '--') return;
 
-    const parseNum = (v) => {
-      if (v === null || v === undefined) return 0;
-      const c = String(v).replace(/[R$\s.]/g, '').replace(',', '.');
-      return parseFloat(c) || 0;
-    };
+    let paymentMethod = 'Pix';
+    if (pix > 0) paymentMethod = 'Pix';
+    else if (credito > 0) paymentMethod = 'Crédito';
+    else if (debito > 0) paymentMethod = 'Débito';
+    else if (dinheiro > 0) paymentMethod = 'Dinheiro';
 
-    const pix = parseNum(get('_pix') ?? get('pix'));
-    const credito = parseNum(get('_credito') ?? get('credito'));
-    const debito = parseNum(get('_debito') ?? get('debito'));
-    const dinheiro = parseNum(get('_dinheiro') ?? get('dinheiro'));
-    const repasse = parseNum(get('_repasse') ?? get('repasse'));
-    const comissaoVal = parseNum(get('_comissao') ?? get('comissao'));
+    const comandaStr = comandaVal ? String(comandaVal).trim() : `rec_${rowIdx}`;
 
     sheetRows.push({
-      comanda: String(comanda).trim(),
+      comanda: comandaStr,
       date_ref: dateRef,
-      client,
-      procedure,
-      professional,
+      client: String(clienteVal).trim(),
+      procedure: procVal ? String(procVal).trim() : '—',
+      professional: profVal ? String(profVal).trim() : '—',
       gross,
       payment_method: paymentMethod,
       pix,
       credito,
       debito,
       dinheiro,
-      repasse,
-      commission_value: comissaoVal > 0 ? comissaoVal : null,
-      row_type: rowType,
-      tipo: rowType,
+      repasse: 0,
+      commission_value: null,
+      row_type: 'receita',
+      tipo: 'receita',
       origin: 'planilha',
       is_metadata: false,
     });

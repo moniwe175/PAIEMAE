@@ -979,8 +979,8 @@ export default function Financial() {
                           {item.tipo}
                         </span>
                       </td>
-                      <td style={{ textAlign: 'right', fontWeight: 700, fontSize: 13, color: '#E11D48', padding: '16px' }}>
-                        {fmtCurrency(item.valor)}
+                      <td style={{ textAlign: 'right', fontWeight: 700, fontSize: 13, color: item.valor > 0 ? '#E11D48' : '#94A3B8', padding: '16px' }}>
+                        {item.valor > 0 ? fmtCurrency(item.valor) : '--'}
                       </td>
                       <td style={{ textAlign: 'right', padding: '16px' }}>
                         <span style={{ fontSize: 10, fontWeight: 600, color: '#64748B', background: '#F1F5F9', padding: '4px 8px', borderRadius: 4 }}>
