@@ -89,17 +89,11 @@ export function SyncProvider({ children }) {
           fetchSheetConnections(),
         ]);
 
-        if (Array.isArray(txRes.data)) setTransactions(txRes.data);
-        else if (txRes.data?.length > 0) setTransactions(txRes.data);
-
-        if (Array.isArray(expRes.data)) setExpenses(expRes.data);
-        else if (expRes.data?.length > 0) setExpenses(expRes.data);
-
+        if (txRes.data?.length > 0) setTransactions(txRes.data);
+        if (expRes.data?.length > 0) setExpenses(expRes.data);
         if (comRes.data?.length > 0) setComissoes(comRes.data);
-        // Ensure cashier always has sangrias array (field may be missing in DB row)
-        if (cashRes.data) setCashier({ ...cashRes.data, sangrias: Array.isArray(cashRes.data.sangrias) ? cashRes.data.sangrias : [] });
-        if (Array.isArray(splitRes.data)) setSplitConfig(splitRes.data);
-        else if (splitRes.data?.length > 0) setSplitConfig(splitRes.data);
+        if (cashRes.data) setCashier(cashRes.data);
+        if (splitRes.data?.length > 0) setSplitConfig(splitRes.data);
         
         if (sheetsRes.data?.length > 0) {
           const active = sheetsRes.data.find(s => s.status === 'conectado') || sheetsRes.data[0];

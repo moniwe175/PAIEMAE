@@ -75,7 +75,7 @@ export default function Financial() {
 
   const loadReports = useCallback(async () => {
     const { data } = await fetchDailyReports(30);
-    setReportsHistory(data ?? []);
+    if (data) setReportsHistory(data);
   }, []);
 
   useEffect(() => {
@@ -150,21 +150,17 @@ export default function Financial() {
   };
 
   const isConnected = syncStatus === 'connected';
-  // Defensive: Supabase may return null instead of [] when the table is empty
-  const safeTx = Array.isArray(transactions) ? transactions : [];
-  const safeExp = Array.isArray(expenses) ? expenses : [];
-  const hasData = dailySheet || safeTx.length > 0 || safeExp.length > 0;
+  const hasData = dailySheet || transactions.length > 0 || expenses.length > 0;
 
   const txsHoje = useMemo(() => {
-    return safeTx.map(normalizeTx).filter(t => t.data === hoje() && t.status === 'paid');
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    return transactions.map(normalizeTx).filter(t => t.data === hoje() && t.status === 'paid');
   }, [transactions]);
 
   // Calcular totais direto das transactions do Supabase (espelho exato da planilha)
   const faturamentoHoje = txsHoje.reduce((a, t) => a + t.total, 0);
   const ticketMedio = txsHoje.length > 0 ? faturamentoHoje / txsHoje.length : 0;
-  const aReceber = safeTx.map(normalizeTx).filter(t => t.status === 'pending').reduce((a, t) => a + t.total, 0);
-  const pendentesCount = safeTx.map(normalizeTx).filter(t => t.status === 'pending').length;
+  const aReceber = transactions.map(normalizeTx).filter(t => t.status === 'pending').reduce((a, t) => a + t.total, 0);
+  const pendentesCount = transactions.map(normalizeTx).filter(t => t.status === 'pending').length;
 
   // Formas de pagamento calculadas direto do Supabase
   const formasPagamento = useMemo(() => {
@@ -235,11 +231,10 @@ export default function Financial() {
 
   // Transações filtradas: fonte única = Supabase (mantido em espelho pelo Python sync)
   const txFiltradas = useMemo(() => {
-    const all = safeTx
+    const all = transactions
       .map(normalizeTx)
       .sort((a, b) => Number(a.ordem ?? 0) - Number(b.ordem ?? 0));
     return all.filter(t => txFiltroStatus === 'todos' || t.status === txFiltroStatus);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [transactions, txFiltroStatus]);
 
   const expFiltradas = useMemo(() => {
@@ -253,9 +248,8 @@ export default function Financial() {
       valor: e.valor,
       origem: 'planilha',
     }));
-    const all = [...safeExp, ...sheetExpenses];
+    const all = [...expenses, ...sheetExpenses];
     return all.filter(e => expFiltroCat === 'todos' || e.categoria === expFiltroCat);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [expenses, dailySheet, expFiltroCat]);
 
   const handleSangria = () => {
@@ -835,10 +829,10 @@ export default function Financial() {
               </div>
 
               {/* Sangrias list */}
-              {(cashier.sangrias ?? []).length > 0 && (
+              {cashier.sangrias.length > 0 && (
                 <div style={{ marginTop: 16, borderTop: '1px solid var(--border-color)', paddingTop: 12 }}>
                   <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 8 }}>Sangrias Realizadas</div>
-                  {(cashier.sangrias ?? []).map(s => (
+                  {cashier.sangrias.map(s => (
                     <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, padding: '6px 0', borderBottom: '1px solid var(--border-light)' }}>
                       <span style={{ color: 'var(--text-medium)' }}>{s.motivo}</span>
                       <span style={{ fontWeight: 700, color: 'var(--danger)' }}>- {fmtCurrency(s.valor)}</span>
@@ -1136,7 +1130,7 @@ export default function Financial() {
       {activeTab === 'split' && (
         <div>
           <div className="grid-3 section-gap">
-            {(Array.isArray(splitConfig) ? splitConfig : []).map(sc => (
+            {splitConfig.map(sc => (
               <div className="card" key={sc.profissional}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
                   <div style={{
