@@ -166,10 +166,22 @@ export default function Financial() {
   // Dados reais vindos de sheet_transactions
   const safeSheetTx = Array.isArray(sheetTransactions) ? sheetTransactions : [];
 
-  // ─ Separação das transações da planilha por row_type ─
-  const receitasSheet = safeSheetTx.filter(t => (t.row_type || t.tipo || 'receita') === 'receita');
-  const despesasSheet = safeSheetTx.filter(t => (t.row_type || t.tipo) === 'despesa');
-  const sangriasSheet = safeSheetTx.filter(t => (t.row_type || t.tipo) === 'sangria');
+  // ─ Helper para normalizar o tipo de linha ─
+  const getRowType = (t) => String(t.row_type || t.tipo || '').toLowerCase().trim();
+
+  // ─ Separação das transações da planilha por row_type (case-insensitive) ─
+  const receitasSheet = safeSheetTx.filter(t => {
+    const rt = getRowType(t);
+    return rt.includes('receita') || rt === '' || !rt;
+  });
+  const despesasSheet = safeSheetTx.filter(t => {
+    const rt = getRowType(t);
+    return rt.includes('despesa') || rt.includes('saida') || rt.includes('saída') || rt.includes('gasto');
+  });
+  const sangriasSheet = safeSheetTx.filter(t => {
+    const rt = getRowType(t);
+    return rt.includes('sangria');
+  });
 
   // ─ KPI Cards: calculados do sheetSummary (sheet_transactions) ─
   const faturamentoHoje    = Number(sheetSummary?.receitas)  || 0;

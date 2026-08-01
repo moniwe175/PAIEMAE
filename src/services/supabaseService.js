@@ -122,16 +122,24 @@ export async function fetchSheetTransactionsSummary() {
   if (!isSupabaseConfigured()) return handleError('Supabase not configured', { receitas: 0, despesas: 0, sangrias: 0 });
   const { data, error } = await supabase
     .from('sheet_transactions')
-    .select('row_type, gross')
+    .select('row_type, tipo, gross')
     .eq('is_metadata', false)
     .is('deleted_at', null);
   if (error) return handleError(error, { receitas: 0, despesas: 0, sangrias: 0 });
   const summary = { receitas: 0, despesas: 0, sangrias: 0, count: { receitas: 0, despesas: 0, sangrias: 0 } };
   (data || []).forEach(row => {
     const v = Number(row.gross) || 0;
-    if (row.row_type === 'receita') { summary.receitas += v; summary.count.receitas += 1; }
-    else if (row.row_type === 'despesa') { summary.despesas += v; summary.count.despesas += 1; }
-    else if (row.row_type === 'sangria') { summary.sangrias += v; summary.count.sangrias += 1; }
+    const rt = String(row.row_type || row.tipo || '').toLowerCase().trim();
+    if (rt.includes('sangria')) {
+      summary.sangrias += v;
+      summary.count.sangrias += 1;
+    } else if (rt.includes('despesa') || rt.includes('saida') || rt.includes('saída') || rt.includes('gasto')) {
+      summary.despesas += v;
+      summary.count.despesas += 1;
+    } else if (rt.includes('receita') || rt === '' || !rt) {
+      summary.receitas += v;
+      summary.count.receitas += 1;
+    }
   });
   return { data: summary, error: null };
 }
