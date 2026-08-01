@@ -134,18 +134,20 @@ export default function Financial() {
     }
   };
 
-  const isConnected = syncStatus === 'connected';
-  const hasData = dailySheet || transactions.length > 0 || expenses.length > 0;
+  const safeTransactions = Array.isArray(transactions) ? transactions : [];
+  const safeExpenses = Array.isArray(expenses) ? expenses : [];
+  const safeSplitConfig = Array.isArray(splitConfig) ? splitConfig : [];
+  const safeSangrias = Array.isArray(cashier?.sangrias) ? cashier.sangrias : [];
 
   const txsHoje = useMemo(() => {
-    return transactions.map(normalizeTx).filter(t => t.data === hoje() && t.status === 'paid');
-  }, [transactions]);
+    return safeTransactions.map(normalizeTx).filter(t => t.data === hoje() && t.status === 'paid');
+  }, [safeTransactions]);
 
   // Calcular totais direto das transactions do Supabase (espelho exato da planilha)
   const faturamentoHoje = txsHoje.reduce((a, t) => a + t.total, 0);
   const ticketMedio = txsHoje.length > 0 ? faturamentoHoje / txsHoje.length : 0;
-  const aReceber = transactions.map(normalizeTx).filter(t => t.status === 'pending').reduce((a, t) => a + t.total, 0);
-  const pendentesCount = transactions.map(normalizeTx).filter(t => t.status === 'pending').length;
+  const aReceber = safeTransactions.map(normalizeTx).filter(t => t.status === 'pending').reduce((a, t) => a + t.total, 0);
+  const pendentesCount = safeTransactions.map(normalizeTx).filter(t => t.status === 'pending').length;
 
   // Formas de pagamento calculadas direto do Supabase
   const formasPagamento = useMemo(() => {
@@ -155,22 +157,21 @@ export default function Financial() {
       counts[pg] = (counts[pg] || 0) + t.total;
     });
     const total = Object.values(counts).reduce((a, v) => a + v, 0) || 1;
-    return paymentMethods.map(pm => ({
+    const safeMethods = Array.isArray(paymentMethods) ? paymentMethods : [];
+    return safeMethods.map(pm => ({
       ...pm,
       valor: counts[(pm.nome || '').toLowerCase()] || counts[pm.id] || 0,
       pct: Math.round(((counts[(pm.nome || '').toLowerCase()] || counts[pm.id] || 0) / total) * 100),
     }));
   }, [txsHoje]);
 
-
-
   // Transações filtradas: fonte única = Supabase (mantido em espelho pelo Python sync)
   const txFiltradas = useMemo(() => {
-    const all = transactions
+    const all = safeTransactions
       .map(normalizeTx)
       .sort((a, b) => Number(a.ordem ?? 0) - Number(b.ordem ?? 0));
     return all.filter(t => txFiltroStatus === 'todos' || t.status === txFiltroStatus);
-  }, [transactions, txFiltroStatus]);
+  }, [safeTransactions, txFiltroStatus]);
 
   const expFiltradas = useMemo(() => {
     // Merge Supabase expenses + sheet expense rows
@@ -183,9 +184,9 @@ export default function Financial() {
       valor: e.valor,
       origem: 'planilha',
     }));
-    const all = [...expenses, ...sheetExpenses];
+    const all = [...safeExpenses, ...sheetExpenses];
     return all.filter(e => expFiltroCat === 'todos' || e.categoria === expFiltroCat);
-  }, [expenses, dailySheet, expFiltroCat]);
+  }, [safeExpenses, dailySheet, expFiltroCat]);
 
   const handleSangria = () => {
     const v = parseFloat(sangriaForm.valor);
@@ -764,10 +765,10 @@ export default function Financial() {
               </div>
 
               {/* Sangrias list */}
-              {cashier.sangrias.length > 0 && (
+              {safeSangrias.length > 0 && (
                 <div style={{ marginTop: 16, borderTop: '1px solid var(--border-color)', paddingTop: 12 }}>
                   <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 8 }}>Sangrias Realizadas</div>
-                  {cashier.sangrias.map(s => (
+                  {safeSangrias.map(s => (
                     <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, padding: '6px 0', borderBottom: '1px solid var(--border-light)' }}>
                       <span style={{ color: 'var(--text-medium)' }}>{s.motivo}</span>
                       <span style={{ fontWeight: 700, color: 'var(--danger)' }}>- {fmtCurrency(s.valor)}</span>
@@ -925,7 +926,7 @@ export default function Financial() {
       {activeTab === 'split' && (
         <div>
           <div className="grid-3 section-gap">
-            {splitConfig.map(sc => (
+            {safeSplitConfig.map(sc => (
               <div className="card" key={sc.profissional}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
                   <div style={{
