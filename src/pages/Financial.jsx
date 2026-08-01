@@ -809,67 +809,113 @@ export default function Financial() {
       )}
 
       {/* Tab: Despesas */}
-      {activeTab === 'despesas' && (
-        <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-          <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
-            <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-dark)', display: 'flex', alignItems: 'center', gap: 8 }}>
-              <TrendingDown style={{ width: 16, height: 16, color: 'var(--danger)' }} />
-              Despesas
-            </span>
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-              <div className="tabs">
-                {[{ k: 'todos', l: 'Todas' }, { k: 'Estoque', l: 'Estoque' }, { k: 'Fixo', l: 'Fixo' }, { k: 'Marketing', l: 'Marketing' }, { k: 'Outros', l: 'Outros' }].map(({ k, l }) => (
-                  <button key={k} className={`tab-item${expFiltroCat === k ? ' active' : ''}`} onClick={() => setExpFiltroCat(k)} style={{ fontSize: 11 }}>{l}</button>
-                ))}
+      {activeTab === 'despesas' && (() => {
+        const despesasMapped = expFiltradas.map(e => ({
+          id: e.id,
+          data: e.data || hoje(),
+          descricao: e.descricao || e.categoria || 'Despesa',
+          categoria: e.categoria || 'Outros',
+          tipo: 'Despesa',
+          valor: Number(e.valor) || 0,
+          origem: e.origem === 'planilha' ? 'Planilha' : 'Manual',
+          isFromSheet: e.origem === 'planilha'
+        }));
+
+        const sangriasMapped = safeSangrias.map(s => ({
+          id: s.id,
+          data: s.data || hoje(),
+          descricao: s.motivo || 'SANGRIA',
+          categoria: 'Sangria',
+          tipo: 'Sangria',
+          valor: Number(s.valor) || 0,
+          origem: 'Planilha',
+          isFromSheet: true
+        }));
+
+        const listSaidas = [...despesasMapped, ...sangriasMapped];
+        const totalSaidas = listSaidas.reduce((acc, i) => acc + i.valor, 0);
+
+        return (
+          <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+            <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
+              <div style={{ display: 'flex', flexDirection: 'column' }}>
+                <span style={{ fontSize: 14, fontWeight: 700, color: '#333' }}>
+                  Despesas e Sangrias ({listSaidas.length} registros)
+                </span>
+                <span style={{ fontSize: 11, color: '#999', marginTop: 2 }}>
+                  Total de saídas: <strong style={{ color: '#E11D48' }}>{fmtCurrency(totalSaidas)}</strong>
+                </span>
               </div>
-              <button className="btn btn-primary btn-sm" onClick={() => setDespesaModal(true)}><Plus style={{ width: 12, height: 12 }} />Nova Despesa</button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div style={{ display: 'flex', alignItems: 'center', background: '#fff', border: '1px solid var(--border-color)', borderRadius: 6, padding: '4px 12px' }}>
+                  <Receipt style={{ width: 14, height: 14, color: '#999', marginRight: 6 }} />
+                  <input type="text" placeholder="Buscar..." style={{ border: 'none', outline: 'none', background: 'transparent', fontSize: 13, width: 180, color: 'var(--text-dark)' }} />
+                </div>
+                <button className="btn btn-primary btn-sm" onClick={() => setDespesaModal(true)}>
+                  <Plus style={{ width: 12, height: 12 }} />Nova Despesa
+                </button>
+              </div>
+            </div>
+            <div className="table-wrapper">
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr>
+                    <th style={{ color: '#666', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', padding: '12px 16px' }}>Data</th>
+                    <th style={{ color: '#666', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', padding: '12px 16px' }}>Descrição</th>
+                    <th style={{ color: '#666', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', padding: '12px 16px' }}>Categoria</th>
+                    <th style={{ color: '#666', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', padding: '12px 16px' }}>Tipo</th>
+                    <th style={{ color: '#666', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', padding: '12px 16px', textAlign: 'right' }}>Valor</th>
+                    <th style={{ color: '#666', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', padding: '12px 16px', textAlign: 'right' }}>Origem</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {listSaidas.map((item, idx) => (
+                    <tr key={item.id || idx} style={{ borderBottom: '1px solid var(--border-light)' }}>
+                      <td style={{ color: '#555', fontSize: 13, padding: '16px' }}>
+                        {item.data}
+                      </td>
+                      <td style={{ fontWeight: 700, fontSize: 13, color: '#334155', padding: '16px', textTransform: 'uppercase' }}>
+                        {item.descricao}
+                      </td>
+                      <td style={{ padding: '16px' }}>
+                        <span style={{ fontSize: 11, fontWeight: 500, color: '#475569', background: '#F1F5F9', padding: '4px 10px', borderRadius: 99 }}>
+                          {item.categoria}
+                        </span>
+                      </td>
+                      <td style={{ padding: '16px' }}>
+                        <span style={{
+                          fontSize: 11,
+                          fontWeight: 600,
+                          color: item.tipo === 'Sangria' ? '#E11D48' : '#D97706',
+                          background: item.tipo === 'Sangria' ? '#FFE4E6' : '#FFEDD5',
+                          padding: '4px 10px',
+                          borderRadius: 99
+                        }}>
+                          {item.tipo}
+                        </span>
+                      </td>
+                      <td style={{ textAlign: 'right', fontWeight: 700, fontSize: 13, color: '#E11D48', padding: '16px' }}>
+                        {fmtCurrency(item.valor)}
+                      </td>
+                      <td style={{ textAlign: 'right', padding: '16px' }}>
+                        <span style={{ fontSize: 10, fontWeight: 600, color: '#64748B', background: '#F1F5F9', padding: '4px 8px', borderRadius: 4 }}>
+                          {item.origem}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {listSaidas.length === 0 && (
+                <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: 13, padding: 40 }}>
+                  <TrendingDown style={{ width: 32, height: 32, opacity: 0.3, margin: '0 auto 10px' }} />
+                  <p>{isConnected ? 'Nenhuma despesa ou sangria encontrada' : 'Conecte a planilha para visualizar despesas'}</p>
+                </div>
+              )}
             </div>
           </div>
-          <div className="table-wrapper">
-            <table>
-              <thead>
-                <tr><th>Data</th><th>Descrição</th><th>Categoria</th><th>Método</th><th style={{ textAlign: 'right' }}>Valor</th><th style={{ width: 40 }} /></tr>
-              </thead>
-              <tbody>
-                {expFiltradas.map(e => {
-                  const isFromSheet = e.origem === 'planilha';
-                  const metodo = e.metodoPagamento || e.metodo || '—';
-                  return (
-                  <tr key={e.id}>
-                    <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>{e.data}</td>
-                    <td style={{ fontWeight: 500, fontSize: 13 }}>{e.descricao}</td>
-                    <td>
-                      <span className="badge" style={{
-                        fontSize: 10,
-                        background: e.categoria === 'Estoque' ? '#E3F2FD' : e.categoria === 'Fixo' ? '#FFF3E0' : e.categoria === 'Marketing' ? '#F3E5F5' : isFromSheet ? '#FDE8E8' : 'var(--neutral-bg)',
-                        color: e.categoria === 'Estoque' ? '#1565C0' : e.categoria === 'Fixo' ? '#E65100' : e.categoria === 'Marketing' ? '#6A1B9A' : isFromSheet ? '#B91C1C' : 'var(--text-medium)',
-                      }}>
-                        {e.categoria}
-                      </span>
-                    </td>
-                    <td><span className="badge badge-neutral" style={{ fontSize: 10 }}>{metodo}</span></td>
-                    <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--danger)', fontSize: 13 }}>- {fmtCurrency(e.valor)}</td>
-                    <td>
-                      {!isFromSheet && (
-                        <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 4 }} onClick={() => removeExpense(e.id)}>
-                          <Trash2 style={{ width: 12, height: 12 }} />
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-            {expFiltradas.length === 0 && (
-              <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: 13, padding: 40 }}>
-                <TrendingDown style={{ width: 32, height: 32, opacity: 0.3, margin: '0 auto 10px' }} />
-                <p>{isConnected ? 'Nenhuma despesa encontrada' : 'Conecte a planilha para visualizar despesas'}</p>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Tab: Split */}
       {activeTab === 'split' && (
