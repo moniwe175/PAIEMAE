@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   RefreshCw, Table2, Clock, AlertTriangle, Plus, Trash2,
   Copy, ToggleLeft, ToggleRight, Link2, FileSpreadsheet,
@@ -15,6 +15,7 @@ import {
   fetchSheetConnections, upsertSheetConnection, deleteSheetConnection
 } from '../services/supabaseService';
 import { supabase, getCurrentUser } from '../lib/supabase';
+import { syncSheetToSupabase, startSheetPolling } from '../services/googleSheetsSync';
 
 // Default configured spreadsheet used to seed Supabase when empty
 const defaultSheet = {
@@ -80,6 +81,9 @@ export default function Integration() {
   const [activeTab, setActiveTab] = useState('conexoes');
   const [sheets, setSheets] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [syncingSheetId, setSyncingSheetId] = useState(null);
+  const [syncResults, setSyncResults] = useState({});
+  const pollingStoppers = useRef({});
 
   // Marketing Engine toggle state
   const [engineEnabled, setEngineEnabled] = useState(true);
@@ -260,6 +264,59 @@ export default function Integration() {
     const persisted = await persistSheet(newSheet);
     setSheets(prev => prev.map(s => s.id === tempId ? persisted : s));
   };
+
+  const handleSyncNow = async (sheet) => {
+    if (!sheet.url) {
+      alert('Esta planilha não tem URL configurada.');
+      return;
+    }
+    setSyncingSheetId(sheet.id);
+    setSyncResults(prev => ({ ...prev, [sheet.id]: null }));
+    const result = await syncSheetToSupabase(sheet.url);
+    setSyncResults(prev => ({ ...prev, [sheet.id]: result }));
+    setSyncingSheetId(null);
+    if (result.success) {
+      // Atualiza linhas sincronizadas no Supabase
+      const updated = { ...sheet, linhasSincronizadas: result.rowCount, ultimoSync: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) };
+      const persisted = await persistSheet(updated);
+      setSheets(prev => prev.map(s => s.id === sheet.id ? persisted : s));
+      addLog('success', `Sincronizadas ${result.rowCount} linhas de "${sheet.nome}"`);
+    } else {
+      addLog('error', `Falha ao sincronizar "${sheet.nome}": ${result.error}`);
+    }
+  };
+
+  // Inicia polling para sheets conectadas
+  useEffect(() => {
+    const connectedSheets = sheets.filter(s => s.status === 'conectado' && s.url && s.autoSync);
+    connectedSheets.forEach(sheet => {
+      if (!pollingStoppers.current[sheet.id]) {
+        const stop = startSheetPolling(sheet.url, sheet.pollingInterval || 60, (result) => {
+          if (result.success && result.rowCount > 0) {
+            addLog('success', `Auto-sync "${sheet.nome}": ${result.rowCount} registros`);
+            setSheets(prev => prev.map(s => s.id === sheet.id ? {
+              ...s,
+              linhasSincronizadas: result.rowCount,
+              ultimoSync: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+            } : s));
+          }
+        });
+        pollingStoppers.current[sheet.id] = stop;
+      }
+    });
+    // Para polling de sheets desconectadas
+    Object.keys(pollingStoppers.current).forEach(id => {
+      if (!connectedSheets.find(s => s.id === id)) {
+        pollingStoppers.current[id]();
+        delete pollingStoppers.current[id];
+      }
+    });
+    return () => {
+      Object.values(pollingStoppers.current).forEach(stop => stop());
+      pollingStoppers.current = {};
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sheets]);
 
   const tabs = [
     { key: 'conexoes', label: 'Conexões', icon: Link2 },
@@ -544,15 +601,33 @@ export default function Integration() {
                         </button>
                       )}
                       {sheet.status === 'conectado' && (
-                        <button
-                          className="btn btn-ghost btn-sm"
-                          onClick={() => {
-                            disconnect();
-                            handleToggleAutoSync(sheet.id);
-                          }}
-                        >
-                          <WifiOff style={{ width: 12, height: 12 }} />Desconectar
-                        </button>
+                        <>
+                          <button
+                            className="btn btn-primary btn-sm"
+                            onClick={() => handleSyncNow(sheet)}
+                            disabled={syncingSheetId === sheet.id}
+                            style={{ background: '#2ECC71', borderColor: '#2ECC71' }}
+                          >
+                            {syncingSheetId === sheet.id
+                              ? <><Loader2 style={{ width: 12, height: 12, animation: 'spin 1s linear infinite' }} />Sincronizando...</>
+                              : <><RefreshCw style={{ width: 12, height: 12 }} />Sincronizar agora</>
+                            }
+                          </button>
+                          <button
+                            className="btn btn-ghost btn-sm"
+                            onClick={() => {
+                              disconnect();
+                              const updated = { ...sheet, status: 'aguardando' };
+                              persistSheet(updated).then(p => setSheets(prev => prev.map(s => s.id === sheet.id ? p : s)));
+                              if (pollingStoppers.current[sheet.id]) {
+                                pollingStoppers.current[sheet.id]();
+                                delete pollingStoppers.current[sheet.id];
+                              }
+                            }}
+                          >
+                            <WifiOff style={{ width: 12, height: 12 }} />Desconectar
+                          </button>
+                        </>
                       )}
                       <button
                         style={{
@@ -566,6 +641,26 @@ export default function Integration() {
                         <Trash2 style={{ width: 14, height: 14 }} />
                       </button>
                     </div>
+
+                    {/* Sync result inline */}
+                    {syncResults[sheet.id] && (
+                      <div style={{
+                        marginLeft: 46, marginBottom: 10,
+                        padding: '8px 12px', borderRadius: 6,
+                        background: syncResults[sheet.id].success ? 'var(--success-bg)' : 'var(--danger-bg)',
+                        fontSize: 12, color: syncResults[sheet.id].success ? 'var(--success)' : 'var(--danger)',
+                        display: 'flex', alignItems: 'center', gap: 8,
+                      }}>
+                        {syncResults[sheet.id].success
+                          ? <CheckCircle style={{ width: 12, height: 12 }} />
+                          : <XCircle style={{ width: 12, height: 12 }} />
+                        }
+                        {syncResults[sheet.id].success
+                          ? `${syncResults[sheet.id].rowCount} registros importados com sucesso`
+                          : syncResults[sheet.id].error || syncResults[sheet.id].warning
+                        }
+                      </div>
+                    )}
 
                     {/* Metadata */}
                     <div style={{ display: 'flex', alignItems: 'center', gap: 16, fontSize: 11, color: 'var(--text-muted)', marginLeft: 46, marginBottom: sheet.tags?.length > 0 ? 10 : 0 }}>

@@ -14,6 +14,7 @@ import {
   fetchSheetConnections, upsertSheetConnection as sbUpsertSheetConnection,
 } from '../services/supabaseService';
 import { defaultCashier, defaultSplitConfig } from '../mocks/financial';
+import { syncSheetToSupabase } from '../services/googleSheetsSync';
 
 const SyncContext = createContext(null);
 
@@ -51,6 +52,8 @@ export function SyncProvider({ children }) {
   const countdownTimerRef = useRef(null);
   const connectionCheckRef = useRef(null);
   const realtimeChannelRef = useRef(null);
+  const sheetPollTimerRef = useRef(null);
+  const sheetPollUrlRef = useRef(null);
 
   // ─── Load from Supabase on mount + connectivity monitor ────
   useEffect(() => {
@@ -138,6 +141,51 @@ export function SyncProvider({ children }) {
       if (connectionCheckRef.current) clearInterval(connectionCheckRef.current);
     };
   }, []);
+
+  // ─── Global Sheet Polling — roda em background independente da página ──
+  // Inicia o polling automático sempre que uma planilha conectada é detectada no syncConfig
+  useEffect(() => {
+    const sheetUrl = syncConfig?.sheet_url;
+    const interval = (syncConfig?.pollingInterval || 60) * 1000;
+    const isConnected = syncStatus === 'connected';
+
+    // Parar polling anterior se a URL mudou ou desconectou
+    if (sheetPollTimerRef.current && (sheetPollUrlRef.current !== sheetUrl || !isConnected)) {
+      clearInterval(sheetPollTimerRef.current);
+      sheetPollTimerRef.current = null;
+      sheetPollUrlRef.current = null;
+      console.log('[SyncContext] Sheet polling parado.');
+    }
+
+    // Iniciar novo polling se conectado e com URL válida
+    if (isConnected && sheetUrl && !sheetPollTimerRef.current) {
+      sheetPollUrlRef.current = sheetUrl;
+      console.log(`[SyncContext] Iniciando sheet polling a cada ${interval / 1000}s para: ${sheetUrl}`);
+
+      const doSync = async () => {
+        try {
+          const result = await syncSheetToSupabase(sheetUrl);
+          if (result.success && result.rowCount > 0) {
+            console.log(`[SyncContext] Auto-sync: ${result.rowCount} registros importados`);
+            setLastSyncAt(new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }));
+            setSyncedRowCount(result.rowCount);
+            // O Supabase Realtime já vai atualizar as transactions automaticamente via subscription
+          }
+        } catch (e) {
+          console.warn('[SyncContext] Erro no sheet polling:', e);
+        }
+      };
+
+      // Sync imediato ao conectar
+      doSync();
+      // Polling periódico
+      sheetPollTimerRef.current = setInterval(doSync, interval);
+    }
+
+    return () => {
+      // Não limpa aqui — o cleanup só acontece quando a URL ou status muda (acima)
+    };
+  }, [syncConfig?.sheet_url, syncStatus, syncConfig?.pollingInterval]);
 
   // ─── Supabase Realtime: escuta mudanças na tabela transactions ──
   // Quando o Python sync faz upsert/delete, o frontend atualiza automaticamente
