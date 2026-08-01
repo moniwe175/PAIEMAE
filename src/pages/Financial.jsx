@@ -114,11 +114,23 @@ export default function Financial() {
 
   const handleManualSync = async () => {
     setSyncing(true);
-    addLog('info', 'Iniciando sincronização com a planilha Google Sheets...');
+    addLog('info', 'Iniciando sincronização com a planilha Excel/Google Sheets...');
     try {
-      const result = await syncSheetToSupabase();
+      const result = await syncSheetToSupabase(syncConfig?.sheet_url, {
+        connectionId: syncConfig?.id,
+        id: syncConfig?.id,
+      });
+
       if (result.success) {
-        addLog('success', `Planilha sincronizada com sucesso! ${result.rowCount || 0} registros atualizados.`);
+        addLog('success', `Planilha sincronizada com sucesso! ${result.rowCount || 0} registros processados.`);
+        
+        // Recarregar dados em tempo real para re-renderizar KPIs e tabelas na hora
+        const [stRes, summaryRes] = await Promise.all([
+          sbFetchSheetTransactions(),
+          sbFetchSheetSummary(),
+        ]);
+        if (!stRes.error && stRes.data) setSheetTransactions(stRes.data);
+        if (!summaryRes.error && summaryRes.data) setSheetSummary(summaryRes.data);
       } else {
         addLog('error', `Erro na sincronização: ${result.error}`);
         alert(`Erro ao sincronizar: ${result.error}`);
