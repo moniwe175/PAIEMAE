@@ -860,3 +860,51 @@ export async function discardMessage(id) {
   if (error) return handleError(error);
   return { data, error: null };
 }
+
+// ─── Access Requests ──────────────────────────────────────────
+
+export async function requestAccess({ nome, email, telefone, mensagem }) {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured');
+  const { data, error } = await supabase
+    .from('access_requests')
+    .insert([{ nome, email, telefone, mensagem, status: 'pending' }])
+    .select()
+    .single();
+  if (error) return handleError(error);
+  return { data, error: null };
+}
+
+export async function checkUserAccessStatus(email) {
+  if (!isSupabaseConfigured()) return { data: null, error: null };
+  const { data, error } = await supabase
+    .from('access_requests')
+    .select('status')
+    .eq('email', email)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) return handleError(error);
+  return { data, error: null };
+}
+
+export async function fetchAccessRequests() {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured', []);
+  const { data, error } = await supabase
+    .from('access_requests')
+    .select('*')
+    .order('created_at', { ascending: false });
+  if (error) return handleError(error, []);
+  return { data: data || [], error: null };
+}
+
+export async function updateAccessRequestStatus(id, status) {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured');
+  const { data, error } = await supabase
+    .from('access_requests')
+    .update({ status })
+    .eq('id', id)
+    .select()
+    .single();
+  if (error) return handleError(error);
+  return { data, error: null };
+}
