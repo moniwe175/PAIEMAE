@@ -889,7 +889,7 @@ export default function Financial() {
           id: e.id,
           data: e.date_ref ? new Date(e.date_ref + 'T00:00:00').toLocaleDateString('pt-BR') : '—',
           descricao: (e.client && e.client !== '—' ? e.client : e.procedure && e.procedure !== '—' ? e.procedure : e.comanda || 'DESPESA').toUpperCase(),
-          categoria: formatCategory(e.client, e.procedure),
+          categoria: e.despesa_categoria || formatCategory(e.client, e.procedure),
           tipo: 'Despesa',
           valor: Number(e.gross) || 0,
           origem: 'Planilha',
