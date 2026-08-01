@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import {
   DollarSign, Plus, XCircle, FileSpreadsheet, Link2, Wallet,
   Printer, Lock, Unlock, AlertTriangle, Clock, CheckCircle, X,
@@ -9,6 +9,10 @@ import {
 import { useSync } from '../contexts/SyncContext';
 import { paymentMethods, calcularSplit } from '../mocks/financial';
 import { syncSheetToSupabase } from '../services/googleSheetsSync';
+import {
+  fetchSheetTransactions as sbFetchSheetTransactions,
+  fetchSheetTransactionsSummary as sbFetchSheetSummary
+} from '../services/supabaseService';
 
 const TABS = [
   { key: 'transacoes', label: 'Transações' },
@@ -46,13 +50,13 @@ export default function Financial() {
     expenses, addExpense, removeExpense,
     cashier, abrirCaixa, fecharCaixa, realizarSangria,
     splitConfig, updateSplitConfig,
-    syncStatus, addLog,
+    syncStatus, syncConfig, addLog,
     supabaseConnected, connectionError,
     dailySheet,
     lastSyncAt, syncedRowCount,
     // ─ Dados reais da planilha (sheet_transactions) ─
-    sheetTransactions,
-    sheetSummary,
+    sheetTransactions, setSheetTransactions,
+    sheetSummary, setSheetSummary,
   } = useSync();
 
   const [activeTab, setActiveTab] = useState('transacoes');
@@ -68,6 +72,45 @@ export default function Financial() {
   const [txFiltroStatus, setTxFiltroStatus] = useState('todos');
   const [expFiltroCat, setExpFiltroCat] = useState('todos');
   const [syncing, setSyncing] = useState(false);
+
+  // ─── Auto-sync automático em tempo real: abre a página -> sincroniza; a cada 2 min -> sincroniza ───
+  useEffect(() => {
+    let timer;
+
+    async function autoSync() {
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+
+      try {
+        const result = await syncSheetToSupabase(syncConfig?.sheet_url, {
+          connectionId: syncConfig?.id,
+          id: syncConfig?.id,
+        });
+
+        if (result.success) {
+          const [stRes, summaryRes] = await Promise.all([
+            sbFetchSheetTransactions(),
+            sbFetchSheetSummary(),
+          ]);
+          if (!stRes.error && stRes.data) setSheetTransactions(stRes.data);
+          if (!summaryRes.error && summaryRes.data) setSheetSummary(summaryRes.data);
+        }
+      } catch (err) {
+        console.warn('[Financial] Auto-sync background error:', err);
+      }
+    }
+
+    // 1. Sincronização imediata ao abrir a página Financeiro
+    autoSync();
+
+    // 2. Polling periódico silencioso a cada 2 minutos (120.000ms)
+    timer = setInterval(() => {
+      autoSync();
+    }, 120000);
+
+    return () => {
+      if (timer) clearInterval(timer);
+    };
+  }, [syncConfig?.sheet_url, syncConfig?.id, setSheetTransactions, setSheetSummary]);
 
   const handleManualSync = async () => {
     setSyncing(true);
