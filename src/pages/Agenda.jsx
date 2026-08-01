@@ -615,6 +615,52 @@ function AppointmentDetailModal({ apt, profissionais, onClose, onEdit, onDelete,
   );
 }
 
+// ─── Search Helpers for Client Names ────────────────────────────
+function normalizeSearchText(str) {
+  if (!str) return '';
+  return str
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim();
+}
+
+function getPhoneticKey(str) {
+  return normalizeSearchText(str)
+    .replace(/z/g, 's')
+    .replace(/c([ei])/g, 's$1')
+    .replace(/ç/g, 's');
+}
+
+function scoreClientMatch(clientName, clientPhone, rawQuery) {
+  if (!rawQuery) return 0;
+  const q = normalizeSearchText(rawQuery);
+  if (!q) return 0;
+
+  const qPhonetic = getPhoneticKey(rawQuery);
+  const nameNorm = normalizeSearchText(clientName);
+  const namePhonetic = getPhoneticKey(clientName);
+  const phoneNorm = (clientPhone || '').replace(/\D/g, '');
+  const qPhone = rawQuery.replace(/\D/g, '');
+
+  if (nameNorm === q) return 1000;
+  if (nameNorm.startsWith(q)) return 900;
+
+  const wordsNorm = nameNorm.split(/\s+/);
+  if (wordsNorm.some(w => w.startsWith(q))) return 800;
+
+  if (namePhonetic.startsWith(qPhonetic)) return 700;
+  const wordsPhonetic = namePhonetic.split(/\s+/);
+  if (wordsPhonetic.some(w => w.startsWith(qPhonetic))) return 600;
+
+  if (nameNorm.includes(q)) return 500;
+  if (namePhonetic.includes(qPhonetic)) return 400;
+
+  if (qPhone && phoneNorm.includes(qPhone)) return 300;
+
+  return 0;
+}
+
 // ═══════════════════════════════════════════════════════════════
 // ─── AgendamentoModal ─────────────────────────────────────────
 // ═══════════════════════════════════════════════════════════════
@@ -650,26 +696,22 @@ function AgendamentoModal({ onClose, date, profissional: prefillProf, hora: pref
   }, []);
 
   const clientesFiltrados = useMemo(() => {
-    const q = clienteBusca.toLowerCase().trim();
+    const q = clienteBusca.trim();
     if (!q) return pacientes.slice(0, 8);
 
-    const filtered = pacientes.filter(p => {
-      const nome = (p.nome || '').toLowerCase();
-      return nome.includes(q) || (p.telefone && p.telefone.includes(q));
+    const scored = pacientes
+      .map(p => ({
+        paciente: p,
+        score: scoreClientMatch(p.nome, p.telefone, q)
+      }))
+      .filter(item => item.score > 0);
+
+    scored.sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      return (a.paciente.nome || '').localeCompare(b.paciente.nome || '', 'pt-BR');
     });
 
-    // Sort by relevance: names that START with the search term come first
-    filtered.sort((a, b) => {
-      const aName = (a.nome || '').toLowerCase();
-      const bName = (b.nome || '').toLowerCase();
-      const aStarts = aName.startsWith(q);
-      const bStarts = bName.startsWith(q);
-      if (aStarts && !bStarts) return -1;
-      if (!aStarts && bStarts) return 1;
-      return aName.localeCompare(bName, 'pt-BR');
-    });
-
-    return filtered;
+    return scored.map(item => item.paciente);
   }, [pacientes, clienteBusca]);
 
   const [form, setForm] = useState(() => isEdit ? { ...apt } : {
@@ -797,30 +839,37 @@ function AgendamentoModal({ onClose, date, profissional: prefillProf, hora: pref
                   style={inputSt}
                   autoComplete="off"
                 />
-                {showClienteList && clientesFiltrados.length > 0 && (
+                {showClienteList && (
                   <div style={{
                     position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 100,
                     background: '#fff', border: '1.5px solid #E5E7EB', borderRadius: 10,
-                    marginTop: 4, maxHeight: 180, overflowY: 'auto',
+                    marginTop: 4, maxHeight: 200, overflowY: 'auto',
                     boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
                   }}>
-                    {clientesFiltrados.map(p => {
-                      const isSelected = form.paciente === p.nome;
-                      return (
-                        <div key={p.nome} onClick={() => { set('paciente', p.nome); setClienteBusca(p.nome); setShowClienteList(false); }}
-                          style={{
-                            padding: '8px 12px', cursor: 'pointer', fontSize: 13,
-                            background: isSelected ? '#FDF4F7' : '#fff',
-                            borderBottom: '1px solid #F3F4F6',
-                            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                          }}
-                          onMouseEnter={e => { if (!isSelected) e.currentTarget.style.background = '#F9FAFB'; }}
-                          onMouseLeave={e => { if (!isSelected) e.currentTarget.style.background = '#fff'; }}>
-                          <span style={{ fontWeight: 500, color: '#1F2937' }}>{p.nome}</span>
-                          {p.telefone && <span style={{ fontSize: 11, color: '#9CA3AF' }}>{p.telefone}</span>}
-                        </div>
-                      );
-                    })}
+                    {clientesFiltrados.length > 0 ? (
+                      clientesFiltrados.map(p => {
+                        const isSelected = form.paciente === p.nome;
+                        return (
+                          <div key={p.nome} onClick={() => { set('paciente', p.nome); setClienteBusca(p.nome); setShowClienteList(false); }}
+                            style={{
+                              padding: '9px 12px', cursor: 'pointer', fontSize: 13,
+                              background: isSelected ? '#FDF4F7' : '#fff',
+                              borderBottom: '1px solid #F3F4F6',
+                              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                              transition: 'background 0.15s'
+                            }}
+                            onMouseEnter={e => { if (!isSelected) e.currentTarget.style.background = '#F9FAFB'; }}
+                            onMouseLeave={e => { if (!isSelected) e.currentTarget.style.background = '#fff'; }}>
+                            <span style={{ fontWeight: 600, color: '#1F2937' }}>{p.nome}</span>
+                            {p.telefone && <span style={{ fontSize: 11, color: '#9CA3AF' }}>{p.telefone}</span>}
+                          </div>
+                        );
+                      })
+                    ) : (
+                      <div style={{ padding: '12px 14px', fontSize: 12, color: '#9CA3AF', textAlign: 'center' }}>
+                        Nenhum cliente encontrado
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

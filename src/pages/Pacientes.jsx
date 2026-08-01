@@ -15,6 +15,51 @@ const defaultPacientes = [
 
 const historicoDefault = [];
 
+function normalizeSearchText(str) {
+  if (!str) return '';
+  return str
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim();
+}
+
+function getPhoneticKey(str) {
+  return normalizeSearchText(str)
+    .replace(/z/g, 's')
+    .replace(/c([ei])/g, 's$1')
+    .replace(/ç/g, 's');
+}
+
+function scoreClientMatch(clientName, clientPhone, rawQuery) {
+  if (!rawQuery) return 0;
+  const q = normalizeSearchText(rawQuery);
+  if (!q) return 0;
+
+  const qPhonetic = getPhoneticKey(rawQuery);
+  const nameNorm = normalizeSearchText(clientName);
+  const namePhonetic = getPhoneticKey(clientName);
+  const phoneNorm = (clientPhone || '').replace(/\D/g, '');
+  const qPhone = rawQuery.replace(/\D/g, '');
+
+  if (nameNorm === q) return 1000;
+  if (nameNorm.startsWith(q)) return 900;
+
+  const wordsNorm = nameNorm.split(/\s+/);
+  if (wordsNorm.some(w => w.startsWith(q))) return 800;
+
+  if (namePhonetic.startsWith(qPhonetic)) return 700;
+  const wordsPhonetic = namePhonetic.split(/\s+/);
+  if (wordsPhonetic.some(w => w.startsWith(qPhonetic))) return 600;
+
+  if (nameNorm.includes(q)) return 500;
+  if (namePhonetic.includes(qPhonetic)) return 400;
+
+  if (qPhone && phoneNorm.includes(qPhone)) return 300;
+
+  return 0;
+}
+
 function PacienteModal({ onClose, onSave, initialData }) {
   const [form, setForm] = useState(initialData || { nome:'', telefone:'', email:'', instagram:'', nascimento:'', cidade:'', obs:'' });
   const set = (k,v) => setForm(f=>({...f,[k]:v}));
@@ -372,17 +417,33 @@ export default function Pacientes() {
     return date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear();
   };
 
-  const filtrados = pacientes.filter(p => {
-    const matchBusca = p.nome.toLowerCase().includes(busca.toLowerCase()) || p.telefone.includes(busca);
-    if (!matchBusca) return false;
-    
-    const novo = isNovo(p.createdAt);
-    if (filtro === 'Novo') return novo;
-    if (filtro === 'Ativo') return p.status === 'ativo' && !novo;
-    if (filtro === 'Inativo') return p.status === 'inativo' && !novo;
-    
-    return true; // 'Todos'
-  });
+  const filtrados = useMemo(() => {
+    let list = pacientes;
+
+    if (busca.trim()) {
+      const scored = list
+        .map(p => ({
+          paciente: p,
+          score: scoreClientMatch(p.nome, p.telefone, busca)
+        }))
+        .filter(item => item.score > 0);
+
+      scored.sort((a, b) => {
+        if (b.score !== a.score) return b.score - a.score;
+        return (a.paciente.nome || '').localeCompare(b.paciente.nome || '', 'pt-BR');
+      });
+
+      list = scored.map(item => item.paciente);
+    }
+
+    return list.filter(p => {
+      const novo = isNovo(p.createdAt);
+      if (filtro === 'Novo') return novo;
+      if (filtro === 'Ativo') return p.status === 'ativo' && !novo;
+      if (filtro === 'Inativo') return p.status === 'inativo' && !novo;
+      return true;
+    });
+  }, [pacientes, busca, filtro]);
 
   return (
     <div>
