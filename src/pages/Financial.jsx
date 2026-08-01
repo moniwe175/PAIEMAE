@@ -4,15 +4,15 @@ import {
   Printer, Lock, Unlock, AlertTriangle, Clock, CheckCircle, X,
   CreditCard, Banknote, Landmark, TrendingUp, TrendingDown,
   ArrowUpRight, ArrowDownLeft, User, Percent, Edit3, Trash2,
-  Filter, Minus, Receipt
+  Filter, Minus, Receipt, RefreshCw
 } from 'lucide-react';
 import { useSync } from '../contexts/SyncContext';
 import { paymentMethods, calcularSplit } from '../mocks/financial';
 
 const TABS = [
-  { key: 'caixa', label: 'Caixa' },
   { key: 'transacoes', label: 'Transações' },
   { key: 'despesas', label: 'Despesas' },
+  { key: 'caixa', label: 'Caixa' },
   { key: 'split', label: 'Split' },
 ];
 
@@ -51,7 +51,7 @@ export default function Financial() {
     lastSyncAt, syncedRowCount,
   } = useSync();
 
-  const [activeTab, setActiveTab] = useState('caixa');
+  const [activeTab, setActiveTab] = useState('transacoes');
   const [sangriaModal, setSangriaModal] = useState(false);
   const [caixaConfirm, setCaixaConfirm] = useState(null); // { type: 'abrir' | 'fechar' | 'fechar-pendente', title, message }
   const [caixaLoading, setCaixaLoading] = useState(false);
@@ -149,6 +149,16 @@ export default function Financial() {
   const ticketMedio = txsHoje.length > 0 ? faturamentoHoje / txsHoje.length : 0;
   const aReceber = safeTransactions.map(normalizeTx).filter(t => t.status === 'pending').reduce((a, t) => a + t.total, 0);
   const pendentesCount = safeTransactions.map(normalizeTx).filter(t => t.status === 'pending').length;
+
+  const comissoesHoje = txsHoje.reduce((a, t) => a + (Number(t.profissional) || 0), 0);
+  const despesasFixasHoje = safeExpenses.filter(e => e.data === hoje()).reduce((a, e) => a + (Number(e.valor) || 0), 0);
+  const sangriasHoje = safeSangrias.filter(s => s.data === hoje()).reduce((a, s) => a + (Number(s.valor) || 0), 0);
+  const totalDespesasHoje = despesasFixasHoje + sangriasHoje;
+  const lucroLiquido = faturamentoHoje - totalDespesasHoje - comissoesHoje;
+  const receitasCount = txsHoje.length;
+  const despesasCount = safeExpenses.filter(e => e.data === hoje()).length;
+  const sangriasCount = safeSangrias.filter(s => s.data === hoje()).length;
+
 
   // Formas de pagamento calculadas direto do Supabase
   const formasPagamento = useMemo(() => {
@@ -479,21 +489,14 @@ export default function Financial() {
       {/* Page Header */}
       <div className="page-header" style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
         <div>
-          <div className="page-header-label"><DollarSign />FINANCEIRO</div>
-          <h1 className="page-title">Financeiro</h1>
-          <p className="page-subtitle">Caixa · Pagamentos · Split</p>
+          <h1 className="page-title" style={{ fontFamily: 'serif', fontSize: 24, color: '#1A4D2E', marginBottom: 4 }}>Financeiro</h1>
+          <p className="page-subtitle" style={{ fontSize: 13, color: '#888' }}>
+            {receitasCount} receitas • {despesasCount} despesas • {sangriasCount} sangrias
+          </p>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          {!isConnected && (
-            <a href="#/integracoes" className="btn btn-primary btn-sm">
-              <Link2 style={{ width: 14, height: 14 }} />Conectar Planilha
-            </a>
-          )}
-          <button className="btn btn-ghost btn-sm" onClick={() => setSangriaModal(true)} disabled={!supabaseConnected} style={!supabaseConnected ? { opacity: 0.5, cursor: 'not-allowed' } : {}}>
-            <Minus style={{ width: 14, height: 14 }} />Sangria
-          </button>
-          <button className="btn btn-primary btn-sm" onClick={() => setTxModal(true)} disabled={!supabaseConnected} style={!supabaseConnected ? { opacity: 0.5, cursor: 'not-allowed' } : {}}>
-            <Plus style={{ width: 14, height: 14 }} />Nova Transação
+          <button className="btn btn-sm" style={{ border: '1px solid #FFC107', background: '#FFF8E1', color: '#FF9800', fontWeight: 600, padding: '8px 16px', borderRadius: 8 }}>
+            <RefreshCw style={{ width: 14, height: 14, marginRight: 6 }} />Sincronizar planilha Excel
           </button>
         </div>
       </div>
@@ -548,86 +551,75 @@ export default function Financial() {
 
       {/* KPI Cards */}
       <div className="grid-4 section-gap">
-        {/* Caixa do Dia - Dark Green */}
-        <div className="stat-card" style={{
-          background: '#1A4D2E',
-          color: '#fff',
-          border: '1px solid #1A4D2E',
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <Wallet style={{ width: 18, height: 18, color: '#D4F1E8' }} />
-              <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, color: '#A8D5BA' }}>Caixa do Dia</span>
-            </div>
-            <span style={{
-              padding: '2px 8px',
-              borderRadius: 99,
-              fontSize: 10,
-              fontWeight: 700,
-              background: cashier.status === 'aberto' ? '#D4F1E8' : '#FF9AA233',
-              color: cashier.status === 'aberto' ? '#1A7A4C' : '#FF9AA2',
-            }}>
-              {cashier.status === 'aberto' ? 'Aberto' : 'Fechado'}
-            </span>
+        {/* Faturamento Total */}
+        <div className="stat-card" style={{ background: '#1A4D2E', color: '#fff', border: 'none', position: 'relative' }}>
+          <div style={{ position: 'absolute', top: 16, right: 16, width: 6, height: 6, borderRadius: '50%', background: '#4CAF50' }} />
+          <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, color: '#A8D5BA', marginBottom: 8 }}>
+            FATURAMENTO TOTAL
           </div>
-          <div style={{ fontSize: 28, fontWeight: 800, marginBottom: 4, color: '#fff' }}>
-            {isConnected
-              ? fmtCurrency(dailySheet ? (dailySheet.faturamentoLiquido ?? dailySheet.faturamentoBruto) : cashier.saldo)
-              : 'R$ --'}
-          </div>
-          <div style={{ fontSize: 11, color: '#A8D5BA' }}>
-            {dailySheet
-              ? `Bruto: ${fmtCurrency(dailySheet.faturamentoBruto)} • Despesas: ${fmtCurrency(dailySheet.totalDespesas || 0)} • ${dailySheet.totalTransacoes} tx`
-              : cashier.status === 'aberto' && cashier.horaAbertura
-                ? `Aberto às ${cashier.horaAbertura}`
-              : isConnected ? 'Caixa fechado' : 'Aguardando planilha'}
-          </div>
-          {cashier.status === 'fechado' && (
-            <button className="btn btn-sm" onClick={handlePromptAbrirCaixa} style={{ marginTop: 10, background: '#D4F1E8', color: '#1A4D2E', border: 'none', fontWeight: 700 }}>
-              <Unlock style={{ width: 12, height: 12 }} />Abrir Caixa
-            </button>
-          )}
-        </div>
-
-        {/* Faturamento Hoje */}
-        <div className="stat-card">
-          <div className="stat-card-icon" style={{ background: 'var(--success-bg)' }}>
-            <TrendingUp style={{ color: 'var(--success)' }} />
-          </div>
-          <div className="stat-value" style={{ color: 'var(--success)' }}>
+          <div style={{ fontSize: 28, fontWeight: 800, marginBottom: 4, color: '#4CAF50' }}>
             {fmtCurrency(faturamentoHoje)}
           </div>
-          <div className="stat-label">Faturamento Hoje</div>
-          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
-            {syncedRowCount > 0 ? `${syncedRowCount} transações no banco` : 'Sincronizado via banco de dados'}
+          <div style={{ fontSize: 11, color: '#A8D5BA', marginBottom: 16 }}>
+            {receitasCount} receitas
+          </div>
+          <div style={{ display: 'flex', borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: 12 }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 10, color: '#A8D5BA', marginBottom: 2 }}>Comissões</div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: '#F39C12' }}>{fmtCurrency(comissoesHoje)}</div>
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 10, color: '#A8D5BA', marginBottom: 2 }}>Líquido</div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: '#4CAF50' }}>{fmtCurrency(lucroLiquido)}</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Total Despesas */}
+        <div className="stat-card" style={{ background: '#fff', border: '1px solid var(--border-color)', position: 'relative' }}>
+          <div style={{ position: 'absolute', top: 16, right: 16, width: 24, height: 24, borderRadius: '50%', background: '#FEF2F2', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+             <ArrowDownLeft style={{ width: 12, height: 12, color: '#EF4444' }} />
+          </div>
+          <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--text-muted)', marginBottom: 8 }}>
+            TOTAL DESPESAS
+          </div>
+          <div style={{ fontSize: 28, fontWeight: 800, marginBottom: 4, color: '#EF4444' }}>
+            {fmtCurrency(totalDespesasHoje)}
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+            {fmtCurrency(despesasFixasHoje)} despesas + {fmtCurrency(sangriasHoje)} sangrias
+          </div>
+        </div>
+
+        {/* Lucro Líquido */}
+        <div className="stat-card" style={{ background: '#fff', border: '1px solid var(--border-color)', position: 'relative' }}>
+          <div style={{ position: 'absolute', top: 16, right: 16, width: 24, height: 24, borderRadius: '50%', background: 'var(--success-bg)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+             <ArrowUpRight style={{ width: 12, height: 12, color: 'var(--success)' }} />
+          </div>
+          <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--text-muted)', marginBottom: 8 }}>
+            LUCRO LÍQUIDO
+          </div>
+          <div style={{ fontSize: 28, fontWeight: 800, marginBottom: 4, color: 'var(--success)' }}>
+            {fmtCurrency(lucroLiquido)}
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+            Faturamento - Despesas - Comissões
           </div>
         </div>
 
         {/* Ticket Médio */}
-        <div className="stat-card">
-          <div className="stat-card-icon" style={{ background: 'var(--info-bg)' }}>
-            <Receipt style={{ color: 'var(--info)' }} />
+        <div className="stat-card" style={{ background: '#fff', border: '1px solid var(--border-color)', position: 'relative' }}>
+          <div style={{ position: 'absolute', top: 16, right: 16, width: 24, height: 24, borderRadius: '50%', background: 'var(--bg-main)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+             <Receipt style={{ width: 12, height: 12, color: 'var(--text-muted)' }} />
           </div>
-          <div className="stat-value" style={{ color: 'var(--info)' }}>
-            {isConnected ? fmtCurrency(ticketMedio) : 'R$ --'}
+          <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--text-muted)', marginBottom: 8 }}>
+            TICKET MÉDIO
           </div>
-          <div className="stat-label">Ticket Médio</div>
-          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
-            {isConnected ? `${dailySheet ? dailySheet.totalTransacoes : txsHoje.length} procedimentos pagos` : 'Aguardando planilha'}
+          <div style={{ fontSize: 28, fontWeight: 800, marginBottom: 4, color: '#111' }}>
+            {fmtCurrency(ticketMedio)}
           </div>
-        </div>
-
-        {/* A Receber */}
-        <div className="stat-card">
-          <div className="stat-card-icon" style={{ background: 'var(--warning-bg)' }}>
-            <Clock style={{ color: 'var(--warning)' }} />
-          </div>
-          <div className="stat-value" style={{ color: 'var(--warning)' }}>
-            {isConnected ? fmtCurrency(aReceber) : 'R$ --'}
-          </div>
-          <div className="stat-label">A Receber</div>
-          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
-            {isConnected ? `${pendentesCount} pagamentos pendentes` : 'Aguardando planilha'}
+          <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+            Média por receita
           </div>
         </div>
       </div>
