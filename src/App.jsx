@@ -3,6 +3,7 @@ import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 // Import AuthContext provider and ProtectedRoute
 import { AuthProvider } from './contexts/AuthContext';
 import ProtectedRoute from './components/auth/ProtectedRoute';
+import ErrorBoundary from './components/ErrorBoundary';
 
 // Import SyncContext provider
 import { SyncProvider } from './contexts/SyncContext';
@@ -87,7 +88,9 @@ function App() {
                 path="/*"
                 element={
                   <ProtectedRoute>
-                    <MainLayout />
+                    <ErrorBoundary>
+                      <MainLayout />
+                    </ErrorBoundary>
                   </ProtectedRoute>
                 }
               />

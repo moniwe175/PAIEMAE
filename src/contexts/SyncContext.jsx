@@ -92,7 +92,7 @@ export function SyncProvider({ children }) {
         if (txRes.data?.length > 0) setTransactions(txRes.data);
         if (expRes.data?.length > 0) setExpenses(expRes.data);
         if (comRes.data?.length > 0) setComissoes(comRes.data);
-        if (cashRes.data) setCashier(cashRes.data);
+        if (cashRes.data) setCashier({ sangrias: [], ...cashRes.data, sangrias: Array.isArray(cashRes.data.sangrias) ? cashRes.data.sangrias : [] });
         if (splitRes.data?.length > 0) setSplitConfig(splitRes.data);
         
         if (sheetsRes.data?.length > 0) {
