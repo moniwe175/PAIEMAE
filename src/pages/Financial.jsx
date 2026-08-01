@@ -48,7 +48,6 @@ export default function Financial() {
     syncStatus, addLog,
     supabaseConnected, connectionError,
     dailySheet,
-    pythonSyncStatus,
     lastSyncAt, syncedRowCount,
   } = useSync();
 
@@ -545,50 +544,7 @@ export default function Financial() {
         </div>
       )}
 
-      {/* Python Sync status banner */}
-      {supabaseConnected && (
-        <div style={{
-          background: pythonSyncStatus?.status === 'success' ? 'var(--success-bg)'
-            : pythonSyncStatus?.status === 'error' ? 'var(--danger-bg)'
-            : '#FFF8E1',
-          border: `1px solid ${
-            pythonSyncStatus?.status === 'success' ? 'var(--success)'
-            : pythonSyncStatus?.status === 'error' ? 'var(--danger)'
-            : '#FFD966'}`,
-          borderLeft: `4px solid ${
-            pythonSyncStatus?.status === 'success' ? 'var(--success)'
-            : pythonSyncStatus?.status === 'error' ? 'var(--danger)'
-            : '#FFD966'}`,
-          borderRadius: 'var(--radius-sm)',
-          padding: '10px 16px',
-          marginBottom: 20,
-          display: 'flex',
-          alignItems: 'center',
-          gap: 10,
-          fontSize: 12,
-        }}>
-          <span style={{
-            width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
-            background: pythonSyncStatus?.status === 'success' ? 'var(--success)'
-              : pythonSyncStatus?.status === 'error' ? 'var(--danger)'
-              : '#E6A800',
-            boxShadow: pythonSyncStatus?.status === 'success' ? '0 0 0 3px rgba(46,204,113,0.2)' : 'none',
-          }} />
-          <span style={{ color: 'var(--text-dark)', fontWeight: 600 }}>
-            {pythonSyncStatus?.status === 'success' ? 'Python Sync ativo'
-              : pythonSyncStatus?.status === 'error' ? 'Python Sync com erro'
-              : 'Aguardando Python Sync'}
-          </span>
-          <span style={{ color: 'var(--text-muted)' }}>
-            {pythonSyncStatus?.message || 'Inicie o sync_financeiro.py no computador da clínica para sincronizar a planilha automaticamente.'}
-          </span>
-          {lastSyncAt && (
-            <span style={{ marginLeft: 'auto', color: 'var(--text-muted)', flexShrink: 0 }}>
-              Último update: {lastSyncAt} • {syncedRowCount} linhas
-            </span>
-          )}
-        </div>
-      )}
+
 
       {/* KPI Cards */}
       <div className="grid-4 section-gap">
@@ -643,7 +599,7 @@ export default function Financial() {
           </div>
           <div className="stat-label">Faturamento Hoje</div>
           <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
-            {syncedRowCount > 0 ? `${syncedRowCount} transações no banco` : 'Aguardando Python Sync'}
+            {syncedRowCount > 0 ? `${syncedRowCount} transações no banco` : 'Sincronizado via banco de dados'}
           </div>
         </div>
 

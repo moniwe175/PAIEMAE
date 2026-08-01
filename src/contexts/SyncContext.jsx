@@ -45,8 +45,7 @@ export function SyncProvider({ children }) {
   const [supabaseConnected, setSupabaseConnected] = useState(false);
   const [connectionError, setConnectionError] = useState(null);
   const [dailySheet, setDailySheet] = useState(null);
-  // Status do Python sync (lido dos sync_logs em tempo real)
-  const [pythonSyncStatus, setPythonSyncStatus] = useState(null); // { lastSync, rowCount, status }
+
 
   const pollTimerRef = useRef(null);
   const countdownTimerRef = useRef(null);
@@ -193,12 +192,6 @@ export function SyncProvider({ children }) {
         (payload) => {
           const log = payload.new;
           if (!log) return;
-          // Atualizar status do Python sync
-          setPythonSyncStatus(prev => ({
-            lastSync: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-            status: log.status || log.type || 'info',
-            message: log.message || log.details || '',
-          }));
           // Adicionar ao log local
           const entry = {
             id: log.id || Date.now(),
@@ -636,8 +629,6 @@ export function SyncProvider({ children }) {
     lastSyncAt, syncedRowCount, nextSyncIn,
     supabaseReady, supabaseConnected, connectionError,
     dailySheet, updateDailySheet, saveDailyReport,
-    pythonSyncStatus,
-
     addTransaction, removeTransaction,
     addExpense, removeExpense,
     addComissao, removeComissao, updateComissaoStatus,
