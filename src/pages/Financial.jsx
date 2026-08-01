@@ -495,7 +495,7 @@ export default function Financial() {
           </p>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          <button className="btn btn-sm" style={{ border: '1px solid #FFC107', background: '#FFF8E1', color: '#FF9800', fontWeight: 600, padding: '8px 16px', borderRadius: 8 }}>
+          <button className="btn btn-sm" style={{ border: '1px solid #FDE68A', background: '#FFFBEB', color: '#D97706', fontWeight: 600, padding: '8px 16px', borderRadius: 8 }}>
             <RefreshCw style={{ width: 14, height: 14, marginRight: 6 }} />Sincronizar planilha Excel
           </button>
         </div>
@@ -736,62 +736,61 @@ export default function Financial() {
       {activeTab === 'transacoes' && (
         <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
           <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
-            <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-dark)', display: 'flex', alignItems: 'center', gap: 8 }}>
-              <Receipt style={{ width: 16, height: 16, color: 'var(--color-primary)' }} />
-              Transações (Espelho Inteligente com Hash e Ordem Preservada)
-            </span>
-            <div className="tabs">
-              {[{ k: 'todos', l: 'Todos' }, { k: 'paid', l: 'Pagos' }, { k: 'pending', l: 'Pendentes' }, { k: 'cancelled', l: 'Cancelados' }].map(({ k, l }) => (
-                <button key={k} className={`tab-item${txFiltroStatus === k ? ' active' : ''}`} onClick={() => setTxFiltroStatus(k)} style={{ fontSize: 11 }}>{l}</button>
-              ))}
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              <span style={{ fontSize: 14, fontWeight: 700, color: '#333' }}>
+                Receitas da Planilha ({txFiltradas.length} registros)
+              </span>
+              <span style={{ fontSize: 11, color: '#999', marginTop: 2 }}>
+                Total: {fmtCurrency(txFiltradas.reduce((acc, t) => acc + t.total, 0))}
+              </span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', background: '#fff', border: '1px solid var(--border-color)', borderRadius: 6, padding: '4px 12px' }}>
+              <Receipt style={{ width: 14, height: 14, color: '#999', marginRight: 6 }} />
+              <input type="text" placeholder="Buscar..." style={{ border: 'none', outline: 'none', background: 'transparent', fontSize: 13, width: 200, color: 'var(--text-dark)' }} />
             </div>
           </div>
           <div className="table-wrapper">
-            <table>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>
                 <tr>
-                  <th style={{ width: 60 }}>Ordem</th>
-                  <th>Comanda (ID)</th>
-                  <th>Cliente</th>
-                  <th>Profissional</th>
-                  <th style={{ textAlign: 'right' }}>Valor</th>
-                  <th>Pagamento</th>
-                  <th>Hash Integridade</th>
-                  <th>Origem</th>
+                  <th style={{ color: '#666', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', padding: '12px 16px' }}>Data</th>
+                  <th style={{ color: '#666', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', padding: '12px 16px' }}>Cliente</th>
+                  <th style={{ color: '#666', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', padding: '12px 16px' }}>Procedimento</th>
+                  <th style={{ color: '#666', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', padding: '12px 16px' }}>Profissional</th>
+                  <th style={{ color: '#666', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', padding: '12px 16px', textAlign: 'center' }}>Valor</th>
+                  <th style={{ color: '#666', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', padding: '12px 16px', textAlign: 'center' }}>Comissão</th>
+                  <th style={{ color: '#666', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', padding: '12px 16px', textAlign: 'center' }}>Pagamento</th>
+                  <th style={{ color: '#666', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', padding: '12px 16px', textAlign: 'right' }}>Origem</th>
                 </tr>
               </thead>
               <tbody>
                 {txFiltradas.map((t, idx) => (
-                  <tr key={t.id || idx}>
-                    <td>
-                      <span className="badge badge-neutral" style={{ fontSize: 11, fontWeight: 700 }}>
-                        #{t.ordem || idx + 1}
-                      </span>
+                  <tr key={t.id || idx} style={{ borderBottom: '1px solid var(--border-light)' }}>
+                    <td style={{ color: '#555', fontSize: 13, padding: '16px' }}>
+                      {t.data || hoje()}
                     </td>
-                    <td>
-                      <span className="badge" style={{ fontSize: 11, background: '#E8F5E9', color: '#2E7D32', fontWeight: 700 }}>
-                        {t.comanda || t.id}
-                      </span>
+                    <td style={{ fontWeight: 600, fontSize: 13, color: '#334155', padding: '16px' }}>
+                      {t.cliente}
                     </td>
-                    <td style={{ fontWeight: 500, fontSize: 13 }}>{t.cliente}</td>
-                    <td style={{ fontWeight: 500, fontSize: 12 }}>{t.profissional || t.profissionalNome || '—'}</td>
-                    <td style={{ textAlign: 'right', fontWeight: 700, fontSize: 13 }}>{fmtCurrency(t.total)}</td>
-                    <td>
-                      <span className="badge badge-neutral" style={{ fontSize: 10, textTransform: 'uppercase' }}>
+                    <td style={{ fontSize: 13, color: '#555', padding: '16px' }}>
+                      {t.procedimento}
+                    </td>
+                    <td style={{ fontSize: 13, color: '#555', padding: '16px', textTransform: 'uppercase' }}>
+                      {t.profissional || t.profissionalNome || '—'}
+                    </td>
+                    <td style={{ textAlign: 'center', fontWeight: 700, fontSize: 13, color: '#10B981', padding: '16px' }}>
+                      {fmtCurrency(t.total)}
+                    </td>
+                    <td style={{ textAlign: 'center', fontWeight: 700, fontSize: 13, color: '#D97706', padding: '16px' }}>
+                      --
+                    </td>
+                    <td style={{ textAlign: 'center', padding: '16px' }}>
+                      <span style={{ fontSize: 11, fontWeight: 600, color: '#10B981', background: '#D1FAE5', padding: '4px 10px', borderRadius: 99 }}>
                         {t.pagamento}
                       </span>
                     </td>
-                    <td>
-                      {t.hash ? (
-                        <span title={t.hash} style={{ fontFamily: 'monospace', fontSize: 10, color: 'var(--text-muted)', background: 'var(--bg-main)', padding: '2px 6px', borderRadius: 4 }}>
-                          {t.hash.substring(0, 8)}...
-                        </span>
-                      ) : (
-                        <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>—</span>
-                      )}
-                    </td>
-                    <td>
-                      <span className={`origem-badge ${t.origem === 'planilha' ? 'origem-planilha' : 'origem-manual'}`} style={{ fontSize: 10 }}>
+                    <td style={{ textAlign: 'right', padding: '16px' }}>
+                      <span style={{ fontSize: 10, fontWeight: 600, color: '#10B981', background: '#D1FAE5', padding: '4px 8px', borderRadius: 4, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
                         {t.origem === 'planilha' ? <><FileSpreadsheet style={{ width: 10, height: 10 }} />Planilha</> : 'Manual'}
                       </span>
                     </td>
