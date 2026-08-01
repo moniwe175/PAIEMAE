@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 import { Users, Plus, Search, Phone, Calendar, FileText, Star, XCircle, ChevronRight, Mail, Instagram, Upload, Trash2, AlertTriangle } from 'lucide-react';
 import { fetchClients, insertClient, deleteClient, updateClient, fetchAppointments } from '../services/supabaseService';
 import { getCurrentUser } from '../lib/supabase';
@@ -65,6 +66,7 @@ function PacienteModal({ onClose, onSave, initialData }) {
 }
 
 export default function Pacientes() {
+  const location = useLocation();
   const [pacientes, setPacientes] = useState([]);
   const [modal, setModal] = useState(false);
   const [editModal, setEditModal] = useState(null);
@@ -142,6 +144,23 @@ export default function Pacientes() {
     }
     load();
   }, []);
+
+  // Auto-select patient if navigated from Agenda with selectedPaciente in state or query
+  useEffect(() => {
+    if (pacientes.length > 0) {
+      const targetName = location.state?.selectedPaciente || new URLSearchParams(location.search).get('paciente');
+      if (targetName) {
+        const targetClean = targetName.trim().toLowerCase();
+        const found = pacientes.find(p => {
+          const pName = (p.nome || '').trim().toLowerCase();
+          return pName === targetClean || pName.includes(targetClean) || targetClean.includes(pName);
+        });
+        if (found) {
+          setSelected(found);
+        }
+      }
+    }
+  }, [pacientes, location]);
 
   const cleanAndTitleCaseName = (name) => {
     if (!name) return '';

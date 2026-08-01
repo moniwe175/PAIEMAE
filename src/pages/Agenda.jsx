@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect, useCallback, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   ChevronLeft, ChevronRight, Plus, Star, XCircle, CheckCircle,
   Clock, User, Scissors, AlertCircle, Calendar, UserPlus,
@@ -483,6 +484,7 @@ function BloqueioModal({ onClose, date, profissional: prefillProf, hora: prefill
 // ─── AppointmentDetailModal ───────────────────────────────────
 // ═══════════════════════════════════════════════════════════════
 function AppointmentDetailModal({ apt, profissionais, onClose, onEdit, onDelete, onDeleteAll, onStatusChange }) {
+  const navigate = useNavigate();
   const [showConfirmDeleteAll, setShowConfirmDeleteAll] = useState(false);
   const prof = profissionais.find(p => p.nome === apt.profissional);
   const st = STATUS_CONFIG[apt.status] || STATUS_CONFIG.aguardando_confirmacao;
@@ -514,13 +516,33 @@ function AppointmentDetailModal({ apt, profissionais, onClose, onEdit, onDelete,
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
             <div>
               <div style={{ fontSize: 11, fontWeight: 700, color: 'rgba(255,255,255,0.7)', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 5 }}>Agendamento</div>
-              <div style={{ fontSize: 20, fontWeight: 700, color: '#fff', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div style={{ fontSize: 20, fontWeight: 700, color: '#fff', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                 {apt.paciente}
                 {apt.fixo && (
                   <div title="Cliente Fixo" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: '#3B82F6', borderRadius: 20, padding: '2px 10px', fontSize: 10, fontWeight: 700, color: '#fff' }}>
                     <Repeat2 style={{ width: 10, height: 10 }} />FIXO
                   </div>
                 )}
+                <button
+                  onClick={() => navigate('/pacientes', { state: { selectedPaciente: apt.paciente } })}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    background: 'rgba(255,255,255,0.25)',
+                    border: '1px solid rgba(255,255,255,0.4)',
+                    borderRadius: 20,
+                    padding: '3px 10px',
+                    fontSize: 11,
+                    fontWeight: 600,
+                    color: '#fff',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s',
+                  }}
+                  title="Ver Perfil do Paciente"
+                >
+                  <User style={{ width: 11, height: 11 }} /> Ver Perfil
+                </button>
               </div>
               <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.85)', display: 'flex', alignItems: 'center', gap: 5 }}>
                 <Scissors style={{ width: 13, height: 13 }} />{apt.servico}
@@ -568,7 +590,7 @@ function AppointmentDetailModal({ apt, profissionais, onClose, onEdit, onDelete,
               ))}
             </div>
           </div>
-          <div style={{ display: 'flex', gap: 8, paddingTop: 14, borderTop: '1px solid #F0EBE6' }}>
+          <div style={{ display: 'flex', gap: 8, paddingTop: 14, borderTop: '1px solid #F0EBE6', flexWrap: 'wrap' }}>
             <button onClick={() => onDelete(apt.id)} style={{ padding: '8px 14px', borderRadius: 10, border: '1.5px solid #FCA5A5', background: '#FFF5F5', fontSize: 13, fontWeight: 600, cursor: 'pointer', color: '#EF4444', display: 'flex', alignItems: 'center', gap: 5 }}>
               <Trash2 style={{ width: 13, height: 13 }} />Excluir
             </button>
@@ -577,7 +599,13 @@ function AppointmentDetailModal({ apt, profissionais, onClose, onEdit, onDelete,
                 <Trash2 style={{ width: 13, height: 13 }} />Excluir Todos
               </button>
             )}
-            <button onClick={() => onEdit(apt)} style={{ flex: 1, padding: '8px 14px', borderRadius: 10, border: 'none', background: 'linear-gradient(135deg,#C73B6D,#A83158)', fontSize: 13, fontWeight: 700, cursor: 'pointer', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}>
+            <button
+              onClick={() => navigate('/pacientes', { state: { selectedPaciente: apt.paciente } })}
+              style={{ padding: '8px 14px', borderRadius: 10, border: '1.5px solid #C73B6D', background: '#FFF5F8', fontSize: 13, fontWeight: 600, cursor: 'pointer', color: '#C73B6D', display: 'flex', alignItems: 'center', gap: 5 }}
+            >
+              <User style={{ width: 13, height: 13 }} />Ver Perfil
+            </button>
+            <button onClick={() => onEdit(apt)} style={{ flex: 1, padding: '8px 14px', borderRadius: 10, border: 'none', background: 'linear-gradient(135deg,#C73B6D,#A83158)', fontSize: 13, fontWeight: 700, cursor: 'pointer', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, minWidth: 90 }}>
               <Edit3 style={{ width: 13, height: 13 }} />Editar
             </button>
           </div>
