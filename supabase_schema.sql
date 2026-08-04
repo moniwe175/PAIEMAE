@@ -944,3 +944,148 @@ create trigger handle_updated_at_kanban_leads
   for each row execute function public.handle_updated_at();
 
 create index if not exists idx_kanban_leads_user_id on public.kanban_leads(user_id);
+
+-- ─── 22. Sheet Transactions (dados financeiros da planilha) ────────
+create table if not exists public.sheet_transactions (
+  id uuid default gen_random_uuid() primary key,
+  connection_id text references public.sheet_connections(id),
+  date_ref date,
+  client text,
+  procedure text,
+  professional text,
+  gross numeric(12,2) default 0,
+  commission_percent integer,
+  commission_value numeric(12,2),
+  payment_method text default 'Pix',
+  pix numeric(12,2) default 0,
+  credito numeric(12,2) default 0,
+  debito numeric(12,2) default 0,
+  dinheiro numeric(12,2) default 0,
+  repasse numeric(12,2) default 0,
+  comanda text,
+  row_type text default 'receita',
+  tipo text default 'receita',
+  origin text default 'planilha',
+  is_metadata boolean default false,
+  deleted_at timestamp with time zone,
+  user_id uuid references auth.users,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null,
+  updated_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+alter table public.sheet_transactions enable row level security;
+
+create policy "Users can view own sheet_transactions"
+  on public.sheet_transactions for select
+  using ( auth.uid() = user_id );
+
+create policy "Users can insert own sheet_transactions"
+  on public.sheet_transactions for insert
+  with check ( auth.uid() = user_id );
+
+create policy "Users can update own sheet_transactions"
+  on public.sheet_transactions for update
+  using ( auth.uid() = user_id );
+
+create policy "Users can delete own sheet_transactions"
+  on public.sheet_transactions for delete
+  using ( auth.uid() = user_id );
+
+create trigger handle_updated_at_sheet_transactions
+  before update on public.sheet_transactions
+  for each row execute function public.handle_updated_at();
+
+create index if not exists idx_sheet_transactions_user_id on public.sheet_transactions(user_id);
+create index if not exists idx_sheet_transactions_date_ref on public.sheet_transactions(date_ref);
+create index if not exists idx_sheet_transactions_comanda on public.sheet_transactions(comanda);
+
+-- ─── Security Fixes ─────────────────────────────────────────────
+
+-- Auto-create profile on new user signup
+create or replace function public.handle_new_user()
+returns trigger as $$
+begin
+  insert into public.profiles (id, nome, avatar_url)
+  values (
+    new.id,
+    coalesce(new.raw_user_meta_data->>'nome', new.raw_user_meta_data->>'name', split_part(new.email, '@', 1)),
+    new.raw_user_meta_data->>'avatar_url'
+  )
+  on conflict (id) do nothing;
+  return new;
+end;
+$$ language plpgsql security definer;
+
+drop trigger if exists on_auth_user_created on auth.users;
+create trigger on_auth_user_created
+  after insert on auth.users
+  for each row execute function public.handle_new_user();
+
+-- profiles: allow insert (for trigger and direct creation)
+drop policy if exists "Users can insert own profile" on public.profiles;
+create policy "Users can insert own profile"
+  on public.profiles for insert
+  with check ( auth.uid() = id );
+
+-- transactions: missing UPDATE policy
+drop policy if exists "Users can update own transactions" on public.transactions;
+create policy "Users can update own transactions"
+  on public.transactions for update
+  using ( auth.uid() = user_id );
+
+-- expenses: missing UPDATE policy
+drop policy if exists "Users can update own expenses" on public.expenses;
+create policy "Users can update own expenses"
+  on public.expenses for update
+  using ( auth.uid() = user_id );
+
+-- sync_logs: add missing columns + UPDATE policy
+alter table public.sync_logs add column if not exists event text;
+alter table public.sync_logs add column if not exists status text;
+alter table public.sync_logs add column if not exists details text;
+
+drop policy if exists "Users can update own sync logs" on public.sync_logs;
+create policy "Users can update own sync logs"
+  on public.sync_logs for update
+  using ( auth.uid() = user_id );
+
+-- kr_weekly_snapshots: missing UPDATE policy
+drop policy if exists "Users can update own kr_weekly_snapshots" on public.kr_weekly_snapshots;
+create policy "Users can update own kr_weekly_snapshots"
+  on public.kr_weekly_snapshots for update
+  using ( auth.uid() = user_id );
+
+-- marketing_engine_settings: missing DELETE policy
+drop policy if exists "Users can delete marketing engine settings" on public.marketing_engine_settings;
+create policy "Users can delete marketing engine settings"
+  on public.marketing_engine_settings for delete
+  to authenticated using (true);
+
+-- Missing indexes
+create index if not exists idx_sheet_connections_user_id on public.sheet_connections(user_id);
+
+-- Missing updated_at columns + triggers
+alter table public.transactions add column if not exists updated_at timestamp with time zone default timezone('utc'::text, now()) not null;
+alter table public.expenses add column if not exists updated_at timestamp with time zone default timezone('utc'::text, now()) not null;
+alter table public.comissoes add column if not exists updated_at timestamp with time zone default timezone('utc'::text, now()) not null;
+alter table public.sync_logs add column if not exists updated_at timestamp with time zone default timezone('utc'::text, now()) not null;
+
+drop trigger if exists handle_updated_at_transactions on public.transactions;
+create trigger handle_updated_at_transactions
+  before update on public.transactions
+  for each row execute function public.handle_updated_at();
+
+drop trigger if exists handle_updated_at_expenses on public.expenses;
+create trigger handle_updated_at_expenses
+  before update on public.expenses
+  for each row execute function public.handle_updated_at();
+
+drop trigger if exists handle_updated_at_comissoes on public.comissoes;
+create trigger handle_updated_at_comissoes
+  before update on public.comissoes
+  for each row execute function public.handle_updated_at();
+
+drop trigger if exists handle_updated_at_sync_logs on public.sync_logs;
+create trigger handle_updated_at_sync_logs
+  before update on public.sync_logs
+  for each row execute function public.handle_updated_at();

@@ -76,44 +76,6 @@ export default function Financial() {
   const [expFiltroCat, setExpFiltroCat] = useState('todos');
   const [syncing, setSyncing] = useState(false);
 
-  // ─── Auto-sync automático em tempo real: abre a página -> sincroniza; a cada 2 min -> sincroniza ───
-  useEffect(() => {
-    let timer;
-
-    async function autoSync() {
-      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
-
-      try {
-        const result = await syncSheetToSupabase(syncConfig?.sheet_url, {
-          connectionId: syncConfig?.id,
-          id: syncConfig?.id,
-        });
-
-        if (result.success) {
-          const [stRes, summaryRes] = await Promise.all([
-            sbFetchSheetTransactions(),
-            sbFetchSheetSummary(),
-          ]);
-          if (!stRes.error && stRes.data) setSheetTransactions(stRes.data);
-          if (!summaryRes.error && summaryRes.data) setSheetSummary(summaryRes.data);
-        }
-      } catch (err) {
-        console.warn('[Financial] Auto-sync background error:', err);
-      }
-    }
-
-    // 1. Sincronização imediata ao abrir a página Financeiro
-    autoSync();
-
-    // 2. Polling periódico silencioso a cada 2 minutos (120.000ms)
-    timer = setInterval(() => {
-      autoSync();
-    }, 120000);
-
-    return () => {
-      if (timer) clearInterval(timer);
-    };
-  }, [syncConfig?.sheet_url, syncConfig?.id, setSheetTransactions, setSheetSummary]);
 
   // ─── Supabase Realtime: escuta mudanças em sheet_transactions, sheet_connections e expenses ───
   useEffect(() => {
@@ -175,14 +137,7 @@ export default function Financial() {
 
       if (result.success) {
         addLog('success', `Planilha sincronizada com sucesso! ${result.rowCount || 0} registros processados.`);
-        
-        // Recarregar dados em tempo real para re-renderizar KPIs e tabelas na hora
-        const [stRes, summaryRes] = await Promise.all([
-          sbFetchSheetTransactions(),
-          sbFetchSheetSummary(),
-        ]);
-        if (!stRes.error && stRes.data) setSheetTransactions(stRes.data);
-        if (!summaryRes.error && summaryRes.data) setSheetSummary(summaryRes.data);
+        // Realtime listener irá re-buscar os dados automaticamente após o upsert
       } else {
         addLog('error', `Erro na sincronização: ${result.error}`);
         alert(`Erro ao sincronizar: ${result.error}`);
