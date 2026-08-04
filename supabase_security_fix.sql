@@ -226,14 +226,79 @@ CREATE TRIGGER handle_updated_at_sync_logs
 -- Adicionar coluna user_id
 ALTER TABLE public.sheet_transactions ADD COLUMN IF NOT EXISTS user_id uuid references auth.users;
 
--- Backfill: atribuir todas as transações existentes ao primeiro usuário
--- AJUSTE O UUID ABAIXO para o user_id correto antes de executar!
--- UPDATE public.sheet_transactions
--- SET user_id = 'SEU-UUID-AQUI'
--- WHERE user_id IS NULL;
-
 -- Habilitar RLS após adicionar user_id
 ALTER TABLE public.sheet_transactions ENABLE ROW LEVEL SECURITY;
+
+
+-- ═══════════════════════════════════════════════════════════════
+-- SEÇÃO D — BACKFILL user_id em TODAS as tabelas
+-- IMPORTANTE: Substitua SEU-UUID-AQUI pelo seu user_id real
+-- Para descobrir seu UUID, execute:
+--   SELECT id, email FROM auth.users;
+-- ═══════════════════════════════════════════════════════════════
+
+-- Backfill sheet_transactions
+UPDATE public.sheet_transactions SET user_id = (SELECT id FROM auth.users LIMIT 1) WHERE user_id IS NULL;
+
+-- Backfill transactions
+UPDATE public.transactions SET user_id = (SELECT id FROM auth.users LIMIT 1) WHERE user_id IS NULL;
+
+-- Backfill expenses
+UPDATE public.expenses SET user_id = (SELECT id FROM auth.users LIMIT 1) WHERE user_id IS NULL;
+
+-- Backfill comissoes
+UPDATE public.comissoes SET user_id = (SELECT id FROM auth.users LIMIT 1) WHERE user_id IS NULL;
+
+-- Backfill sync_logs
+UPDATE public.sync_logs SET user_id = (SELECT id FROM auth.users LIMIT 1) WHERE user_id IS NULL;
+
+-- Backfill cashier_state
+UPDATE public.cashier_state SET user_id = (SELECT id FROM auth.users LIMIT 1) WHERE user_id IS NULL;
+
+-- Backfill split_config
+UPDATE public.split_config SET user_id = (SELECT id FROM auth.users LIMIT 1) WHERE user_id IS NULL;
+
+-- Backfill sheet_connections
+UPDATE public.sheet_connections SET user_id = (SELECT id FROM auth.users LIMIT 1) WHERE user_id IS NULL;
+
+-- Backfill clients
+UPDATE public.clients SET user_id = (SELECT id FROM auth.users LIMIT 1) WHERE user_id IS NULL;
+
+-- Backfill appointments
+UPDATE public.appointments SET user_id = (SELECT id FROM auth.users LIMIT 1) WHERE user_id IS NULL;
+
+-- Backfill campaigns
+UPDATE public.campaigns SET user_id = (SELECT id FROM auth.users LIMIT 1) WHERE user_id IS NULL;
+
+-- Backfill anamneses
+UPDATE public.anamneses SET user_id = (SELECT id FROM auth.users LIMIT 1) WHERE user_id IS NULL;
+
+-- Backfill inventory
+UPDATE public.inventory SET user_id = (SELECT id FROM auth.users LIMIT 1) WHERE user_id IS NULL;
+
+-- Backfill packages
+UPDATE public.packages SET user_id = (SELECT id FROM auth.users LIMIT 1) WHERE user_id IS NULL;
+
+-- Backfill kanban_leads
+UPDATE public.kanban_leads SET user_id = (SELECT id FROM auth.users LIMIT 1) WHERE user_id IS NULL;
+
+-- Backfill daily_reports
+UPDATE public.daily_reports SET user_id = (SELECT id FROM auth.users LIMIT 1) WHERE user_id IS NULL;
+
+-- Backfill OKR tables
+UPDATE public.ciclos_okr SET user_id = (SELECT id FROM auth.users LIMIT 1) WHERE user_id IS NULL;
+UPDATE public.objetivos SET user_id = (SELECT id FROM auth.users LIMIT 1) WHERE user_id IS NULL;
+UPDATE public.key_results SET user_id = (SELECT id FROM auth.users LIMIT 1) WHERE user_id IS NULL;
+UPDATE public.kr_weekly_snapshots SET user_id = (SELECT id FROM auth.users LIMIT 1) WHERE user_id IS NULL;
+
+-- Backfill strategic/sticky
+UPDATE public.sticky_notes SET user_id = (SELECT id FROM auth.users LIMIT 1) WHERE user_id IS NULL;
+UPDATE public.strategic_tasks SET user_id = (SELECT id FROM auth.users LIMIT 1) WHERE user_id IS NULL;
+
+-- Backfill servicos/profissionais
+UPDATE public.servicos SET user_id = (SELECT id FROM auth.users LIMIT 1) WHERE user_id IS NULL;
+UPDATE public.profissionais SET user_id = (SELECT id FROM auth.users LIMIT 1) WHERE user_id IS NULL;
+UPDATE public.pacientes SET user_id = (SELECT id FROM auth.users LIMIT 1) WHERE user_id IS NULL;
 
 
 -- ═══════════════════════════════════════════════════════════════
@@ -242,7 +307,7 @@ ALTER TABLE public.sheet_transactions ENABLE ROW LEVEL SECURITY;
 
 -- Confirmar que TODAS as tabelas têm RLS ativo
 SELECT relname AS tabela,
-       CASE WHEN relrowsecurity THEN '✅ ATIVO' ELSE '❌ DESATIVADO' END AS rls_status
+       CASE WHEN relrowsecurity THEN 'OK ATIVO' ELSE 'DESATIVADO' END AS rls_status
 FROM pg_class
 WHERE relkind = 'r'
   AND relnamespace = 'public'::regnamespace
@@ -254,3 +319,13 @@ FROM pg_policies
 WHERE schemaname = 'public'
 GROUP BY tablename
 ORDER BY tablename;
+
+-- Verificar registros sem user_id (deve retornar 0 em todas)
+SELECT 'sheet_transactions' AS tabela, COUNT(*) AS sem_user_id FROM public.sheet_transactions WHERE user_id IS NULL
+UNION ALL SELECT 'transactions', COUNT(*) FROM public.transactions WHERE user_id IS NULL
+UNION ALL SELECT 'expenses', COUNT(*) FROM public.expenses WHERE user_id IS NULL
+UNION ALL SELECT 'comissoes', COUNT(*) FROM public.comissoes WHERE user_id IS NULL
+UNION ALL SELECT 'sync_logs', COUNT(*) FROM public.sync_logs WHERE user_id IS NULL
+UNION ALL SELECT 'clients', COUNT(*) FROM public.clients WHERE user_id IS NULL
+UNION ALL SELECT 'sheet_connections', COUNT(*) FROM public.sheet_connections WHERE user_id IS NULL
+ORDER BY sem_user_id DESC;

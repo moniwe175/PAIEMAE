@@ -7,6 +7,19 @@ function handleError(error, fallback = null) {
   return { data: fallback, error };
 }
 
+/**
+ * Retorna o user_id do usuário autenticado atual.
+ * Usado para garantir que todos os inserts/upserts tenham user_id correto para RLS.
+ */
+export async function getUserId() {
+  try {
+    const { data: { user } } = await supabase.auth.getUser();
+    return user?.id || null;
+  } catch {
+    return null;
+  }
+}
+
 // ─── Connectivity Check ───────────────────────────────────────
 
 export async function checkSupabaseConnection() {
@@ -34,7 +47,8 @@ export async function fetchTransactions() {
 
 export async function insertTransaction(tx) {
   if (!isSupabaseConfigured()) return handleError('Supabase not configured');
-  const { data, error } = await supabase.from('transactions').insert([tx]).select().single();
+  const userId = tx.user_id || await getUserId();
+  const { data, error } = await supabase.from('transactions').insert([{ ...tx, user_id: userId }]).select().single();
   if (error) return handleError(error);
   return { data, error: null };
 }
@@ -66,7 +80,7 @@ export async function upsertTransaction(tx) {
     comanda: comandaId,
     ordem: Number(tx.ordem ?? 0),
     hash: tx.hash || null,
-    user_id: tx.user_id || null,
+    user_id: tx.user_id || await getUserId(),
   };
 
   const { data, error } = await supabase
@@ -151,6 +165,7 @@ export async function upsertSheetTransaction(st) {
   if (!isSupabaseConfigured()) return handleError('Supabase not configured');
 
   const comandaStr = st.comanda ? String(st.comanda).trim() : null;
+  const userId = st.user_id || await getUserId();
 
   const payload = {
     date_ref: st.date_ref || new Date().toISOString().split('T')[0],
@@ -172,6 +187,7 @@ export async function upsertSheetTransaction(st) {
     origin: st.origin || 'planilha',
     is_metadata: false,
     deleted_at: null,
+    user_id: userId,
   };
 
   if (st.id) payload.id = st.id;
@@ -217,7 +233,8 @@ export async function fetchExpenses() {
 
 export async function insertExpense(exp) {
   if (!isSupabaseConfigured()) return handleError('Supabase not configured');
-  const { data, error } = await supabase.from('expenses').insert([exp]).select().single();
+  const userId = exp.user_id || await getUserId();
+  const { data, error } = await supabase.from('expenses').insert([{ ...exp, user_id: userId }]).select().single();
   if (error) return handleError(error);
   return { data, error: null };
 }
@@ -235,7 +252,7 @@ export async function upsertExpense(exp) {
     metodo_pagamento: exp.metodo_pagamento || exp.metodoPagamento || exp.metodo || 'Outros',
     origem: exp.origem || 'manual',
     tipo: exp.tipo || 'despesa',
-    user_id: exp.user_id || null,
+    user_id: exp.user_id || await getUserId(),
   };
 
   const { data, error } = await supabase
@@ -271,7 +288,8 @@ export async function fetchComissoes() {
 
 export async function insertComissao(com) {
   if (!isSupabaseConfigured()) return handleError('Supabase not configured');
-  const { data, error } = await supabase.from('comissoes').insert([com]).select().single();
+  const userId = com.user_id || await getUserId();
+  const { data, error } = await supabase.from('comissoes').insert([{ ...com, user_id: userId }]).select().single();
   if (error) return handleError(error);
   return { data, error: null };
 }
@@ -297,13 +315,15 @@ export async function fetchCashierState() {
 
 export async function upsertCashierState(state) {
   if (!isSupabaseConfigured()) return handleError('Supabase not configured');
-  const { data: existing } = await supabase.from('cashier_state').select('id').maybeSingle();
+  const userId = state.user_id || await getUserId();
+  const stateWithUser = { ...state, user_id: userId };
+  const { data: existing } = await supabase.from('cashier_state').select('id').eq('user_id', userId).maybeSingle();
   if (existing?.id) {
-    const { data, error } = await supabase.from('cashier_state').update(state).eq('id', existing.id).select().single();
+    const { data, error } = await supabase.from('cashier_state').update(stateWithUser).eq('id', existing.id).select().single();
     if (error) return handleError(error);
     return { data, error: null };
   }
-  const { data, error } = await supabase.from('cashier_state').insert([state]).select().single();
+  const { data, error } = await supabase.from('cashier_state').insert([stateWithUser]).select().single();
   if (error) return handleError(error);
   return { data, error: null };
 }
@@ -319,9 +339,11 @@ export async function fetchSplitConfig() {
 
 export async function upsertSplitConfig(config) {
   if (!isSupabaseConfigured()) return handleError('Supabase not configured');
+  const userId = config.user_id || await getUserId();
+  const configWithUser = { ...config, user_id: userId };
   const { data, error } = await supabase
     .from('split_config')
-    .upsert(config, { onConflict: 'profissional' })
+    .upsert(configWithUser, { onConflict: 'profissional' })
     .select();
   if (error) return handleError(error);
   return { data, error: null };
@@ -342,6 +364,7 @@ export async function fetchSyncLogs(limit = 200) {
 
 export async function insertSyncLog(log) {
   if (!isSupabaseConfigured()) return handleError('Supabase not configured');
+  const userId = log.user_id || await getUserId();
   // Mapear para colunas reais do banco (event e status são NOT NULL)
   const dbLog = {
     event: log.event || log.type || 'info',
@@ -349,6 +372,7 @@ export async function insertSyncLog(log) {
     details: log.message || log.details || null,
     type: log.type || null,
     message: log.message || null,
+    user_id: userId,
   };
   const { data, error } = await supabase.from('sync_logs').insert([dbLog]).select().single();
   if (error) return handleError(error);
@@ -393,6 +417,7 @@ export async function upsertSheetConnection(connection) {
   const rawId = (connection.id || connection.sheet_id || '').toString();
   const uuid = generateUuidFromSeed(rawId);
   const extractSheetId = connection.sheetId || connection.sheet_id || connection.url?.match(/spreadsheets\/d\/([a-zA-Z0-9-_]+)/)?.[1] || connection.sheet_url?.match(/spreadsheets\/d\/([a-zA-Z0-9-_]+)/)?.[1] || null;
+  const userId = connection.user_id || await getUserId();
 
   // ── Tentativa 1: Payload EN com UUID (schema padrão Supabase)
   const payloadEN = {
@@ -407,8 +432,8 @@ export async function upsertSheetConnection(connection) {
     sheet_id: extractSheetId,
     api_key: connection.googleApiKey || connection.api_key || null,
     range: connection.range || 'A1:Z1000',
+    user_id: userId,
   };
-  if (connection.user_id) payloadEN.user_id = connection.user_id;
 
   let { data, error } = await supabase
     .from('sheet_connections')
@@ -430,8 +455,8 @@ export async function upsertSheetConnection(connection) {
       sheet_id: extractSheetId,
       api_key: connection.googleApiKey || connection.api_key || null,
       range: connection.range || 'A1:Z1000',
+      user_id: userId,
     };
-    if (connection.user_id) payloadPT.user_id = connection.user_id;
 
     const res2 = await supabase
       .from('sheet_connections')
@@ -511,6 +536,7 @@ export async function insertDailyReport(report) {
   };
 
   if (report.user_id) dbReport.user_id = report.user_id;
+  else dbReport.user_id = await getUserId();
 
   // Tentativa 1: upsert normal
   let { data, error } = await supabase
@@ -569,7 +595,8 @@ export async function fetchCampaigns() {
 
 export async function insertCampaign(campaign) {
   if (!isSupabaseConfigured()) return handleError('Supabase not configured');
-  const { data, error } = await supabase.from('campaigns').insert([campaign]).select().single();
+  const userId = campaign.user_id || await getUserId();
+  const { data, error } = await supabase.from('campaigns').insert([{ ...campaign, user_id: userId }]).select().single();
   if (error) return handleError(error);
   return { data, error: null };
 }
@@ -674,7 +701,8 @@ export async function fetchClients() {
 
 export async function insertClient(client) {
   if (!isSupabaseConfigured()) return handleError('Supabase not configured');
-  const { data, error } = await supabase.from('clients').insert([client]).select().single();
+  const userId = client.user_id || await getUserId();
+  const { data, error } = await supabase.from('clients').insert([{ ...client, user_id: userId }]).select().single();
   if (error) return handleError(error);
   return { data, error: null };
 }
@@ -708,7 +736,8 @@ export async function fetchAppointments() {
 
 export async function insertAppointment(apt) {
   if (!isSupabaseConfigured()) return handleError('Supabase not configured');
-  const { data, error } = await supabase.from('appointments').insert([apt]).select().single();
+  const userId = apt.user_id || await getUserId();
+  const { data, error } = await supabase.from('appointments').insert([{ ...apt, user_id: userId }]).select().single();
   if (error) return handleError(error);
   return { data, error: null };
 }
@@ -741,9 +770,10 @@ export async function fetchAnamneses() {
 
 export async function upsertAnamnese(anamnese) {
   if (!isSupabaseConfigured()) return handleError('Supabase not configured');
+  const userId = anamnese.user_id || await getUserId();
   const { data, error } = await supabase
     .from('anamneses')
-    .upsert([anamnese], { onConflict: 'id' })
+    .upsert([{ ...anamnese, user_id: userId }], { onConflict: 'id' })
     .select()
     .single();
   if (error) return handleError(error);
@@ -771,7 +801,8 @@ export async function fetchInventory() {
 
 export async function insertInventoryItem(item) {
   if (!isSupabaseConfigured()) return handleError('Supabase not configured');
-  const { data, error } = await supabase.from('inventory').insert([item]).select().single();
+  const userId = item.user_id || await getUserId();
+  const { data, error } = await supabase.from('inventory').insert([{ ...item, user_id: userId }]).select().single();
   if (error) return handleError(error);
   return { data, error: null };
 }
@@ -804,8 +835,9 @@ export async function fetchPackages() {
 
 export async function insertPackage(pkg) {
   if (!isSupabaseConfigured()) return handleError('Supabase not configured');
+  const userId = pkg.user_id || await getUserId();
   console.log('[PACKAGES] Inserting package:', pkg);
-  const { data, error } = await supabase.from('packages').insert([pkg]).select().single();
+  const { data, error } = await supabase.from('packages').insert([{ ...pkg, user_id: userId }]).select().single();
   if (error) {
     console.error('[PACKAGES] Error inserting:', error);
     return handleError(error);
@@ -842,7 +874,8 @@ export async function fetchKanbanLeads() {
 
 export async function insertKanbanLead(lead) {
   if (!isSupabaseConfigured()) return handleError('Supabase not configured');
-  const { data, error } = await supabase.from('kanban_leads').insert([lead]).select().single();
+  const userId = lead.user_id || await getUserId();
+  const { data, error } = await supabase.from('kanban_leads').insert([{ ...lead, user_id: userId }]).select().single();
   if (error) return handleError(error);
   return { data, error: null };
 }

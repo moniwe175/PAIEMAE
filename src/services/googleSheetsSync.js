@@ -6,7 +6,7 @@
  */
 
 import { supabase } from '../lib/supabase';
-import { upsertSheetTransaction } from './supabaseService';
+import { upsertSheetTransaction, getUserId } from './supabaseService';
 
 /**
  * Extrai o Sheet ID da URL do Google Sheets
@@ -288,20 +288,24 @@ export async function syncSheetToSupabase(sheetUrl, options = {}) {
     // Espelhamento perfeito: deletar registros de planilha que foram removidos do Google Sheets
     const activeComandas = sheetRows.map(r => r.comanda).filter(Boolean);
     if (activeComandas.length > 0) {
+      const userId = await getUserId();
       await supabase
         .from('sheet_transactions')
         .delete()
         .eq('origin', 'planilha')
+        .eq('user_id', userId)
         .not('comanda', 'in', `(${activeComandas.map(c => `"${c}"`).join(',')})`)
         .catch(err => console.warn('[GoogleSheetsSync] Aviso na remoção de itens apagados:', err.message));
     }
 
+    const userId = await getUserId();
     await supabase.from('sync_logs').insert([{
       event: 'sync_complete',
       status: 'success',
       details: `Sincronizado ${succeeded} registros na tabela sheet_transactions`,
       message: `Sync Google Sheets (JS): ${succeeded} registros importados`,
       type: 'success',
+      user_id: userId,
     }]).catch(() => {});
 
     return {
@@ -312,12 +316,14 @@ export async function syncSheetToSupabase(sheetUrl, options = {}) {
   } catch (error) {
     console.error('[GoogleSheetsSync] Erro:', error);
     
+    const userId2 = await getUserId();
     await supabase.from('sync_logs').insert([{
       event: 'sync_error',
       status: 'error',
       details: error.message,
       message: `Erro ao sincronizar planilha: ${error.message}`,
       type: 'error',
+      user_id: userId2,
     }]).catch(() => {});
 
     return {
