@@ -11,8 +11,10 @@ import { paymentMethods, calcularSplit } from '../mocks/financial';
 import { syncSheetToSupabase } from '../services/googleSheetsSync';
 import {
   fetchSheetTransactions as sbFetchSheetTransactions,
-  fetchSheetTransactionsSummary as sbFetchSheetSummary
+  fetchSheetTransactionsSummary as sbFetchSheetSummary,
+  fetchExpenses as sbFetchExpenses
 } from '../services/supabaseService';
+import supabase from '../lib/supabase';
 
 const TABS = [
   { key: 'transacoes', label: 'Transações' },
@@ -57,6 +59,7 @@ export default function Financial() {
     // ─ Dados reais da planilha (sheet_transactions) ─
     sheetTransactions, setSheetTransactions,
     sheetSummary, setSheetSummary,
+    setExpenses,
   } = useSync();
 
   const [activeTab, setActiveTab] = useState('transacoes');
@@ -111,6 +114,55 @@ export default function Financial() {
       if (timer) clearInterval(timer);
     };
   }, [syncConfig?.sheet_url, syncConfig?.id, setSheetTransactions, setSheetSummary]);
+
+  // ─── Supabase Realtime: escuta mudanças em sheet_transactions, sheet_connections e expenses ───
+  useEffect(() => {
+    async function fetchFinancialData() {
+      try {
+        const [stRes, summaryRes, expRes] = await Promise.all([
+          sbFetchSheetTransactions(),
+          sbFetchSheetSummary(),
+          sbFetchExpenses(),
+        ]);
+        if (!stRes.error && stRes.data) setSheetTransactions(stRes.data);
+        if (!summaryRes.error && summaryRes.data) setSheetSummary(summaryRes.data);
+        if (!expRes.error && expRes.data) setExpenses(expRes.data);
+      } catch (err) {
+        console.warn('[Financial] Realtime re-fetch error:', err);
+      }
+    }
+
+    // Buscar dados iniciais
+    fetchFinancialData();
+
+    // Escutar mudanças em tempo real
+    const channel = supabase
+      .channel('financial-realtime')
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'sheet_transactions'
+      }, () => {
+        fetchFinancialData();
+      })
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'sheet_connections'
+      }, () => {
+        fetchFinancialData();
+      })
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'expenses'
+      }, () => {
+        fetchFinancialData();
+      })
+      .subscribe();
+
+    return () => supabase.removeChannel(channel);
+  }, []);
 
   const handleManualSync = async () => {
     setSyncing(true);
