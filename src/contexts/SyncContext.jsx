@@ -25,12 +25,20 @@ const defaultSyncConfig = {
   sheetId: '',
   sheetName: '',
   range: 'A1:Z1000',
-  pollingInterval: 30,
   columnMapping: {},
   syncedRowHashes: [],
   googleClientId: '',
   googleApiKey: '',
 };
+
+// Polling intervals for sheet sync:
+// - Visible tab: 20s — fast enough for near-real-time updates without overloading
+//   the Google Sheets gviz endpoint (no strict rate limit, but 20s balances
+//   freshness with network economy).
+// - Hidden tab: 60s — keeps background sync alive so data is ready when the user
+//   returns, without wasting bandwidth or hitting the API unnecessarily.
+const VISIBLE_POLLING_MS = 20_000;
+const HIDDEN_POLLING_MS  = 60_000;
 
 export function SyncProvider({ children }) {
   const [transactions, setTransactions] = useState([]);
@@ -153,10 +161,10 @@ export function SyncProvider({ children }) {
   }, []);
 
   // ─── Global Sheet Polling — roda em background independente da página ──
-  // Inicia o polling automático sempre que uma planilha conectada é detectada no syncConfig
+  // Inicia o polling automático sempre que uma planilha conectada é detectada no syncConfig.
+  // Usa intervalo mais curto quando visível (20s) e mais longo em background (60s).
   useEffect(() => {
     const sheetUrl = syncConfig?.sheet_url;
-    const interval = (syncConfig?.pollingInterval || 60) * 1000;
     const isConnected = syncStatus === 'connected';
 
     // Parar polling anterior se a URL mudou ou desconectou
@@ -170,16 +178,21 @@ export function SyncProvider({ children }) {
     // Iniciar novo polling se conectado e com URL válida
     if (isConnected && sheetUrl && !sheetPollTimerRef.current) {
       sheetPollUrlRef.current = sheetUrl;
-      console.log(`[SyncContext] Iniciando sheet polling a cada ${interval / 1000}s para: ${sheetUrl}`);
+
+      let consecutiveErrors = 0; // Track consecutive failures to avoid log spam
 
       const doSync = async () => {
-        if (typeof document !== 'undefined' && document.visibilityState !== 'visible') {
-          return; // Só sincroniza se a aba estiver visível
-        }
+        // Determine interval based on tab visibility:
+        // - Visible: fast polling (VISIBLE_POLLING_MS = 20s) for near-real-time updates
+        // - Hidden: slow polling (HIDDEN_POLLING_MS = 60s) to keep background sync alive
+        const isHidden = typeof document !== 'undefined' && document.visibilityState !== 'visible';
+        const currentInterval = isHidden ? HIDDEN_POLLING_MS : VISIBLE_POLLING_MS;
+
         try {
           const result = await syncSheetToSupabase(sheetUrl, { connectionId: syncConfig?.id });
           if (result.success) {
-            console.log(`[SyncContext] Auto-sync concluído: ${result.rowCount || 0} registros processados`);
+            consecutiveErrors = 0; // Reset on success
+            console.log(`[SyncContext] Auto-sync concluído: ${result.rowCount || 0} registros (${isHidden ? 'background' : 'foreground'})`);
             setLastSyncAt(new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }));
             setSyncedRowCount(result.rowCount || 0);
 
@@ -190,23 +203,40 @@ export function SyncProvider({ children }) {
             ]);
             if (!stRes.error && stRes.data) setSheetTransactions(stRes.data);
             if (!summaryRes.error && summaryRes.data) setSheetSummary(summaryRes.data);
+          } else {
+            // sync returned { success: false } — count error but don't break the loop
+            consecutiveErrors++;
+            if (consecutiveErrors <= 3) {
+              console.warn(`[SyncContext] Sheet sync retornou falha (${consecutiveErrors}x):`, result.error);
+            }
           }
+
+          // Re-agendar com o intervalo correto (pode ter mudado de visible→hidden ou vice-versa)
+          if (sheetPollTimerRef.current) clearInterval(sheetPollTimerRef.current);
+          sheetPollTimerRef.current = setInterval(doSync, currentInterval);
         } catch (e) {
-          console.warn('[SyncContext] Erro no sheet polling:', e);
+          // Error handling: log only the first few consecutive errors to avoid console spam,
+          // then log every 10th error. Never break the polling loop.
+          consecutiveErrors++;
+          if (consecutiveErrors <= 3 || consecutiveErrors % 10 === 0) {
+            console.warn(`[SyncContext] Erro no sheet polling (${consecutiveErrors}x consecutivos):`, e?.message);
+          }
+          // Re-agendar mesmo com erro — polling nunca para
+          if (sheetPollTimerRef.current) clearInterval(sheetPollTimerRef.current);
+          sheetPollTimerRef.current = setInterval(doSync, currentInterval);
         }
       };
 
+      console.log(`[SyncContext] Iniciando sheet polling: ${VISIBLE_POLLING_MS / 1000}s (visível) / ${HIDDEN_POLLING_MS / 1000}s (background) para: ${sheetUrl}`);
+
       // Sync imediato ao carregar/conectar
       doSync();
-
-      // Polling periódico a cada intervalo (padrão: 2 minutos / 120s)
-      sheetPollTimerRef.current = setInterval(doSync, interval || 120000);
     }
 
     return () => {
-      // Não limpa aqui — o cleanup só acontece quando a URL ou status muda (acima)
+      // Cleanup only when URL or status changes (handled above)
     };
-  }, [syncConfig?.sheet_url, syncConfig?.id, syncStatus, syncConfig?.pollingInterval]);
+  }, [syncConfig?.sheet_url, syncConfig?.id, syncStatus]);
 
   // ─── Supabase Realtime: escuta mudanças na tabela transactions ──
   // Quando o Python sync faz upsert/delete, o frontend atualiza automaticamente

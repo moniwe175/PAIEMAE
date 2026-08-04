@@ -13,6 +13,12 @@ ALTER PUBLICATION supabase_realtime ADD TABLE sync_logs;
 -- Habilitar Realtime nas despesas (opcional mas recomendado)
 ALTER PUBLICATION supabase_realtime ADD TABLE expenses;
 
+-- Habilitar Realtime na tabela sheet_transactions (fonte real dos dados financeiros da planilha)
+ALTER PUBLICATION supabase_realtime ADD TABLE sheet_transactions;
+
+-- Habilitar Realtime na tabela sheet_connections (status das conexões de planilha)
+ALTER PUBLICATION supabase_realtime ADD TABLE sheet_connections;
+
 -- Verificar quais tabelas estão com Realtime habilitado
 SELECT schemaname, tablename
 FROM pg_publication_tables
