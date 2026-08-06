@@ -1,0 +1,21 @@
+{
+  "name": "marketing-engine-whatsapp-worker",
+  "version": "2.0.0",
+  "description": "Worker Baileys local para envio de mensagens WhatsApp — EvelynEstheticCenter",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev":   "node --watch index.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js":    "^2.45.0",
+    "@whiskeysockets/baileys":  "^6.7.0",
+    "dotenv":                   "^16.4.0",
+    "pino":                     "^9.3.0",
+    "qrcode":                   "^1.5.4"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
