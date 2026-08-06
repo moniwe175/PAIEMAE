@@ -1,0 +1,8 @@
+{
+  "name": "Evelyn Esthetic Center",
+  "description": "Sistema de gestão para clínica de estética e botox - Evelyn Esthetic Center",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
