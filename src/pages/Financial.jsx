@@ -1,0 +1,1136 @@
+import { useState, useMemo, useEffect } from 'react';
+import {
+  DollarSign, Plus, XCircle, FileSpreadsheet, Link2, Wallet,
+  Printer, Lock, Unlock, AlertTriangle, Clock, CheckCircle, X,
+  CreditCard, Banknote, Landmark, TrendingUp, TrendingDown,
+  ArrowUpRight, ArrowDownLeft, User, Percent, Edit3, Trash2,
+  Filter, Minus, Receipt, RefreshCw
+} from 'lucide-react';
+import { useSync } from '../contexts/SyncContext';
+import { paymentMethods, calcularSplit } from '../mocks/financial';
+import { syncSheetToSupabase } from '../services/googleSheetsSync';
+import {
+  fetchSheetTransactions as sbFetchSheetTransactions,
+  fetchSheetTransactionsSummary as sbFetchSheetSummary,
+  fetchExpenses as sbFetchExpenses
+} from '../services/supabaseService';
+import supabase from '../lib/supabase';
+
+const TABS = [
+  { key: 'transacoes', label: 'Transações' },
+  { key: 'despesas', label: 'Despesas' },
+  { key: 'caixa', label: 'Caixa' },
+  { key: 'split', label: 'Split' },
+];
+
+const STATUS_LABELS = { paid: 'Pago', pending: 'Pendente', cancelled: 'Cancelado' };
+const STATUS_COLORS = { paid: 'var(--success)', pending: '#E6A800', cancelled: 'var(--danger)' };
+const STATUS_BG = { paid: 'var(--success-bg)', pending: '#FFF8E1', cancelled: 'var(--danger-bg)' };
+
+function hoje() { return new Date().toLocaleDateString('pt-BR'); }
+function fmtCurrency(v) { return v === undefined || v === null || isNaN(v) ? 'R$ --' : `R$ ${v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; }
+function normalizeTx(t) {
+  const total = t.total ?? t.valor ?? 0;
+  const split = t.clinica !== undefined ? { clinica: t.clinica, profissional: t.profissional } : calcularSplit(total, 40);
+  return {
+    ...t,
+    hora: t.hora || '--:--',
+    cliente: t.cliente || '—',
+    procedimento: t.procedimento || t.desc || '—',
+    total,
+    clinica: split.clinica,
+    profissional: split.profissional,
+    pagamento: t.pagamento || 'Pix',
+    status: t.status || 'paid',
+    profissionalNome: t.profissionalNome || t.prof || '—',
+  };
+}
+
+export default function Financial() {
+  const {
+    transactions, addTransaction,
+    expenses, addExpense, removeExpense,
+    cashier, abrirCaixa, fecharCaixa, realizarSangria,
+    splitConfig, updateSplitConfig,
+    syncStatus, syncConfig, addLog,
+    supabaseConnected, connectionError,
+    dailySheet,
+    lastSyncAt, syncedRowCount,
+    // ─ Dados reais da planilha (sheet_transactions) ─
+    sheetTransactions, setSheetTransactions,
+    sheetSummary, setSheetSummary,
+    setExpenses,
+  } = useSync();
+
+  const [activeTab, setActiveTab] = useState('transacoes');
+  const [sangriaModal, setSangriaModal] = useState(false);
+  const [caixaConfirm, setCaixaConfirm] = useState(null); // { type: 'abrir' | 'fechar' | 'fechar-pendente', title, message }
+  const [caixaLoading, setCaixaLoading] = useState(false);
+  const [txModal, setTxModal] = useState(false);
+  const [despesaModal, setDespesaModal] = useState(false);
+  const [splitEdit, setSplitEdit] = useState(null);
+  const [sangriaForm, setSangriaForm] = useState({ valor: '', motivo: '' });
+  const [txForm, setTxForm] = useState({ cliente: '', procedimento: '', total: '', pagamento: 'Pix', status: 'paid', profissionalNome: '' });
+  const [despesaForm, setDespesaForm] = useState({ descricao: '', categoria: '', valor: '', metodoPagamento: 'Pix' });
+  const [txFiltroStatus, setTxFiltroStatus] = useState('todos');
+  const [expFiltroCat, setExpFiltroCat] = useState('todos');
+  const [syncing, setSyncing] = useState(false);
+
+
+  // ─── Supabase Realtime: escuta mudanças em sheet_transactions, sheet_connections e expenses ───
+  useEffect(() => {
+    async function fetchFinancialData() {
+      try {
+        const [stRes, summaryRes, expRes] = await Promise.all([
+          sbFetchSheetTransactions(),
+          sbFetchSheetSummary(),
+          sbFetchExpenses(),
+        ]);
+        if (!stRes.error && stRes.data) setSheetTransactions(stRes.data);
+        if (!summaryRes.error && summaryRes.data) setSheetSummary(summaryRes.data);
+        if (!expRes.error && expRes.data) setExpenses(expRes.data);
+      } catch (err) {
+        console.warn('[Financial] Realtime re-fetch error:', err);
+      }
+    }
+
+    // Buscar dados iniciais
+    fetchFinancialData();
+
+    // Escutar mudanças em tempo real
+    const channel = supabase
+      .channel('financial-realtime')
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'sheet_transactions'
+      }, () => {
+        fetchFinancialData();
+      })
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'sheet_connections'
+      }, () => {
+        fetchFinancialData();
+      })
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'expenses'
+      }, () => {
+        fetchFinancialData();
+      })
+      .subscribe();
+
+    return () => supabase.removeChannel(channel);
+  }, []);
+
+  const handleManualSync = async () => {
+    setSyncing(true);
+    addLog('info', 'Iniciando sincronização com a planilha Excel/Google Sheets...');
+    try {
+      const result = await syncSheetToSupabase(syncConfig?.sheet_url, {
+        connectionId: syncConfig?.id,
+        id: syncConfig?.id,
+      });
+
+      if (result.success) {
+        addLog('success', `Planilha sincronizada com sucesso! ${result.rowCount || 0} registros processados.`);
+        // Realtime listener irá re-buscar os dados automaticamente após o upsert
+      } else {
+        addLog('error', `Erro na sincronização: ${result.error}`);
+        alert(`Erro ao sincronizar: ${result.error}`);
+      }
+    } catch (err) {
+      addLog('error', `Erro na sincronização: ${err.message}`);
+      alert(`Erro ao sincronizar: ${err.message}`);
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+
+
+  // ─── Caixa confirmation handlers ────────────────────────────
+  const handlePromptAbrirCaixa = () => {
+    if (cashier.status === 'aberto') {
+      const hojeStr = hoje();
+      const isDiaAnterior = cashier.dataAbertura && cashier.dataAbertura !== hojeStr;
+      setCaixaConfirm({
+        type: 'fechar-pendente',
+        title: isDiaAnterior ? 'Caixa do dia anterior em aberto' : 'Caixa já está aberto',
+        message: isDiaAnterior
+          ? `O caixa do dia ${cashier.dataAbertura} ainda não foi fechado. O sistema irá fechá-lo e abrir o caixa de hoje (${hojeStr}). Deseja continuar?`
+          : `O caixa já está aberto desde ${cashier.horaAbertura}. Deseja fechá-lo e reabrir?`,
+        action: async () => {
+          setCaixaLoading(true);
+          await new Promise(r => setTimeout(r, 600));
+          fecharCaixa();
+          await new Promise(r => setTimeout(r, 300));
+          abrirCaixa(0);
+          setCaixaLoading(false);
+          setCaixaConfirm(null);
+        },
+      });
+    } else {
+      setCaixaConfirm({
+        type: 'abrir',
+        title: 'Abrir Caixa',
+        message: `Você está prestes a abrir o caixa do dia ${hoje()}. O sistema irá iniciar um novo período de recebimentos e despesas. Tem certeza?`,
+        action: async () => {
+          setCaixaLoading(true);
+          await new Promise(r => setTimeout(r, 600));
+          abrirCaixa(0);
+          setCaixaLoading(false);
+          setCaixaConfirm(null);
+        },
+      });
+    }
+  };
+
+  const handlePromptFecharCaixa = () => {
+    const resumo = dailySheet
+      ? `\n\nResumo da planilha:\n• Faturamento Bruto: R$ ${dailySheet.faturamentoBruto.toFixed(2)}\n• Despesas (Sangria): R$ ${(dailySheet.totalDespesas || 0).toFixed(2)}\n• Faturamento Líquido: R$ ${(dailySheet.faturamentoLiquido ?? dailySheet.faturamentoBruto).toFixed(2)}\n• PIX: R$ ${dailySheet.totalPix.toFixed(2)} | Crédito: R$ ${dailySheet.totalCredito.toFixed(2)}\n• Débito: R$ ${dailySheet.totalDebito.toFixed(2)} | Dinheiro: R$ ${dailySheet.totalDinheiro.toFixed(2)}\n• Total de transações: ${dailySheet.totalTransacoes}`
+      : '\n\nAtenção: Nenhum dado da planilha disponível. O relatório será salvo vazio.';
+
+    setCaixaConfirm({
+      type: 'fechar',
+      title: 'Fechar Caixa',
+      message: `Você está prestes a fechar o caixa do dia ${cashier.dataAbertura || hoje()}. O sistema irá gerar o relatório final consolidado e enviá-lo ao Supabase. Esta ação não pode ser desfeita. Tem certeza?${resumo}`,
+      action: async () => {
+        setCaixaLoading(true);
+        const result = await fecharCaixa();
+        setCaixaLoading(false);
+        if (result && result.success) {
+          addLog('success', `Caixa fechado com sucesso! Relatório salvo.`);
+        } else if (result && result.error) {
+          addLog('error', `Erro ao fechar caixa: ${result.error}`);
+          alert(`Erro ao salvar relatório: ${result.error}`);
+        }
+        setCaixaConfirm(null);
+      },
+    });
+  };
+
+  const handleConfirmCaixa = async () => {
+    if (caixaConfirm?.action) {
+      await caixaConfirm.action();
+    }
+  };
+
+  const isConnected = syncStatus === 'connected';
+
+  const safeTransactions = Array.isArray(transactions) ? transactions : [];
+  const safeExpenses = Array.isArray(expenses) ? expenses : [];
+  const safeSplitConfig = Array.isArray(splitConfig) ? splitConfig : [];
+  const safeSangrias = Array.isArray(cashier?.sangrias) ? cashier.sangrias : [];
+  // Dados reais vindos de sheet_transactions
+  const safeSheetTx = Array.isArray(sheetTransactions) ? sheetTransactions : [];
+
+  // ─ Helper para normalizar o tipo de linha ─
+  const getRowType = (t) => String(t.row_type || t.tipo || '').toLowerCase().trim();
+
+  // ─ Separação das transações da planilha por row_type (case-insensitive) ─
+  const receitasSheet = safeSheetTx.filter(t => {
+    const rt = getRowType(t);
+    return rt.includes('receita') || rt === '' || !rt;
+  });
+  const despesasSheet = safeSheetTx.filter(t => {
+    const rt = getRowType(t);
+    return rt.includes('despesa') || rt.includes('saida') || rt.includes('saída') || rt.includes('gasto');
+  });
+  const sangriasSheet = safeSheetTx.filter(t => {
+    const rt = getRowType(t);
+    return rt.includes('sangria');
+  });
+
+  // ─ KPI Cards: calculados do sheetSummary (sheet_transactions) ─
+  const faturamentoHoje    = Number(sheetSummary?.receitas)  || 0;
+  const totalDespesasSheet = Number(sheetSummary?.despesas)  || 0;
+  const totalSangriasSheet = Number(sheetSummary?.sangrias)  || 0;
+  const receitasCount      = Number(sheetSummary?.count?.receitas)  || receitasSheet.length;
+  const despesasCountSheet = Number(sheetSummary?.count?.despesas)  || despesasSheet.length;
+  const sangriasCountSheet = Number(sheetSummary?.count?.sangrias)  || sangriasSheet.length;
+
+  const ticketMedio = receitasCount > 0 ? faturamentoHoje / receitasCount : 0;
+  // Despesas manuais (tabela expenses) — somadas às despesas da planilha
+  const despesasFixasHoje = safeExpenses.reduce((a, e) => a + (Number(e.valor) || 0), 0);
+  const sangriasHoje      = safeSangrias.reduce((a, s) => a + (Number(s.valor) || 0), 0);
+  const totalDespesasHoje = totalDespesasSheet + totalSangriasSheet + despesasFixasHoje + sangriasHoje;
+  // Comissões: soma de commission_value das receitas da planilha
+  const comissoesHoje = receitasSheet.reduce((a, t) => a + (Number(t.commission_value) || 0), 0);
+  const lucroLiquido = faturamentoHoje - totalDespesasHoje - comissoesHoje;
+  const despesasCount = safeExpenses.length + despesasCountSheet;
+  const sangriasCount = safeSangrias.length  + sangriasCountSheet;
+
+
+  // Formas de pagamento calculadas das receitas da planilha (sheet_transactions)
+  const formasPagamento = useMemo(() => {
+    const counts = {};
+    receitasSheet.forEach(t => {
+      // Prioriza colunas individuais (pix, credito, debito, dinheiro) se preenchidas
+      if (Number(t.pix) > 0)     counts['pix']      = (counts['pix']     || 0) + Number(t.pix);
+      if (Number(t.credito) > 0) counts['crédito']  = (counts['crédito'] || 0) + Number(t.credito);
+      if (Number(t.debito) > 0)  counts['débito']   = (counts['débito']  || 0) + Number(t.debito);
+      if (Number(t.dinheiro) > 0)counts['dinheiro'] = (counts['dinheiro']|| 0) + Number(t.dinheiro);
+      // Fallback: payment_method genérico
+      if (!Number(t.pix) && !Number(t.credito) && !Number(t.debito) && !Number(t.dinheiro) && t.payment_method) {
+        const pg = (t.payment_method || '').toLowerCase();
+        counts[pg] = (counts[pg] || 0) + (Number(t.gross) || 0);
+      }
+    });
+    const total = Object.values(counts).reduce((a, v) => a + v, 0) || 1;
+    const safeMethods = Array.isArray(paymentMethods) ? paymentMethods : [];
+    return safeMethods.map(pm => ({
+      ...pm,
+      valor: counts[(pm.nome || '').toLowerCase()] || counts[pm.id] || 0,
+      pct: Math.round(((counts[(pm.nome || '').toLowerCase()] || counts[pm.id] || 0) / total) * 100),
+    }));
+  }, [receitasSheet]);
+
+  // Aba Transações: lista de receitas da planilha (sheet_transactions)
+  const txFiltradas = useMemo(() => {
+    return receitasSheet;
+  }, [receitasSheet]);
+
+  const expFiltradas = useMemo(() => {
+    // Merge Supabase expenses + sheet expense rows
+    const sheetExpenses = (dailySheet?.expenseRows || []).map(e => ({
+      id: `sheet_${e.categoria}`,
+      data: dailySheet?.dataCaixa || '--',
+      descricao: e.categoria,
+      categoria: e.categoria,
+      metodo: 'Planilha',
+      valor: e.valor,
+      origem: 'planilha',
+    }));
+    const all = [...safeExpenses, ...sheetExpenses];
+    return all.filter(e => expFiltroCat === 'todos' || e.categoria === expFiltroCat);
+  }, [safeExpenses, dailySheet, expFiltroCat]);
+
+  const handleSangria = () => {
+    const v = parseFloat(sangriaForm.valor);
+    if (!v || v <= 0) { alert('Informe um valor válido.'); return; }
+    if (!sangriaForm.motivo.trim()) { alert('Informe o motivo.'); return; }
+    realizarSangria(v, sangriaForm.motivo.trim());
+    setSangriaForm({ valor: '', motivo: '' });
+    setSangriaModal(false);
+  };
+
+  const handleAddTx = () => {
+    if (!supabaseConnected) { alert('Modo somente leitura: Supabase desconectado.'); return; }
+    const total = parseFloat(txForm.total);
+    if (!txForm.cliente.trim() || !txForm.procedimento.trim() || !total) {
+      alert('Preencha cliente, procedimento e valor.');
+      return;
+    }
+    const split = calcularSplit(total, 40);
+    const result = addTransaction({
+      hora: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+      cliente: txForm.cliente.trim(),
+      procedimento: txForm.procedimento.trim(),
+      total,
+      clinica: split.clinica,
+      profissional: split.profissional,
+      pagamento: txForm.pagamento,
+      status: txForm.status,
+      profissionalNome: txForm.profissionalNome || '—',
+      data: hoje(),
+      origem: 'manual',
+      tipo: 'receita',
+    });
+    if (result === null) return;
+    setTxForm({ cliente: '', procedimento: '', total: '', pagamento: 'Pix', status: 'paid', profissionalNome: '' });
+    setTxModal(false);
+  };
+
+  const handleAddDespesa = () => {
+    if (!supabaseConnected) { alert('Modo somente leitura: Supabase desconectado.'); return; }
+    const v = parseFloat(despesaForm.valor);
+    if (!despesaForm.descricao.trim() || !v) { alert('Preencha descrição e valor.'); return; }
+    const result = addExpense({
+      data: hoje(),
+      descricao: despesaForm.descricao.trim(),
+      categoria: despesaForm.categoria || 'Outros',
+      valor: v,
+      metodoPagamento: despesaForm.metodoPagamento,
+      origem: 'manual',
+    });
+    if (result === null) return;
+    setDespesaForm({ descricao: '', categoria: '', valor: '', metodoPagamento: 'Pix' });
+    setDespesaModal(false);
+  };
+
+  const handleSplitSave = () => {
+    if (splitEdit) {
+      updateSplitConfig(splitEdit.profissional, splitEdit.percentual);
+      setSplitEdit(null);
+    }
+  };
+
+  return (
+    <div>
+      {/* Sangria Modal */}
+      {sangriaModal && (
+        <div className="modal-overlay" onClick={() => setSangriaModal(false)}>
+          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 400 }}>
+            <div className="modal-header">
+              <span className="modal-title"><Minus />Realizar Sangria</span>
+              <button className="modal-close" onClick={() => setSangriaModal(false)}><XCircle /></button>
+            </div>
+            <div className="form-group">
+              <label className="form-label">Valor (R$)</label>
+              <input className="form-input" type="number" placeholder="0,00" value={sangriaForm.valor} onChange={e => setSangriaForm(f => ({ ...f, valor: e.target.value }))} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Motivo</label>
+              <input className="form-input" placeholder="Ex: Troco, pagamento fornecedor..." value={sangriaForm.motivo} onChange={e => setSangriaForm(f => ({ ...f, motivo: e.target.value }))} />
+            </div>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 8 }}>
+              <button className="btn btn-ghost" onClick={() => setSangriaModal(false)}>Cancelar</button>
+              <button className="btn btn-primary" onClick={handleSangria} style={{ background: 'var(--danger)', borderColor: 'var(--danger)' }}>
+                <Minus />Confirmar Sangria
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Caixa Confirmation Modal */}
+      {caixaConfirm && (
+        <div className="modal-overlay" onClick={() => !caixaLoading && setCaixaConfirm(null)}>
+          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 460 }}>
+            <div className="modal-header">
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div style={{
+                  width: 36, height: 36, borderRadius: 10,
+                  background: caixaConfirm.type === 'fechar' || caixaConfirm.type === 'fechar-pendente' ? 'var(--danger-bg)' : 'var(--warning-bg)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                }}>
+                  <AlertTriangle style={{
+                    width: 18, height: 18,
+                    color: caixaConfirm.type === 'fechar' || caixaConfirm.type === 'fechar-pendente' ? 'var(--danger)' : 'var(--warning)',
+                  }} />
+                </div>
+                <span className="modal-title">{caixaConfirm.title}</span>
+              </div>
+              <button className="modal-close" onClick={() => !caixaLoading && setCaixaConfirm(null)} disabled={caixaLoading}>
+                <XCircle />
+              </button>
+            </div>
+
+            <div style={{
+              background: caixaConfirm.type === 'fechar' || caixaConfirm.type === 'fechar-pendente' ? 'var(--danger-bg)' : 'var(--warning-bg)',
+              borderLeft: `4px solid ${caixaConfirm.type === 'fechar' || caixaConfirm.type === 'fechar-pendente' ? 'var(--danger)' : 'var(--warning)'}`,
+              borderRadius: 'var(--radius-sm)',
+              padding: '14px 16px',
+              marginBottom: 20,
+            }}>
+              <p style={{ margin: 0, fontSize: 13, color: 'var(--text-dark)', lineHeight: 1.6, fontWeight: 500 }}>
+                {caixaConfirm.message}
+              </p>
+            </div>
+
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+              <button
+                className="btn btn-ghost"
+                onClick={() => setCaixaConfirm(null)}
+                disabled={caixaLoading}
+              >
+                Cancelar
+              </button>
+              <button
+                className="btn btn-primary"
+                onClick={handleConfirmCaixa}
+                disabled={caixaLoading}
+                style={{
+                  background: caixaConfirm.type === 'fechar' || caixaConfirm.type === 'fechar-pendente' ? 'var(--danger)' : '#2ECC71',
+                  borderColor: caixaConfirm.type === 'fechar' || caixaConfirm.type === 'fechar-pendente' ? 'var(--danger)' : '#2ECC71',
+                  minWidth: 140,
+                  justifyContent: 'center',
+                }}
+              >
+                {caixaLoading ? (
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{
+                      width: 14, height: 14, border: '2px solid rgba(255,255,255,0.3)',
+                      borderTopColor: '#fff', borderRadius: '50%',
+                      animation: 'spin 0.8s linear infinite',
+                      display: 'inline-block',
+                    }} />
+                    Processando...
+                  </span>
+                ) : caixaConfirm.type === 'fechar-pendente' ? (
+                  <><Lock />Fechar e Abrir</>
+                ) : caixaConfirm.type === 'fechar' ? (
+                  <><Lock />Confirmar Fechamento</>
+                ) : (
+                  <><Unlock />Confirmar Abertura</>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Nova Transação Modal */}
+      {txModal && (
+        <div className="modal-overlay" onClick={() => setTxModal(false)}>
+          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 460 }}>
+            <div className="modal-header">
+              <span className="modal-title"><Plus />Nova Transação</span>
+              <button className="modal-close" onClick={() => setTxModal(false)}><XCircle /></button>
+            </div>
+            <div className="form-grid-2">
+              <div className="form-group">
+                <label className="form-label">Cliente</label>
+                <input className="form-input" placeholder="Nome do cliente" value={txForm.cliente} onChange={e => setTxForm(f => ({ ...f, cliente: e.target.value }))} />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Profissional</label>
+                <input className="form-input" placeholder="Nome do profissional" value={txForm.profissionalNome} onChange={e => setTxForm(f => ({ ...f, profissionalNome: e.target.value }))} />
+              </div>
+            </div>
+            <div className="form-group">
+              <label className="form-label">Procedimento</label>
+              <input className="form-input" placeholder="Ex: Botox Facial" value={txForm.procedimento} onChange={e => setTxForm(f => ({ ...f, procedimento: e.target.value }))} />
+            </div>
+            <div className="form-grid-2">
+              <div className="form-group">
+                <label className="form-label">Valor Total (R$)</label>
+                <input className="form-input" type="number" placeholder="0,00" value={txForm.total} onChange={e => setTxForm(f => ({ ...f, total: e.target.value }))} />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Pagamento</label>
+                <select className="form-select" value={txForm.pagamento} onChange={e => setTxForm(f => ({ ...f, pagamento: e.target.value }))}>
+                  {['Pix', 'Crédito', 'Débito', 'Dinheiro', 'Boleto'].map(p => <option key={p}>{p}</option>)}
+                </select>
+              </div>
+            </div>
+            <div className="form-group">
+              <label className="form-label">Status</label>
+              <div className="tabs">
+                {[{ k: 'paid', l: 'Pago' }, { k: 'pending', l: 'Pendente' }].map(({ k, l }) => (
+                  <button key={k} className={`tab-item${txForm.status === k ? ' active' : ''}`} onClick={() => setTxForm(f => ({ ...f, status: k }))}>{l}</button>
+                ))}
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 8 }}>
+              <button className="btn btn-ghost" onClick={() => setTxModal(false)}>Cancelar</button>
+              <button className="btn btn-primary" onClick={handleAddTx}><DollarSign />Salvar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Nova Despesa Modal */}
+      {despesaModal && (
+        <div className="modal-overlay" onClick={() => setDespesaModal(false)}>
+          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 420 }}>
+            <div className="modal-header">
+              <span className="modal-title"><Plus />Nova Despesa</span>
+              <button className="modal-close" onClick={() => setDespesaModal(false)}><XCircle /></button>
+            </div>
+            <div className="form-group">
+              <label className="form-label">Descrição</label>
+              <input className="form-input" placeholder="Ex: Material de consumo" value={despesaForm.descricao} onChange={e => setDespesaForm(f => ({ ...f, descricao: e.target.value }))} />
+            </div>
+            <div className="form-grid-2">
+              <div className="form-group">
+                <label className="form-label">Valor (R$)</label>
+                <input className="form-input" type="number" placeholder="0,00" value={despesaForm.valor} onChange={e => setDespesaForm(f => ({ ...f, valor: e.target.value }))} />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Categoria</label>
+                <select className="form-select" value={despesaForm.categoria} onChange={e => setDespesaForm(f => ({ ...f, categoria: e.target.value }))}>
+                  <option value="">Selecione...</option>
+                  {['Estoque', 'Fixo', 'Marketing', 'Salários', 'Impostos', 'Outros'].map(c => <option key={c}>{c}</option>)}
+                </select>
+              </div>
+            </div>
+            <div className="form-group">
+              <label className="form-label">Método de Pagamento</label>
+              <select className="form-select" value={despesaForm.metodoPagamento} onChange={e => setDespesaForm(f => ({ ...f, metodoPagamento: e.target.value }))}>
+                {['Pix', 'Crédito', 'Débito', 'Dinheiro', 'Boleto', 'Transferência'].map(p => <option key={p}>{p}</option>)}
+              </select>
+            </div>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 8 }}>
+              <button className="btn btn-ghost" onClick={() => setDespesaModal(false)}>Cancelar</button>
+              <button className="btn btn-primary" onClick={handleAddDespesa} style={{ background: 'var(--danger)', borderColor: 'var(--danger)' }}><Minus />Salvar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Split Edit Modal */}
+      {splitEdit && (
+        <div className="modal-overlay" onClick={() => setSplitEdit(null)}>
+          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 360 }}>
+            <div className="modal-header">
+              <span className="modal-title"><Percent />Editar Split</span>
+              <button className="modal-close" onClick={() => setSplitEdit(null)}><XCircle /></button>
+            </div>
+            <div className="form-group">
+              <label className="form-label">Profissional</label>
+              <input className="form-input" value={splitEdit.profissional} disabled />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Percentual Profissional (%)</label>
+              <input className="form-input" type="number" min="0" max="100" value={splitEdit.percentual} onChange={e => setSplitEdit(s => ({ ...s, percentual: Math.min(100, Math.max(0, parseInt(e.target.value) || 0)) }))} />
+            </div>
+            <div style={{ padding: 12, background: 'var(--bg-main)', borderRadius: 'var(--radius-sm)', marginBottom: 16 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 4 }}>
+                <span style={{ color: 'var(--text-muted)' }}>Profissional: {splitEdit.percentual}%</span>
+                <span style={{ color: 'var(--text-muted)' }}>Clínica: {100 - splitEdit.percentual}%</span>
+              </div>
+              <div style={{ height: 8, background: 'var(--border-color)', borderRadius: 99, overflow: 'hidden' }}>
+                <div style={{ height: '100%', width: `${splitEdit.percentual}%`, background: 'var(--color-primary)', borderRadius: 99, transition: 'width 0.3s' }} />
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button className="btn btn-ghost" onClick={() => setSplitEdit(null)}>Cancelar</button>
+              <button className="btn btn-primary" onClick={handleSplitSave}><CheckCircle />Salvar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Page Header */}
+      <div className="page-header" style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
+        <div>
+          <h1 className="page-title" style={{ fontFamily: 'serif', fontSize: 24, color: '#1A4D2E', marginBottom: 4 }}>Financeiro</h1>
+          <p className="page-subtitle" style={{ fontSize: 13, color: '#888' }}>
+            {receitasCount} receitas • {despesasCount} despesas • {sangriasCount} sangrias
+          </p>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <button
+            className="btn btn-sm"
+            onClick={handleManualSync}
+            disabled={syncing}
+            style={{
+              border: '1px solid #FDE68A',
+              background: '#FFFBEB',
+              color: '#D97706',
+              fontWeight: 600,
+              padding: '8px 16px',
+              borderRadius: 8,
+              cursor: syncing ? 'wait' : 'pointer',
+              opacity: syncing ? 0.7 : 1,
+            }}
+          >
+            <RefreshCw style={{ width: 14, height: 14, marginRight: 6, animation: syncing ? 'spin 1s linear infinite' : 'none' }} />
+            {syncing ? 'Sincronizando...' : 'Sincronizar planilha Excel'}
+          </button>
+        </div>
+      </div>
+
+      {/* Disconnected warning banner */}
+      {!isConnected && (
+        <div style={{
+          background: '#FFF8E1',
+          border: '1px solid #FFD966',
+          borderLeft: '4px solid #FFD966',
+          borderRadius: 'var(--radius-sm)',
+          padding: '14px 18px',
+          marginBottom: 20,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 12,
+        }}>
+          <AlertTriangle style={{ width: 18, height: 18, color: '#E6A800', flexShrink: 0 }} />
+          <div>
+            <div style={{ fontWeight: 700, fontSize: 13, color: '#8B6914', marginBottom: 2 }}>Aguardando planilha</div>
+            <p style={{ fontSize: 12, color: '#6B5A1E', margin: 0 }}>
+              Conecte a planilha <strong>CONTROLE DE CAIXA 01</strong> na aba Integrações para sincronizar os dados financeiros em tempo real.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Supabase read-only banner */}
+      {!supabaseConnected && (
+        <div style={{
+          background: '#FEF2F2',
+          border: '1px solid #FECACA',
+          borderLeft: '4px solid #EF4444',
+          borderRadius: 'var(--radius-sm)',
+          padding: '14px 18px',
+          marginBottom: 20,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 12,
+        }}>
+          <AlertTriangle style={{ width: 18, height: 18, color: '#DC2626', flexShrink: 0 }} />
+          <div>
+            <div style={{ fontWeight: 700, fontSize: 13, color: '#991B1B', marginBottom: 2 }}>Modo somente leitura</div>
+            <p style={{ fontSize: 12, color: '#7F1D1D', margin: 0 }}>
+              {connectionError || 'Supabase desconectado. Novas inserções, edições e fechamentos de caixa estão bloqueados até que a conexão seja restabelecida.'}
+            </p>
+          </div>
+        </div>
+      )}
+
+
+
+      {/* KPI Cards */}
+      <div className="grid-4 section-gap">
+        {/* Faturamento Total */}
+        <div className="stat-card" style={{ background: '#1A4D2E', color: '#fff', border: 'none', position: 'relative' }}>
+          <div style={{ position: 'absolute', top: 16, right: 16, width: 6, height: 6, borderRadius: '50%', background: '#4CAF50' }} />
+          <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, color: '#A8D5BA', marginBottom: 8 }}>
+            FATURAMENTO TOTAL
+          </div>
+          <div style={{ fontSize: 28, fontWeight: 800, marginBottom: 4, color: '#4CAF50' }}>
+            {fmtCurrency(faturamentoHoje)}
+          </div>
+          <div style={{ fontSize: 11, color: '#A8D5BA', marginBottom: 16 }}>
+            {receitasCount} receitas
+          </div>
+          <div style={{ display: 'flex', borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: 12 }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 10, color: '#A8D5BA', marginBottom: 2 }}>Comissões</div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: '#F39C12' }}>{fmtCurrency(comissoesHoje)}</div>
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 10, color: '#A8D5BA', marginBottom: 2 }}>Líquido</div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: '#4CAF50' }}>{fmtCurrency(lucroLiquido)}</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Total Despesas */}
+        <div className="stat-card" style={{ background: '#fff', border: '1px solid var(--border-color)', position: 'relative' }}>
+          <div style={{ position: 'absolute', top: 16, right: 16, width: 24, height: 24, borderRadius: '50%', background: '#FEF2F2', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+             <ArrowDownLeft style={{ width: 12, height: 12, color: '#EF4444' }} />
+          </div>
+          <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--text-muted)', marginBottom: 8 }}>
+            TOTAL DESPESAS
+          </div>
+          <div style={{ fontSize: 28, fontWeight: 800, marginBottom: 4, color: '#EF4444' }}>
+            {fmtCurrency(totalDespesasHoje)}
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+            {fmtCurrency(despesasFixasHoje)} despesas + {fmtCurrency(sangriasHoje)} sangrias
+          </div>
+        </div>
+
+        {/* Lucro Líquido */}
+        <div className="stat-card" style={{ background: '#fff', border: '1px solid var(--border-color)', position: 'relative' }}>
+          <div style={{ position: 'absolute', top: 16, right: 16, width: 24, height: 24, borderRadius: '50%', background: 'var(--success-bg)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+             <ArrowUpRight style={{ width: 12, height: 12, color: 'var(--success)' }} />
+          </div>
+          <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--text-muted)', marginBottom: 8 }}>
+            LUCRO LÍQUIDO
+          </div>
+          <div style={{ fontSize: 28, fontWeight: 800, marginBottom: 4, color: 'var(--success)' }}>
+            {fmtCurrency(lucroLiquido)}
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+            Faturamento - Despesas - Comissões
+          </div>
+        </div>
+
+        {/* Ticket Médio */}
+        <div className="stat-card" style={{ background: '#fff', border: '1px solid var(--border-color)', position: 'relative' }}>
+          <div style={{ position: 'absolute', top: 16, right: 16, width: 24, height: 24, borderRadius: '50%', background: 'var(--bg-main)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+             <Receipt style={{ width: 12, height: 12, color: 'var(--text-muted)' }} />
+          </div>
+          <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--text-muted)', marginBottom: 8 }}>
+            TICKET MÉDIO
+          </div>
+          <div style={{ fontSize: 28, fontWeight: 800, marginBottom: 4, color: '#111' }}>
+            {fmtCurrency(ticketMedio)}
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+            Média por receita
+          </div>
+        </div>
+      </div>
+
+      {/* Tabs */}
+      <div style={{ borderBottom: '1px solid var(--border-color)', marginBottom: 20 }}>
+        <div style={{ display: 'flex', gap: 0 }}>
+          {TABS.map(tab => (
+            <button
+              key={tab.key}
+              onClick={() => setActiveTab(tab.key)}
+              style={{
+                padding: '10px 20px',
+                fontSize: 13,
+                fontWeight: 600,
+                color: activeTab === tab.key ? 'var(--text-dark)' : 'var(--text-muted)',
+                background: 'none',
+                border: 'none',
+                borderBottom: activeTab === tab.key ? '2px solid var(--text-dark)' : '2px solid transparent',
+                cursor: 'pointer',
+                transition: 'all 0.15s',
+              }}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Tab: Caixa */}
+      {activeTab === 'caixa' && (
+        <div>
+          <div className="grid-2 section-gap">
+            {/* Payment Methods */}
+            <div className="card">
+              <div className="card-header">
+                <span className="card-title"><CreditCard />Formas de Pagamento — Hoje</span>
+              </div>
+              {isConnected && formasPagamento.filter(pm => pm.ativo).map(pm => (
+                <div key={pm.id} style={{ marginBottom: 14 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 6 }}>
+                    <span style={{ fontWeight: 600, color: 'var(--text-dark)' }}>{pm.nome}</span>
+                    <span style={{ color: 'var(--text-medium)' }}>{fmtCurrency(pm.valor)}</span>
+                  </div>
+                  <div style={{ height: 8, background: 'var(--border-color)', borderRadius: 99, overflow: 'hidden' }}>
+                    <div style={{
+                      height: '100%',
+                      width: `${pm.pct}%`,
+                      background: pm.id === 'pix' ? '#32BCAD' : pm.id === 'credito' ? '#185ABD' : pm.id === 'debito' ? '#0F9D58' : '#E6A800',
+                      borderRadius: 99,
+                      transition: 'width 0.5s',
+                    }} />
+                  </div>
+                </div>
+              ))}
+              {!isConnected && (
+                <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: 13, padding: 30 }}>
+                  <CreditCard style={{ width: 32, height: 32, opacity: 0.3, margin: '0 auto 10px' }} />
+                  <p>Conecte a planilha para ver as formas de pagamento</p>
+                </div>
+              )}
+            </div>
+
+            {/* Cashier Actions */}
+            <div className="card">
+              <div className="card-header">
+                <span className="card-title"><Wallet />Ações do Caixa</span>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <button
+                  className="btn btn-sm"
+                  onClick={cashier.status === 'aberto' ? handlePromptFecharCaixa : handlePromptAbrirCaixa}
+                  disabled={caixaLoading}
+                  style={{
+                    justifyContent: 'flex-start',
+                    background: cashier.status === 'aberto' ? 'var(--danger-bg)' : 'var(--success-bg)',
+                    color: cashier.status === 'aberto' ? 'var(--danger)' : 'var(--success)',
+                    border: 'none',
+                    fontWeight: 600,
+                    opacity: caixaLoading ? 0.6 : 1,
+                    cursor: caixaLoading ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  {cashier.status === 'aberto' ? <Lock style={{ width: 14, height: 14 }} /> : <Unlock style={{ width: 14, height: 14 }} />}
+                  {cashier.status === 'aberto' ? 'Fechar Caixa' : 'Abrir Caixa'}
+                </button>
+                <button className="btn btn-ghost btn-sm" onClick={() => setSangriaModal(true)} style={{ justifyContent: 'flex-start' }}>
+                  <Minus style={{ width: 14, height: 14 }} />Realizar Sangria
+                </button>
+                <button className="btn btn-ghost btn-sm" onClick={() => window.print()} style={{ justifyContent: 'flex-start' }}>
+                  <Printer style={{ width: 14, height: 14 }} />Imprimir Relatório
+                </button>
+              </div>
+
+              {/* Sangrias list */}
+              {safeSangrias.length > 0 && (
+                <div style={{ marginTop: 16, borderTop: '1px solid var(--border-color)', paddingTop: 12 }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 8 }}>Sangrias Realizadas</div>
+                  {safeSangrias.map(s => (
+                    <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, padding: '6px 0', borderBottom: '1px solid var(--border-light)' }}>
+                      <span style={{ color: 'var(--text-medium)' }}>{s.motivo}</span>
+                      <span style={{ fontWeight: 700, color: 'var(--danger)' }}>- {fmtCurrency(s.valor)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+        </div>
+      )}
+
+      {/* Tab: Transações */}
+      {activeTab === 'transacoes' && (
+        <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+          <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              <span style={{ fontSize: 14, fontWeight: 700, color: '#333' }}>
+                Receitas da Planilha ({txFiltradas.length} registros)
+              </span>
+              <span style={{ fontSize: 11, color: '#999', marginTop: 2 }}>
+                Total: {fmtCurrency(txFiltradas.reduce((acc, t) => acc + (Number(t.gross) || 0), 0))}
+              </span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', background: '#fff', border: '1px solid var(--border-color)', borderRadius: 6, padding: '4px 12px' }}>
+              <Receipt style={{ width: 14, height: 14, color: '#999', marginRight: 6 }} />
+              <input type="text" placeholder="Buscar..." style={{ border: 'none', outline: 'none', background: 'transparent', fontSize: 13, width: 200, color: 'var(--text-dark)' }} />
+            </div>
+          </div>
+          <div className="table-wrapper">
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr>
+                  <th style={{ color: '#666', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', padding: '12px 16px' }}>Data</th>
+                  <th style={{ color: '#666', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', padding: '12px 16px' }}>Cliente</th>
+                  <th style={{ color: '#666', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', padding: '12px 16px' }}>Procedimento</th>
+                  <th style={{ color: '#666', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', padding: '12px 16px' }}>Profissional</th>
+                  <th style={{ color: '#666', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', padding: '12px 16px', textAlign: 'center' }}>Valor</th>
+                  <th style={{ color: '#666', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', padding: '12px 16px', textAlign: 'center' }}>Comissão</th>
+                  <th style={{ color: '#666', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', padding: '12px 16px', textAlign: 'center' }}>Pagamento</th>
+                  <th style={{ color: '#666', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', padding: '12px 16px', textAlign: 'right' }}>Origem</th>
+                </tr>
+              </thead>
+              <tbody>
+                {txFiltradas.map((t, idx) => (
+                  <tr key={t.id || idx} style={{ borderBottom: '1px solid var(--border-light)' }}>
+                    <td style={{ color: '#555', fontSize: 13, padding: '16px' }}>
+                      {t.date_ref ? new Date(t.date_ref + 'T00:00:00').toLocaleDateString('pt-BR') : '—'}
+                    </td>
+                    <td style={{ fontWeight: 600, fontSize: 13, color: '#334155', padding: '16px' }}>
+                      {t.client || '—'}
+                    </td>
+                    <td style={{ fontSize: 13, color: '#555', padding: '16px' }}>
+                      {t.procedure || '—'}
+                    </td>
+                    <td style={{ fontSize: 13, color: '#555', padding: '16px', textTransform: 'uppercase' }}>
+                      {t.professional || '—'}
+                    </td>
+                    <td style={{ textAlign: 'center', fontWeight: 700, fontSize: 13, color: '#10B981', padding: '16px' }}>
+                      {fmtCurrency(Number(t.gross) || 0)}
+                    </td>
+                    <td style={{ textAlign: 'center', fontWeight: 700, fontSize: 13, color: '#D97706', padding: '16px' }}>
+                      {t.commission_value != null ? fmtCurrency(Number(t.commission_value)) : '—'}
+                    </td>
+                    <td style={{ textAlign: 'center', padding: '16px' }}>
+                      <span style={{ fontSize: 11, fontWeight: 600, color: '#10B981', background: '#D1FAE5', padding: '4px 10px', borderRadius: 99 }}>
+                        {t.payment_method || '—'}
+                      </span>
+                    </td>
+                    <td style={{ textAlign: 'right', padding: '16px' }}>
+                      <span style={{ fontSize: 10, fontWeight: 600, color: '#10B981', background: '#D1FAE5', padding: '4px 8px', borderRadius: 4, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                        <FileSpreadsheet style={{ width: 10, height: 10 }} />Planilha
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {txFiltradas.length === 0 && (
+              <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: 13, padding: 40 }}>
+                <Receipt style={{ width: 32, height: 32, opacity: 0.3, margin: '0 auto 10px' }} />
+                <p>{isConnected ? 'Nenhuma transação encontrada' : 'Conecte a planilha para visualizar transações'}</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Tab: Despesas */}
+      {activeTab === 'despesas' && (() => {
+        const formatCategory = (cat, proc) => {
+          if (proc && proc !== '—' && proc !== 'null') return proc;
+          if (!cat) return 'Outros';
+          const c = String(cat).trim();
+          if (c.toUpperCase() === 'PASSAGEM') return 'Passagem';
+          if (c.toUpperCase() === 'PRODUTOS') return 'Produtos';
+          if (c.toUpperCase() === 'TRIBUTOS') return 'Tributos';
+          if (c.toUpperCase() === 'OUTRAS SAÍDAS' || c.toUpperCase() === 'OUTRAS SAIDAS') return 'Outras Saídas';
+          if (c.toUpperCase() === 'SANGRIA') return 'Sangria';
+          return c;
+        };
+
+        const despesasSheetMapped = despesasSheet.map(e => ({
+          id: e.id,
+          data: e.date_ref ? new Date(e.date_ref + 'T00:00:00').toLocaleDateString('pt-BR') : '—',
+          descricao: (e.client && e.client !== '—' ? e.client : e.procedure && e.procedure !== '—' ? e.procedure : e.comanda || 'DESPESA').toUpperCase(),
+          categoria: e.despesa_categoria || formatCategory(e.client, e.procedure),
+          tipo: 'Despesa',
+          valor: Number(e.gross) || 0,
+          origem: 'Planilha',
+          isFromSheet: true
+        }));
+
+        const sangriasSheetMapped = sangriasSheet.map(s => ({
+          id: s.id,
+          data: s.date_ref ? new Date(s.date_ref + 'T00:00:00').toLocaleDateString('pt-BR') : '—',
+          descricao: (s.client && s.client !== '—' ? s.client : s.procedure && s.procedure !== '—' ? s.procedure : 'SANGRIA').toUpperCase(),
+          categoria: 'Sangria',
+          tipo: 'Sangria',
+          valor: Number(s.gross) || 0,
+          origem: 'Planilha',
+          isFromSheet: true
+        }));
+
+        const despesasManualMapped = safeExpenses.map(e => ({
+          id: e.id,
+          data: e.data || hoje(),
+          descricao: (e.descricao || e.categoria || 'Despesa').toUpperCase(),
+          categoria: e.categoria || 'Outros',
+          tipo: 'Despesa',
+          valor: Number(e.valor) || 0,
+          origem: e.origem === 'planilha' ? 'Planilha' : 'Manual',
+          isFromSheet: e.origem === 'planilha'
+        }));
+
+        const sangriasManualMapped = safeSangrias.map(s => ({
+          id: s.id,
+          data: s.data || hoje(),
+          descricao: (s.motivo || 'SANGRIA').toUpperCase(),
+          categoria: 'Sangria',
+          tipo: 'Sangria',
+          valor: Number(s.valor) || 0,
+          origem: 'Manual',
+          isFromSheet: false
+        }));
+
+        const listSaidas = [...despesasSheetMapped, ...sangriasSheetMapped, ...despesasManualMapped, ...sangriasManualMapped];
+        const totalSaidas = listSaidas.reduce((acc, i) => acc + i.valor, 0);
+
+        return (
+          <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+            <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
+              <div style={{ display: 'flex', flexDirection: 'column' }}>
+                <span style={{ fontSize: 14, fontWeight: 700, color: '#333' }}>
+                  Despesas e Sangrias ({listSaidas.length} registros)
+                </span>
+                <span style={{ fontSize: 11, color: '#999', marginTop: 2 }}>
+                  Total de saídas: <strong style={{ color: '#E11D48' }}>{fmtCurrency(totalSaidas)}</strong>
+                </span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div style={{ display: 'flex', alignItems: 'center', background: '#fff', border: '1px solid var(--border-color)', borderRadius: 6, padding: '4px 12px' }}>
+                  <Receipt style={{ width: 14, height: 14, color: '#999', marginRight: 6 }} />
+                  <input type="text" placeholder="Buscar..." style={{ border: 'none', outline: 'none', background: 'transparent', fontSize: 13, width: 180, color: 'var(--text-dark)' }} />
+                </div>
+                <button className="btn btn-primary btn-sm" onClick={() => setDespesaModal(true)}>
+                  <Plus style={{ width: 12, height: 12 }} />Nova Despesa
+                </button>
+              </div>
+            </div>
+            <div className="table-wrapper">
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr>
+                    <th style={{ color: '#666', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', padding: '12px 16px' }}>Data</th>
+                    <th style={{ color: '#666', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', padding: '12px 16px' }}>Descrição</th>
+                    <th style={{ color: '#666', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', padding: '12px 16px' }}>Categoria</th>
+                    <th style={{ color: '#666', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', padding: '12px 16px' }}>Tipo</th>
+                    <th style={{ color: '#666', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', padding: '12px 16px', textAlign: 'right' }}>Valor</th>
+                    <th style={{ color: '#666', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', padding: '12px 16px', textAlign: 'right' }}>Origem</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {listSaidas.map((item, idx) => (
+                    <tr key={item.id || idx} style={{ borderBottom: '1px solid var(--border-light)' }}>
+                      <td style={{ color: '#555', fontSize: 13, padding: '16px' }}>
+                        {item.data}
+                      </td>
+                      <td style={{ fontWeight: 700, fontSize: 13, color: '#334155', padding: '16px', textTransform: 'uppercase' }}>
+                        {item.descricao}
+                      </td>
+                      <td style={{ padding: '16px' }}>
+                        <span style={{ fontSize: 11, fontWeight: 500, color: '#475569', background: '#F1F5F9', padding: '4px 10px', borderRadius: 99 }}>
+                          {item.categoria}
+                        </span>
+                      </td>
+                      <td style={{ padding: '16px' }}>
+                        <span style={{
+                          fontSize: 11,
+                          fontWeight: 600,
+                          color: item.tipo === 'Sangria' ? '#E11D48' : '#D97706',
+                          background: item.tipo === 'Sangria' ? '#FFE4E6' : '#FFEDD5',
+                          padding: '4px 10px',
+                          borderRadius: 99
+                        }}>
+                          {item.tipo}
+                        </span>
+                      </td>
+                      <td style={{ textAlign: 'right', fontWeight: 700, fontSize: 13, color: item.valor > 0 ? '#E11D48' : '#94A3B8', padding: '16px' }}>
+                        {item.valor > 0 ? fmtCurrency(item.valor) : '--'}
+                      </td>
+                      <td style={{ textAlign: 'right', padding: '16px' }}>
+                        <span style={{ fontSize: 10, fontWeight: 600, color: '#64748B', background: '#F1F5F9', padding: '4px 8px', borderRadius: 4 }}>
+                          {item.origem}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {listSaidas.length === 0 && (
+                <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: 13, padding: 40 }}>
+                  <TrendingDown style={{ width: 32, height: 32, opacity: 0.3, margin: '0 auto 10px' }} />
+                  <p>{isConnected ? 'Nenhuma despesa ou sangria encontrada' : 'Conecte a planilha para visualizar despesas'}</p>
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Tab: Split */}
+      {activeTab === 'split' && (
+        <div>
+          <div className="grid-3 section-gap">
+            {safeSplitConfig.map(sc => (
+              <div className="card" key={sc.profissional}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+                  <div style={{
+                    width: 40, height: 40, borderRadius: 10,
+                    background: 'var(--color-primary-bg)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  }}>
+                    <User style={{ width: 18, height: 18, color: 'var(--color-primary)' }} />
+                  </div>
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--text-dark)' }}>{sc.profissional}</div>
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Profissional</div>
+                  </div>
+                </div>
+
+                <div style={{ marginBottom: 12 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 6 }}>
+                    <span style={{ color: 'var(--text-muted)' }}>Profissional: <strong style={{ color: 'var(--text-dark)' }}>{sc.percentual}%</strong></span>
+                    <span style={{ color: 'var(--text-muted)' }}>Clínica: <strong style={{ color: 'var(--text-dark)' }}>{100 - sc.percentual}%</strong></span>
+                  </div>
+                  <div style={{ height: 10, background: 'var(--border-color)', borderRadius: 99, overflow: 'hidden' }}>
+                    <div style={{
+                      height: '100%',
+                      width: `${sc.percentual}%`,
+                      background: 'var(--color-primary)',
+                      borderRadius: 99,
+                      transition: 'width 0.5s',
+                    }} />
+                  </div>
+                </div>
+
+                <button className="btn btn-ghost btn-sm" style={{ width: '100%', justifyContent: 'center' }} onClick={() => setSplitEdit({ ...sc })}>
+                  <Edit3 style={{ width: 12, height: 12 }} />Editar Split
+                </button>
+              </div>
+            ))}
+          </div>
+
+          <div className="card" style={{ marginTop: 16 }}>
+            <div className="card-header">
+              <span className="card-title"><Percent />Como funciona o Split</span>
+            </div>
+            <p style={{ fontSize: 13, color: 'var(--text-medium)', lineHeight: 1.6, margin: 0 }}>
+              O split define a divisão do valor de cada procedimento entre o profissional e a clínica.
+              Quando uma transação é importada da planilha, o valor é automaticamente dividido conforme a
+              configuração acima. O valor da clínica é calculado como: <strong>Total - Percentual do Profissional</strong>.
+            </p>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

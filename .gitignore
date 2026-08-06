@@ -1,0 +1,42 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Environment variables
+.env
+.env.*
+!.env.example
+!marketing_engine/config/.env.example
+marketing_engine/config/.env
+worker_whatsapp/.env
+worker_whatsapp/sessao_whatsapp/
+INICIAR_SISTEMA_MARKETING.bat
+*.bat
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Python (marketing_engine)
+__pycache__/
+*.pyc
+*.pyo
+config/tokens/
+.vercel

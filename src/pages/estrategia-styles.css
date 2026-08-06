@@ -1,0 +1,141 @@
+/*
+ * Required CSS variables and utility classes used by Estrategia.jsx
+ * Merge these into your project's global CSS (e.g. index.css)
+ * Adjust values to match your theme.
+ */
+
+/* ─── COLOR VARIABLES ─────────────────────────────────────────── */
+:root {
+  --color-primary:        #b08968;   /* warm brown */
+  --color-primary-light:  #c9a88c;
+  --color-accent:         #ddb892;
+  --color-accent-soft:    #f5ebe0;
+
+  --bg-main:    #f8f4f0;
+  --bg-card:    #ffffff;
+
+  --text-dark:   #2c2c2c;
+  --text-muted:  #8a8a8a;
+  --text-light:  #b0b0b0;
+
+  --border-color: #e5ddd5;
+
+  --success:    #4caf50;
+  --success-bg: #e8f5e9;
+  --warning:    #ff9800;
+  --danger:     #e53935;
+  --danger-bg:  #ffebee;
+  --info:       #2196f3;
+  --info-bg:    #e3f2fd;
+
+  --radius-sm:  6px;
+  --radius-md:  10px;
+  --shadow-sm:  0 2px 8px rgba(0,0,0,0.06);
+}
+
+/* ─── LAYOUT CLASSES ──────────────────────────────────────────── */
+.card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 18px 20px;
+}
+
+.page-header {
+  margin-bottom: 20px;
+}
+
+.page-header-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 6px;
+}
+
+.page-title {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text-dark);
+  margin: 0;
+}
+
+.page-subtitle {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+/* ─── GRID ────────────────────────────────────────────────────── */
+.grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.grid-4 {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+}
+
+.section-gap {
+  margin-bottom: 24px;
+}
+
+/* ─── STAT CARDS ──────────────────────────────────────────────── */
+.stat-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.stat-card-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 6px;
+}
+
+.stat-value {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text-dark);
+}
+
+.stat-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.stat-sub {
+  font-size: 11px;
+  color: var(--text-light);
+}
+
+/* ─── BADGES ──────────────────────────────────────────────────── */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 99px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}
+
+.badge-success { background: var(--success-bg); color: var(--success); }
+.badge-warning { background: #fff3e0;           color: var(--warning); }
+.badge-danger  { background: var(--danger-bg);  color: var(--danger);  }
