@@ -1,8 +1,8 @@
 import dotenv from 'dotenv';
 import { createClient } from '@supabase/supabase-js';
-import makeWASocket, { useMultiFileAuthState, DisconnectReason } from '@whiskeysockets/baileys';
+import makeWASocket, { useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, makeCacheableSignalKeyStore } from '@whiskeysockets/baileys';
 import pino from 'pino';
-import qrcode from 'qrcode-terminal';
+import qrcode from 'qrcode';
 
 dotenv.config();
 
@@ -23,41 +23,41 @@ const logger = pino({ level: 'silent' });
 let sock = null;
 let isConnected = false;
 
-async function updateConnectionStatus(status, qrCode = null) {
+async function setWAStatus(status, extra = {}) {
   try {
     const payload = {
+      id: 1,
       status,
-      updated_at: new Date().toISOString()
+      updated_at: new Date().toISOString(),
+      ...extra
     };
-    if (qrCode !== null) payload.qr_code = qrCode;
-
-    const { data } = await supabase
+    const { error } = await supabase
       .from('whatsapp_connection_status')
-      .select('id')
-      .limit(1);
+      .upsert(payload);
 
-    if (data && data.length > 0) {
-      await supabase
-        .from('whatsapp_connection_status')
-        .update(payload)
-        .eq('id', data[0].id);
+    if (error) {
+      console.warn('[Worker WhatsApp] Erro ao salvar status no Supabase:', error.message);
     } else {
-      await supabase
-        .from('whatsapp_connection_status')
-        .insert([{ ...payload, phone_number: null }]);
+      console.log(`[Worker WhatsApp] Status publicado no Supabase: ${status}`);
     }
   } catch (err) {
-    console.warn('[Worker WhatsApp] Aviso ao atualizar status no Supabase:', err.message);
+    console.warn('[Worker WhatsApp] Exceção ao atualizar status no Supabase:', err.message);
   }
 }
 
 async function connectToWhatsApp() {
   const { state, saveCreds } = await useMultiFileAuthState(AUTH_FOLDER);
+  const versionInfo = await fetchLatestBaileysVersion().catch(() => ({ version: undefined }));
 
   sock = makeWASocket({
-    auth: state,
+    version: versionInfo?.version,
+    logger,
+    auth: {
+      creds: state.creds,
+      keys: makeCacheableSignalKeyStore(state.keys, logger),
+    },
     printQRInTerminal: true,
-    logger
+    browser: ['EvelynEstheticCenter', 'Chrome', '1.0.0'],
   });
 
   sock.ev.on('creds.update', saveCreds);
@@ -67,23 +67,41 @@ async function connectToWhatsApp() {
 
     if (qr) {
       console.log('[Worker WhatsApp] Novo QR Code gerado.');
-      qrcode.generate(qr, { small: true });
-      await updateConnectionStatus('disconnected', qr);
+      try {
+        const qrBase64 = await qrcode.toDataURL(qr);
+        await setWAStatus('qr_ready', { qr_code_base64: qrBase64, error_message: null });
+        console.log('[Worker WhatsApp] QR Code (Base64) enviado com sucesso para o Supabase.');
+      } catch (qrErr) {
+        console.error('[Worker WhatsApp] Erro ao converter QR para Base64:', qrErr.message);
+      }
+    }
+
+    if (connection === 'connecting') {
+      await setWAStatus('connecting');
     }
 
     if (connection === 'close') {
       isConnected = false;
-      const shouldReconnect = (lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut);
-      console.log(`[Worker WhatsApp] Conexão fechada. Motivo: ${lastDisconnect?.error}. Reconectando: ${shouldReconnect}`);
-      await updateConnectionStatus('disconnected', null);
+      const code = lastDisconnect?.error?.output?.statusCode;
+      const shouldReconnect = (code !== DisconnectReason.loggedOut);
+      console.log(`[Worker WhatsApp] Conexão fechada. Motivo: ${lastDisconnect?.error?.message}. Reconectando: ${shouldReconnect}`);
+      await setWAStatus('disconnected', {
+        qr_code_base64: null,
+        error_message: lastDisconnect?.error?.message || null
+      });
 
       if (shouldReconnect) {
         setTimeout(connectToWhatsApp, 5000);
       }
     } else if (connection === 'open') {
       isConnected = true;
-      console.log('[Worker WhatsApp] Conectado ao WhatsApp com sucesso!');
-      await updateConnectionStatus('connected', null);
+      const phone = sock.user?.id?.split(':')[0] || null;
+      console.log(`[Worker WhatsApp] Conectado ao WhatsApp com sucesso! Número: ${phone}`);
+      await setWAStatus('connected', {
+        qr_code_base64: null,
+        phone_number: phone,
+        error_message: null
+      });
     }
   });
 }
@@ -168,6 +186,7 @@ async function processQueue() {
           .from('marketing_queue')
           .update({
             status: 'failed',
+            error_message: sendErr.message,
             updated_at: new Date().toISOString()
           })
           .eq('id', item.id);
@@ -180,6 +199,7 @@ async function processQueue() {
 
 async function start() {
   console.log('[Worker WhatsApp] Iniciando serviço...');
+  await setWAStatus('connecting');
   await connectToWhatsApp();
 
   setInterval(processQueue, POLL_INTERVAL_MS);

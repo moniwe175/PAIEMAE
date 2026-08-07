@@ -23,6 +23,13 @@ DROP POLICY IF EXISTS "public_update_queue" ON public.marketing_queue;
 CREATE POLICY "public_update_queue" ON public.marketing_queue
   FOR UPDATE TO anon USING (true) WITH CHECK (true);
 
--- Habilitar Realtime nas duas tabelas
+-- 3. whatsapp_connection_status
+DROP POLICY IF EXISTS "public_all_whatsapp_status" ON public.whatsapp_connection_status;
+DROP POLICY IF EXISTS "public_read_whatsapp_status" ON public.whatsapp_connection_status;
+CREATE POLICY "public_read_whatsapp_status" ON public.whatsapp_connection_status
+  FOR SELECT TO anon, authenticated USING (true);
+
+-- Habilitar Realtime nas três tabelas
 ALTER TABLE public.message_templates REPLICA IDENTITY FULL;
 ALTER TABLE public.marketing_queue REPLICA IDENTITY FULL;
+ALTER TABLE public.whatsapp_connection_status REPLICA IDENTITY FULL;
