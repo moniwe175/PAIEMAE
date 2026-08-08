@@ -76,9 +76,8 @@ async function loadFromSupabase() {
 
 async function upsertToSupabase(svc) {
   if (!isSupabaseConfigured()) return;
-  const user = await getCurrentUser();
   
-  // Garantir que enviamos apenas colunas válidas no schema do Supabase
+  // Apenas colunas que existem na tabela servicos do Supabase
   const dbPayload = {
     id: svc.id,
     nome: svc.nome,
@@ -88,10 +87,10 @@ async function upsertToSupabase(svc) {
     comissao: Number(svc.comissao) || 0,
     ativo: svc.ativo ?? true,
     descricao: encodeDescricao(svc.descricao, svc.fichasObrigatorias || (svc.fichaObrigatoria ? [svc.fichaObrigatoria] : [])),
-    user_id: user?.id
   };
   
-  await supabase.from('servicos').upsert([dbPayload], { onConflict: 'id' });
+  const { error } = await supabase.from('servicos').upsert([dbPayload], { onConflict: 'id' });
+  if (error) console.error('[upsertToSupabase] erro:', error.message);
 }
 
 async function deleteFromSupabase(id) {
