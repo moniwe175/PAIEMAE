@@ -16,7 +16,7 @@ function ServicoModal({ onClose, onSave, servico }) {
     preco: servico?.preco || '',
     comissao: servico?.comissao || '',
     descricao: servico?.descricao || '',
-    fichaObrigatoria: servico?.fichaObrigatoria || '',
+    fichasObrigatorias: servico?.fichasObrigatorias || (servico?.fichaObrigatoria ? [servico.fichaObrigatoria] : []),
   });
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
@@ -58,11 +58,37 @@ function ServicoModal({ onClose, onSave, servico }) {
             <input className="form-input" type="number" placeholder="30" value={form.comissao} onChange={e => set('comissao', e.target.value)} />
           </div>
           <div className="form-group" style={{ gridColumn: 'span 2' }}>
-            <label className="form-label">Ficha de Anamnese Obrigatória</label>
-            <select className="form-select" value={form.fichaObrigatoria} onChange={e => set('fichaObrigatoria', e.target.value)}>
-              <option value="">Nenhuma (Não exige ficha)</option>
-              {TIPOS_FICHA_OPCOES.map(f => <option key={f} value={f}>{f}</option>)}
-            </select>
+            <label className="form-label">Fichas de Anamnese Obrigatórias</label>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 4 }}>
+              {TIPOS_FICHA_OPCOES.map(f => {
+                const isSelected = (form.fichasObrigatorias || []).includes(f);
+                return (
+                  <button
+                    key={f}
+                    type="button"
+                    onClick={() => {
+                      setForm(prev => {
+                        const current = prev.fichasObrigatorias || [];
+                        const next = current.includes(f) ? current.filter(x => x !== f) : [...current, f];
+                        return { ...prev, fichasObrigatorias: next };
+                      });
+                    }}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 6,
+                      padding: '5px 12px', borderRadius: 20, fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                      border: `1.5px solid ${isSelected ? '#E11D48' : '#E5E7EB'}`,
+                      background: isSelected ? '#FFF1F2' : '#fff',
+                      color: isSelected ? '#E11D48' : '#6B7280',
+                      transition: 'all 0.15s',
+                    }}
+                  >
+                    <FileText style={{ width: 12, height: 12 }} />
+                    {f}
+                    {isSelected && <CheckCircle style={{ width: 12, height: 12 }} />}
+                  </button>
+                );
+              })}
+            </div>
           </div>
           <div className="form-group" style={{ gridColumn: 'span 2' }}>
             <label className="form-label">Descrição</label>
@@ -184,32 +210,34 @@ function ProfissionaisPanel({ servicoNome, profissionais, onLink, onUnlink }) {
 }
 
 // ─── Anamnesis Ficha Linking Panel ─────────────────────────
-function FichaPanel({ servico, onSetFicha }) {
-  const currentFicha = servico.fichaObrigatoria;
+function FichaPanel({ servico, onAddFicha, onRemoveFicha }) {
+  const fichas = servico.fichasObrigatorias || (servico.fichaObrigatoria ? [servico.fichaObrigatoria] : []);
 
   return (
     <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px dashed #F0EBE6' }}>
       <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.5, color: '#9CA3AF', textTransform: 'uppercase', marginBottom: 6 }}>
-        Ficha de Anamnese Obrigatória
+        Fichas de Anamnese Obrigatórias
       </div>
 
-      {currentFicha ? (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
-          <span style={{
-            display: 'inline-flex', alignItems: 'center', gap: 4,
-            background: '#FFF1F2', color: '#E11D48', border: '1px solid #FECDD3',
-            padding: '3px 9px', borderRadius: 99, fontSize: 11, fontWeight: 600,
-          }}>
-            <FileText style={{ width: 11, height: 11 }} />
-            {currentFicha}
-            <button
-              onClick={() => onSetFicha(servico.id, null)}
-              style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, display: 'flex', marginLeft: 2 }}
-              title="Remover obrigatoriedade de ficha"
-            >
-              <X style={{ width: 11, height: 11, color: '#E11D48' }} />
-            </button>
-          </span>
+      {fichas.length > 0 ? (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginBottom: 8 }}>
+          {fichas.map(f => (
+            <span key={f} style={{
+              display: 'inline-flex', alignItems: 'center', gap: 4,
+              background: '#FFF1F2', color: '#E11D48', border: '1px solid #FECDD3',
+              padding: '3px 8px', borderRadius: 99, fontSize: 11, fontWeight: 600,
+            }}>
+              <FileText style={{ width: 11, height: 11 }} />
+              {f}
+              <button
+                onClick={() => onRemoveFicha(servico.id, f)}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, display: 'flex', marginLeft: 2 }}
+                title={`Remover obrigatoriedade de ${f}`}
+              >
+                <X style={{ width: 11, height: 11, color: '#E11D48' }} />
+              </button>
+            </span>
+          ))}
         </div>
       ) : (
         <span style={{ fontSize: 11, color: '#D1D5DB', fontStyle: 'italic', display: 'block', marginBottom: 4 }}>
@@ -223,55 +251,44 @@ function FichaPanel({ servico, onSetFicha }) {
           fontSize: 11, fontWeight: 600, color: '#C73B6D', cursor: 'pointer',
           listStyle: 'none', display: 'flex', alignItems: 'center', gap: 4,
         }}>
-          <FileText style={{ width: 12, height: 12 }} />{currentFicha ? 'Alterar ficha vinculada' : 'Vincular ficha de anamnese'}
+          <FileText style={{ width: 12, height: 12 }} />+ Vincular ficha de anamnese
         </summary>
         <div style={{
           marginTop: 6, background: '#fff', border: '1px solid #E5E7EB',
           borderRadius: 8, padding: 6, boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
           maxHeight: 180, overflowY: 'auto', zIndex: 10, position: 'relative',
         }}>
-          {TIPOS_FICHA_OPCOES.map(tipo => (
-            <button
-              key={tipo}
-              onClick={(e) => {
-                onSetFicha(servico.id, tipo);
-                const det = e.currentTarget.closest('details');
-                if (det) det.removeAttribute('open');
-              }}
-              style={{
-                display: 'flex', alignItems: 'center', gap: 8,
-                width: '100%', textAlign: 'left', background: tipo === currentFicha ? '#FDF2F8' : 'none',
-                border: 'none', cursor: 'pointer', padding: '6px 8px',
-                borderRadius: 6, fontSize: 12, color: tipo === currentFicha ? '#C73B6D' : '#374151',
-                fontWeight: tipo === currentFicha ? 700 : 500,
-                transition: 'background 0.1s',
-              }}
-              onMouseEnter={e => { if (tipo !== currentFicha) e.currentTarget.style.background = '#F9FAFB'; }}
-              onMouseLeave={e => { if (tipo !== currentFicha) e.currentTarget.style.background = 'transparent'; }}
-            >
-              <FileText style={{ width: 13, height: 13, color: '#C73B6D' }} />
-              {tipo}
-            </button>
-          ))}
-          {currentFicha && (
-            <button
-              onClick={(e) => {
-                onSetFicha(servico.id, null);
-                const det = e.currentTarget.closest('details');
-                if (det) det.removeAttribute('open');
-              }}
-              style={{
-                display: 'flex', alignItems: 'center', gap: 8,
-                width: '100%', textAlign: 'left', background: 'none',
-                borderTop: '1px solid #F3F4F6', cursor: 'pointer', padding: '6px 8px',
-                borderRadius: 6, fontSize: 11, color: '#EF4444', fontWeight: 600,
-                marginTop: 4,
-              }}
-            >
-              <X style={{ width: 12, height: 12 }} />
-              Remover vínculo de ficha
-            </button>
-          )}
+          {TIPOS_FICHA_OPCOES.map(tipo => {
+            const isSelected = fichas.includes(tipo);
+            return (
+              <button
+                key={tipo}
+                onClick={() => {
+                  if (isSelected) {
+                    onRemoveFicha(servico.id, tipo);
+                  } else {
+                    onAddFicha(servico.id, tipo);
+                  }
+                }}
+                style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  width: '100%', textAlign: 'left', background: isSelected ? '#FDF2F8' : 'none',
+                  border: 'none', cursor: 'pointer', padding: '6px 8px',
+                  borderRadius: 6, fontSize: 12, color: isSelected ? '#C73B6D' : '#374151',
+                  fontWeight: isSelected ? 700 : 500,
+                  transition: 'background 0.1s',
+                }}
+                onMouseEnter={e => { if (!isSelected) e.currentTarget.style.background = '#F9FAFB'; }}
+                onMouseLeave={e => { if (!isSelected) e.currentTarget.style.background = 'transparent'; }}
+              >
+                <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <FileText style={{ width: 13, height: 13, color: '#C73B6D' }} />
+                  {tipo}
+                </span>
+                {isSelected && <CheckCircle style={{ width: 13, height: 13, color: '#C73B6D' }} />}
+              </button>
+            );
+          })}
         </div>
       </details>
     </div>
@@ -280,7 +297,7 @@ function FichaPanel({ servico, onSetFicha }) {
 
 // ─── Main Component ─────────────────────────────────────────
 export default function Services() {
-  const { servicos, addServico, updateServico, removeServico, toggleAtivo, setFichaObrigatoria } = useServicos();
+  const { servicos, addServico, updateServico, removeServico, toggleAtivo, addFichaObrigatoria, removeFichaObrigatoria } = useServicos();
   const { profissionais, addServicoToProfissional, removeServicoFromProfissional } = useProfissionais();
 
   const [editModal, setEditModal] = useState(null); // null | 'new' | servico object
@@ -382,73 +399,77 @@ export default function Services() {
 
       {/* Service cards */}
       <div className="grid-3">
-        {filtrados.map(s => (
-          <div key={s.id} className="card" style={{ opacity: s.ativo ? 1 : 0.6 }}>
-            {/* Top badges */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
-              <span className={`badge ${CAT_COLORS[s.categoria] || 'badge-neutral'}`}>{s.categoria}</span>
-              {s.fichaObrigatoria && (
-                <span className="badge badge-danger" style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }} title={`Requer ${s.fichaObrigatoria}`}>
-                  <FileText style={{ width: 10, height: 10 }} />
-                  {s.fichaObrigatoria}
+        {filtrados.map(s => {
+          const fichas = s.fichasObrigatorias || (s.fichaObrigatoria ? [s.fichaObrigatoria] : []);
+          return (
+            <div key={s.id} className="card" style={{ opacity: s.ativo ? 1 : 0.6 }}>
+              {/* Top badges */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap', marginBottom: 12 }}>
+                <span className={`badge ${CAT_COLORS[s.categoria] || 'badge-neutral'}`}>{s.categoria}</span>
+                {fichas.map(f => (
+                  <span key={f} className="badge badge-danger" style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }} title={`Requer ${f}`}>
+                    <FileText style={{ width: 10, height: 10 }} />
+                    {f}
+                  </span>
+                ))}
+                <span
+                  className={`badge ${s.ativo ? 'badge-success' : 'badge-neutral'}`}
+                  style={{ cursor: 'pointer', marginLeft: 'auto' }}
+                  onClick={() => toggleAtivo(s.id)}
+                  title={s.ativo ? 'Clique para desativar' : 'Clique para ativar'}
+                >
+                  {s.ativo ? 'Ativo' : 'Inativo'}
                 </span>
-              )}
-              <span
-                className={`badge ${s.ativo ? 'badge-success' : 'badge-neutral'}`}
-                style={{ cursor: 'pointer', marginLeft: 'auto' }}
-                onClick={() => toggleAtivo(s.id)}
-                title={s.ativo ? 'Clique para desativar' : 'Clique para ativar'}
-              >
-                {s.ativo ? 'Ativo' : 'Inativo'}
-              </span>
-            </div>
-
-            {/* Service name */}
-            <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 10, color: 'var(--text-dark)' }}>{s.nome}</div>
-
-            <div className="divider" />
-
-            {/* Info */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
-                <span style={{ display: 'flex', alignItems: 'center', gap: 5, color: 'var(--text-muted)' }}><Clock style={{ width: 13, height: 13 }} />Duração</span>
-                <span style={{ fontWeight: 600 }}>{s.duracao} min</span>
               </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
-                <span style={{ display: 'flex', alignItems: 'center', gap: 5, color: 'var(--text-muted)' }}><DollarSign style={{ width: 13, height: 13 }} />Preço</span>
-                <span style={{ fontWeight: 700, color: 'var(--success)' }}>R$ {s.preco.toLocaleString('pt-BR')}</span>
+
+              {/* Service name */}
+              <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 10, color: 'var(--text-dark)' }}>{s.nome}</div>
+
+              <div className="divider" />
+
+              {/* Info */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 5, color: 'var(--text-muted)' }}><Clock style={{ width: 13, height: 13 }} />Duração</span>
+                  <span style={{ fontWeight: 600 }}>{s.duracao} min</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 5, color: 'var(--text-muted)' }}><DollarSign style={{ width: 13, height: 13 }} />Preço</span>
+                  <span style={{ fontWeight: 700, color: 'var(--success)' }}>R$ {s.preco.toLocaleString('pt-BR')}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
+                  <span style={{ color: 'var(--text-muted)' }}>Comissão</span>
+                  <span style={{ fontWeight: 600 }}>{s.comissao}%</span>
+                </div>
               </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
-                <span style={{ color: 'var(--text-muted)' }}>Comissão</span>
-                <span style={{ fontWeight: 600 }}>{s.comissao}%</span>
+
+              {/* Professional linking */}
+              <ProfissionaisPanel
+                servicoNome={s.nome}
+                profissionais={profissionais}
+                onLink={handleLink}
+                onUnlink={handleUnlink}
+              />
+
+              {/* Anamnesis Ficha linking */}
+              <FichaPanel
+                servico={s}
+                onAddFicha={addFichaObrigatoria}
+                onRemoveFicha={removeFichaObrigatoria}
+              />
+
+              {/* Actions */}
+              <div style={{ display: 'flex', gap: 6, marginTop: 14 }}>
+                <button className="btn btn-ghost btn-sm" style={{ flex: 1 }} onClick={() => setEditModal(s)}>
+                  <Edit3 style={{ width: 12, height: 12 }} />Editar
+                </button>
+                <button className="btn btn-ghost btn-sm" style={{ flex: 0, color: '#DC2626', padding: '4px 10px' }} onClick={() => setDeleteId(s.id)}>
+                  <Trash2 style={{ width: 14, height: 14 }} />
+                </button>
               </div>
             </div>
-
-            {/* Professional linking */}
-            <ProfissionaisPanel
-              servicoNome={s.nome}
-              profissionais={profissionais}
-              onLink={handleLink}
-              onUnlink={handleUnlink}
-            />
-
-            {/* Anamnesis Ficha linking */}
-            <FichaPanel
-              servico={s}
-              onSetFicha={setFichaObrigatoria}
-            />
-
-            {/* Actions */}
-            <div style={{ display: 'flex', gap: 6, marginTop: 14 }}>
-              <button className="btn btn-ghost btn-sm" style={{ flex: 1 }} onClick={() => setEditModal(s)}>
-                <Edit3 style={{ width: 12, height: 12 }} />Editar
-              </button>
-              <button className="btn btn-ghost btn-sm" style={{ flex: 0, color: '#DC2626', padding: '4px 10px' }} onClick={() => setDeleteId(s.id)}>
-                <Trash2 style={{ width: 14, height: 14 }} />
-              </button>
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       {filtrados.length === 0 && (

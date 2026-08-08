@@ -32,18 +32,66 @@ function genId() {
   return 'svc_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 }
 
+// ─── Helpers para codificar/decodificar metadados na descricao ─
+function encodeDescricao(text, fichasObrigatorias) {
+  const fichas = Array.isArray(fichasObrigatorias) ? fichasObrigatorias.filter(Boolean) : (fichasObrigatorias ? [fichasObrigatorias] : []);
+  return JSON.stringify({
+    text: text || '',
+    fichas: fichas
+  });
+}
+
+function decodeDescricao(rawDesc) {
+  if (!rawDesc) return { descricao: '', fichasObrigatorias: [] };
+  try {
+    if (typeof rawDesc === 'string' && rawDesc.startsWith('{')) {
+      const parsed = JSON.parse(rawDesc);
+      const fichas = Array.isArray(parsed.fichas) ? parsed.fichas : (parsed.fichas ? [parsed.fichas] : []);
+      return {
+        descricao: parsed.text || '',
+        fichasObrigatorias: fichas
+      };
+    }
+  } catch (e) {}
+  return { descricao: rawDesc, fichasObrigatorias: [] };
+}
+
+function mapServiceFromSupabase(item) {
+  const { descricao, fichasObrigatorias } = decodeDescricao(item.descricao);
+  return {
+    ...item,
+    descricao: descricao,
+    fichasObrigatorias: fichasObrigatorias,
+    fichaObrigatoria: fichasObrigatorias[0] || null
+  };
+}
+
 // ─── Supabase helpers ────────────────────────────────────────
 async function loadFromSupabase() {
   if (!isSupabaseConfigured()) return null;
   const { data, error } = await supabase.from('servicos').select('*').order('created_at');
   if (error || !data) return null;
-  return data;
+  return data.map(mapServiceFromSupabase);
 }
 
 async function upsertToSupabase(svc) {
   if (!isSupabaseConfigured()) return;
   const user = await getCurrentUser();
-  await supabase.from('servicos').upsert([{ ...svc, user_id: user?.id }], { onConflict: 'id' });
+  
+  // Garantir que enviamos apenas colunas válidas no schema do Supabase
+  const dbPayload = {
+    id: svc.id,
+    nome: svc.nome,
+    categoria: svc.categoria || '',
+    duracao: Number(svc.duracao) || 30,
+    preco: Number(svc.preco) || 0,
+    comissao: Number(svc.comissao) || 0,
+    ativo: svc.ativo ?? true,
+    descricao: encodeDescricao(svc.descricao, svc.fichasObrigatorias || (svc.fichaObrigatoria ? [svc.fichaObrigatoria] : [])),
+    user_id: user?.id
+  };
+  
+  await supabase.from('servicos').upsert([dbPayload], { onConflict: 'id' });
 }
 
 async function deleteFromSupabase(id) {
@@ -68,6 +116,7 @@ export function useServicos() {
   }, []);
 
   const addServico = useCallback(async (data) => {
+    const fichas = Array.isArray(data.fichasObrigatorias) ? data.fichasObrigatorias : (data.fichaObrigatoria ? [data.fichaObrigatoria] : []);
     const novo = {
       id: genId(),
       nome: data.nome || 'Novo Serviço',
@@ -77,7 +126,8 @@ export function useServicos() {
       comissao: Number(data.comissao) || 0,
       ativo: true,
       descricao: data.descricao || '',
-      fichaObrigatoria: data.fichaObrigatoria || null,
+      fichasObrigatorias: fichas,
+      fichaObrigatoria: fichas[0] || null
     };
     await upsertToSupabase(novo);
     setServicos(prev => [...prev, novo]);
@@ -87,7 +137,15 @@ export function useServicos() {
   const updateServico = useCallback(async (id, updates) => {
     setServicos(prev => prev.map(s => {
       if (s.id !== id) return s;
-      const updated = { ...s, ...updates };
+      const fichas = updates.fichasObrigatorias !== undefined
+        ? updates.fichasObrigatorias
+        : (updates.fichaObrigatoria !== undefined ? (updates.fichaObrigatoria ? [updates.fichaObrigatoria] : []) : s.fichasObrigatorias);
+      const updated = {
+        ...s,
+        ...updates,
+        fichasObrigatorias: fichas,
+        fichaObrigatoria: fichas[0] || null
+      };
       upsertToSupabase(updated);
       return updated;
     }));
@@ -107,10 +165,47 @@ export function useServicos() {
     }));
   }, []);
 
+  const addFichaObrigatoria = useCallback(async (id, fichaTipo) => {
+    if (!fichaTipo) return;
+    setServicos(prev => prev.map(s => {
+      if (s.id !== id) return s;
+      const current = s.fichasObrigatorias || [];
+      if (current.includes(fichaTipo)) return s;
+      const nextFichas = [...current, fichaTipo];
+      const updated = {
+        ...s,
+        fichasObrigatorias: nextFichas,
+        fichaObrigatoria: nextFichas[0] || null
+      };
+      upsertToSupabase(updated);
+      return updated;
+    }));
+  }, []);
+
+  const removeFichaObrigatoria = useCallback(async (id, fichaTipo) => {
+    setServicos(prev => prev.map(s => {
+      if (s.id !== id) return s;
+      const current = s.fichasObrigatorias || [];
+      const nextFichas = current.filter(f => f !== fichaTipo);
+      const updated = {
+        ...s,
+        fichasObrigatorias: nextFichas,
+        fichaObrigatoria: nextFichas[0] || null
+      };
+      upsertToSupabase(updated);
+      return updated;
+    }));
+  }, []);
+
   const setFichaObrigatoria = useCallback(async (id, fichaTipo) => {
     setServicos(prev => prev.map(s => {
       if (s.id !== id) return s;
-      const updated = { ...s, fichaObrigatoria: fichaTipo || null };
+      const nextFichas = fichaTipo ? [fichaTipo] : [];
+      const updated = {
+        ...s,
+        fichasObrigatorias: nextFichas,
+        fichaObrigatoria: nextFichas[0] || null
+      };
       upsertToSupabase(updated);
       return updated;
     }));
@@ -123,5 +218,7 @@ export function useServicos() {
     removeServico,
     toggleAtivo,
     setFichaObrigatoria,
+    addFichaObrigatoria,
+    removeFichaObrigatoria,
   };
 }

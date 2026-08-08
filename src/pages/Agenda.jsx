@@ -804,11 +804,11 @@ function AgendamentoModal({ onClose, date, profissional: prefillProf, hora: pref
   const handleSave = async () => {
     if (!canSave || isChecking) return;
 
-    // Check if the service has a required Ficha de Anamnese
+    // Check if the service has required Fichas de Anamnese
     const targetService = (todosServicos || []).find(s => s.nome === form.servico);
-    const requiredFicha = targetService?.fichaObrigatoria;
+    const requiredFichas = targetService?.fichasObrigatorias || (targetService?.fichaObrigatoria ? [targetService.fichaObrigatoria] : []);
 
-    if (requiredFicha) {
+    if (requiredFichas.length > 0) {
       setIsChecking(true);
       try {
         const { data: anamnesesData } = await fetchAnamneses();
@@ -829,22 +829,19 @@ function AgendamentoModal({ onClose, date, profissional: prefillProf, hora: pref
           return matchId || matchName || matchClientName;
         });
 
-        let hasFicha = false;
-        if (requiredFicha === 'Qualquer Ficha') {
-          hasFicha = clientAnamneses.length > 0;
-        } else {
-          hasFicha = clientAnamneses.some(a => {
-            const tipo = a.form_data?.tipoFicha || a.tipo_ficha || a.tipoFicha;
-            return tipo === requiredFicha;
-          });
-        }
+        const filledTypes = clientAnamneses.map(a => a.form_data?.tipoFicha || a.tipo_ficha || a.tipoFicha).filter(Boolean);
 
-        if (!hasFicha) {
+        const missingFichas = requiredFichas.filter(rf => {
+          if (rf === 'Qualquer Ficha') return clientAnamneses.length === 0;
+          return !filledTypes.includes(rf);
+        });
+
+        if (missingFichas.length > 0) {
           setIsChecking(false);
           setBlockedInfo({
             paciente: form.paciente,
             servico: form.servico,
-            fichaExigida: requiredFicha,
+            fichaExigida: missingFichas.join(', '),
           });
           return; // BLOCK APPOINTMENT SAVE!
         }
