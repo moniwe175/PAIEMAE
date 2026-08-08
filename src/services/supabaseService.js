@@ -754,9 +754,14 @@ export async function fetchAppointments() {
 
 export async function insertAppointment(apt) {
   if (!isSupabaseConfigured()) return handleError('Supabase not configured');
-  const userId = apt.user_id || await getUserId();
-  const { data, error } = await supabase.from('appointments').insert([{ ...apt, user_id: userId }]).select().single();
-  if (error) return handleError(error);
+  // A tabela appointments NÃO possui coluna user_id — remover antes de inserir
+  // eslint-disable-next-line no-unused-vars
+  const { user_id, ...aptPayload } = apt;
+  const { data, error } = await supabase.from('appointments').insert([aptPayload]).select().single();
+  if (error) {
+    console.error('[Supabase] insertAppointment error:', error);
+    return handleError(error);
+  }
   return { data, error: null };
 }
 
