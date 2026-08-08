@@ -627,9 +627,9 @@ function normalizeSearchText(str) {
 
 /**
  * Pontuação de relevância para busca de clientes.
- * Usa APENAS matching por prefixo (começo do nome/palavra).
- * Não usa substring-contains para evitar resultados confusos
- * (ex: digitar "iu" não deve trazer "Giulia" ou "Luis").
+ * Usa APENAS prefix do nome completo ou telefone.
+ * Sem word-by-word matching para evitar resultados confusos
+ * (ex: "Adriana Cavalcante" aparecendo como "Adriana" para query "ca").
  */
 function scoreClientMatch(clientName, clientPhone, rawQuery) {
   if (!rawQuery) return 0;
@@ -643,14 +643,10 @@ function scoreClientMatch(clientName, clientPhone, rawQuery) {
   // 1. Match exato
   if (nameNorm === q) return 1000;
 
-  // 2. Nome completo começa com a query
+  // 2. Nome começa com a query  (ex: "ca" → Camila, Carla, Cássia)
   if (nameNorm.startsWith(q)) return 900;
 
-  // 3. Alguma palavra do nome começa com a query (ex: sobrenome)
-  const words = nameNorm.split(/\s+/);
-  if (words.some(w => w.startsWith(q))) return 800;
-
-  // 4. Telefone contém a query (só para queries numéricas com 3+ dígitos)
+  // 3. Telefone contém a query (só para queries numéricas com 3+ dígitos)
   if (qPhone.length >= 3 && phoneNorm.includes(qPhone)) return 300;
 
   return 0;
