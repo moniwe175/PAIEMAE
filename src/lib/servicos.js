@@ -69,7 +69,7 @@ function mapServiceFromSupabase(item) {
 // ─── Supabase helpers ────────────────────────────────────────
 async function loadFromSupabase() {
   if (!isSupabaseConfigured()) return null;
-  const { data, error } = await supabase.from('servicos').select('*').order('created_at');
+  const { data, error } = await supabase.from('servicos').select('*').order('created_at').order('id');
   if (error || !data) return null;
   return data.map(mapServiceFromSupabase);
 }
