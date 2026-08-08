@@ -197,10 +197,10 @@ export function useServicos() {
     }));
   }, []);
 
-  const setFichaObrigatoria = useCallback(async (id, fichaTipo) => {
+  const setFichasObrigatorias = useCallback(async (id, fichasArray) => {
     setServicos(prev => prev.map(s => {
       if (s.id !== id) return s;
-      const nextFichas = fichaTipo ? [fichaTipo] : [];
+      const nextFichas = Array.isArray(fichasArray) ? fichasArray : [];
       const updated = {
         ...s,
         fichasObrigatorias: nextFichas,
@@ -220,5 +220,6 @@ export function useServicos() {
     setFichaObrigatoria,
     addFichaObrigatoria,
     removeFichaObrigatoria,
+    setFichasObrigatorias,
   };
 }

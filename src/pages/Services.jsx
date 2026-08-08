@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   Scissors, Plus, Search, XCircle, Clock, DollarSign,
   Edit3, Trash2, CheckCircle, Users, X, UserPlus, UserMinus, FileText, AlertTriangle
@@ -210,8 +210,33 @@ function ProfissionaisPanel({ servicoNome, profissionais, onLink, onUnlink }) {
 }
 
 // ─── Anamnesis Ficha Linking Panel ─────────────────────────
-function FichaPanel({ servico, onAddFicha, onRemoveFicha }) {
-  const fichas = servico.fichasObrigatorias || (servico.fichaObrigatoria ? [servico.fichaObrigatoria] : []);
+function FichaPanel({ servico, onSaveFichas }) {
+  const currentFichas = servico.fichasObrigatorias || (servico.fichaObrigatoria ? [servico.fichaObrigatoria] : []);
+  const [draft, setDraft] = useState(currentFichas);
+
+  // Sync draft when servico.fichasObrigatorias changes
+  useEffect(() => {
+    setDraft(servico.fichasObrigatorias || (servico.fichaObrigatoria ? [servico.fichaObrigatoria] : []));
+  }, [servico.fichasObrigatorias, servico.fichaObrigatoria]);
+
+  const handleToggle = (tipo) => {
+    setDraft(prev => {
+      if (prev.includes(tipo)) return prev.filter(t => t !== tipo);
+      return [...prev, tipo];
+    });
+  };
+
+  const handleRemoveSingle = (tipo) => {
+    const updated = currentFichas.filter(t => t !== tipo);
+    setDraft(updated);
+    onSaveFichas(servico.id, updated);
+  };
+
+  const handleConfirm = (e) => {
+    onSaveFichas(servico.id, draft);
+    const det = e.currentTarget.closest('details');
+    if (det) det.removeAttribute('open');
+  };
 
   return (
     <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px dashed #F0EBE6' }}>
@@ -219,9 +244,9 @@ function FichaPanel({ servico, onAddFicha, onRemoveFicha }) {
         Fichas de Anamnese Obrigatórias
       </div>
 
-      {fichas.length > 0 ? (
+      {currentFichas.length > 0 ? (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginBottom: 8 }}>
-          {fichas.map(f => (
+          {currentFichas.map(f => (
             <span key={f} style={{
               display: 'inline-flex', alignItems: 'center', gap: 4,
               background: '#FFF1F2', color: '#E11D48', border: '1px solid #FECDD3',
@@ -230,7 +255,7 @@ function FichaPanel({ servico, onAddFicha, onRemoveFicha }) {
               <FileText style={{ width: 11, height: 11 }} />
               {f}
               <button
-                onClick={() => onRemoveFicha(servico.id, f)}
+                onClick={() => handleRemoveSingle(f)}
                 style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, display: 'flex', marginLeft: 2 }}
                 title={`Remover obrigatoriedade de ${f}`}
               >
@@ -255,40 +280,54 @@ function FichaPanel({ servico, onAddFicha, onRemoveFicha }) {
         </summary>
         <div style={{
           marginTop: 6, background: '#fff', border: '1px solid #E5E7EB',
-          borderRadius: 8, padding: 6, boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
-          maxHeight: 180, overflowY: 'auto', zIndex: 10, position: 'relative',
+          borderRadius: 10, padding: 8, boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
+          maxHeight: 260, overflowY: 'auto', zIndex: 20, position: 'relative',
         }}>
+          <div style={{ fontSize: 11, fontWeight: 600, color: '#6B7280', marginBottom: 6, paddingLeft: 4 }}>
+            Selecione as fichas desejadas:
+          </div>
+
           {TIPOS_FICHA_OPCOES.map(tipo => {
-            const isSelected = fichas.includes(tipo);
+            const isSelected = draft.includes(tipo);
             return (
-              <button
+              <div
                 key={tipo}
-                onClick={() => {
-                  if (isSelected) {
-                    onRemoveFicha(servico.id, tipo);
-                  } else {
-                    onAddFicha(servico.id, tipo);
-                  }
-                }}
+                onClick={() => handleToggle(tipo)}
                 style={{
                   display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                  width: '100%', textAlign: 'left', background: isSelected ? '#FDF2F8' : 'none',
-                  border: 'none', cursor: 'pointer', padding: '6px 8px',
-                  borderRadius: 6, fontSize: 12, color: isSelected ? '#C73B6D' : '#374151',
-                  fontWeight: isSelected ? 700 : 500,
-                  transition: 'background 0.1s',
+                  width: '100%', textAlign: 'left', background: isSelected ? '#FDF2F8' : 'transparent',
+                  border: 'none', cursor: 'pointer', padding: '7px 10px',
+                  borderRadius: 8, fontSize: 12, color: isSelected ? '#C73B6D' : '#374151',
+                  fontWeight: isSelected ? 700 : 500, marginBottom: 2,
+                  transition: 'background 0.1s', userSelect: 'none',
                 }}
                 onMouseEnter={e => { if (!isSelected) e.currentTarget.style.background = '#F9FAFB'; }}
                 onMouseLeave={e => { if (!isSelected) e.currentTarget.style.background = 'transparent'; }}
               >
                 <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <FileText style={{ width: 13, height: 13, color: '#C73B6D' }} />
+                  <FileText style={{ width: 13, height: 13, color: isSelected ? '#C73B6D' : '#9CA3AF' }} />
                   {tipo}
                 </span>
-                {isSelected && <CheckCircle style={{ width: 13, height: 13, color: '#C73B6D' }} />}
-              </button>
+                {isSelected && <CheckCircle style={{ width: 14, height: 14, color: '#C73B6D' }} />}
+              </div>
             );
           })}
+
+          <div style={{ borderTop: '1px solid #F3F4F6', marginTop: 8, paddingTop: 8 }}>
+            <button
+              type="button"
+              onClick={handleConfirm}
+              style={{
+                width: '100%', padding: '7px 12px', borderRadius: 8, border: 'none',
+                background: 'linear-gradient(135deg,#C73B6D,#A83158)',
+                color: '#fff', fontSize: 12, fontWeight: 700, cursor: 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
+                boxShadow: '0 2px 6px rgba(199,59,109,0.25)',
+              }}
+            >
+              <CheckCircle style={{ width: 13, height: 13 }} /> Salvar Fichas
+            </button>
+          </div>
         </div>
       </details>
     </div>
@@ -297,7 +336,7 @@ function FichaPanel({ servico, onAddFicha, onRemoveFicha }) {
 
 // ─── Main Component ─────────────────────────────────────────
 export default function Services() {
-  const { servicos, addServico, updateServico, removeServico, toggleAtivo, addFichaObrigatoria, removeFichaObrigatoria } = useServicos();
+  const { servicos, addServico, updateServico, removeServico, toggleAtivo, setFichasObrigatorias } = useServicos();
   const { profissionais, addServicoToProfissional, removeServicoFromProfissional } = useProfissionais();
 
   const [editModal, setEditModal] = useState(null); // null | 'new' | servico object
@@ -454,8 +493,7 @@ export default function Services() {
               {/* Anamnesis Ficha linking */}
               <FichaPanel
                 servico={s}
-                onAddFicha={addFichaObrigatoria}
-                onRemoveFicha={removeFichaObrigatoria}
+                onSaveFichas={setFichasObrigatorias}
               />
 
               {/* Actions */}
