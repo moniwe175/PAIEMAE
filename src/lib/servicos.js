@@ -217,7 +217,6 @@ export function useServicos() {
     updateServico,
     removeServico,
     toggleAtivo,
-    setFichaObrigatoria,
     addFichaObrigatoria,
     removeFichaObrigatoria,
     setFichasObrigatorias,
