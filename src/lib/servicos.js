@@ -1,10 +1,18 @@
 import { useState, useCallback, useEffect } from 'react';
 import { supabase, isSupabaseConfigured, getCurrentUser } from './supabase';
 
-// ─── Available categories ───────────────────────────────────
+// ─── Available categories & Ficha options ───────────────────
 export const CATEGORIAS = [
   'Toxina', 'Preenchedor', 'Combo', 'Bioestimulador', 'Fio',
   'Peeling', 'Skincare', 'Depilação', 'Massagem', 'Limpeza',
+];
+
+export const TIPOS_FICHA_OPCOES = [
+  'Ficha Facial',
+  'Ficha Corporal',
+  'Ficha Capilar',
+  'Outros',
+  'Qualquer Ficha',
 ];
 
 export const CAT_COLORS = {
@@ -69,6 +77,7 @@ export function useServicos() {
       comissao: Number(data.comissao) || 0,
       ativo: true,
       descricao: data.descricao || '',
+      fichaObrigatoria: data.fichaObrigatoria || null,
     };
     await upsertToSupabase(novo);
     setServicos(prev => [...prev, novo]);
@@ -98,11 +107,21 @@ export function useServicos() {
     }));
   }, []);
 
+  const setFichaObrigatoria = useCallback(async (id, fichaTipo) => {
+    setServicos(prev => prev.map(s => {
+      if (s.id !== id) return s;
+      const updated = { ...s, fichaObrigatoria: fichaTipo || null };
+      upsertToSupabase(updated);
+      return updated;
+    }));
+  }, []);
+
   return {
     servicos,
     addServico,
     updateServico,
     removeServico,
     toggleAtivo,
+    setFichaObrigatoria,
   };
 }

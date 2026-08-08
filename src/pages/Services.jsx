@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import {
   Scissors, Plus, Search, XCircle, Clock, DollarSign,
-  Edit3, Trash2, CheckCircle, Users, X, UserPlus, UserMinus
+  Edit3, Trash2, CheckCircle, Users, X, UserPlus, UserMinus, FileText, AlertTriangle
 } from 'lucide-react';
-import { useServicos, CATEGORIAS, CAT_COLORS } from '../lib/servicos';
+import { useServicos, CATEGORIAS, CAT_COLORS, TIPOS_FICHA_OPCOES } from '../lib/servicos';
 import { useProfissionais } from '../lib/profissionais';
 
 // ─── Edit / Create Modal ────────────────────────────────────
@@ -16,6 +16,7 @@ function ServicoModal({ onClose, onSave, servico }) {
     preco: servico?.preco || '',
     comissao: servico?.comissao || '',
     descricao: servico?.descricao || '',
+    fichaObrigatoria: servico?.fichaObrigatoria || '',
   });
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
@@ -55,6 +56,13 @@ function ServicoModal({ onClose, onSave, servico }) {
           <div className="form-group">
             <label className="form-label">Comissão (%)</label>
             <input className="form-input" type="number" placeholder="30" value={form.comissao} onChange={e => set('comissao', e.target.value)} />
+          </div>
+          <div className="form-group" style={{ gridColumn: 'span 2' }}>
+            <label className="form-label">Ficha de Anamnese Obrigatória</label>
+            <select className="form-select" value={form.fichaObrigatoria} onChange={e => set('fichaObrigatoria', e.target.value)}>
+              <option value="">Nenhuma (Não exige ficha)</option>
+              {TIPOS_FICHA_OPCOES.map(f => <option key={f} value={f}>{f}</option>)}
+            </select>
           </div>
           <div className="form-group" style={{ gridColumn: 'span 2' }}>
             <label className="form-label">Descrição</label>
@@ -139,7 +147,7 @@ function ProfissionaisPanel({ servicoNome, profissionais, onLink, onUnlink }) {
           <div style={{
             marginTop: 6, background: '#fff', border: '1px solid #E5E7EB',
             borderRadius: 8, padding: 6, boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
-            maxHeight: 150, overflowY: 'auto',
+            maxHeight: 150, overflowY: 'auto', zIndex: 5, position: 'relative',
           }}>
             {unlinked.map(p => (
               <button
@@ -175,9 +183,104 @@ function ProfissionaisPanel({ servicoNome, profissionais, onLink, onUnlink }) {
   );
 }
 
+// ─── Anamnesis Ficha Linking Panel ─────────────────────────
+function FichaPanel({ servico, onSetFicha }) {
+  const currentFicha = servico.fichaObrigatoria;
+
+  return (
+    <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px dashed #F0EBE6' }}>
+      <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.5, color: '#9CA3AF', textTransform: 'uppercase', marginBottom: 6 }}>
+        Ficha de Anamnese Obrigatória
+      </div>
+
+      {currentFicha ? (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+          <span style={{
+            display: 'inline-flex', alignItems: 'center', gap: 4,
+            background: '#FFF1F2', color: '#E11D48', border: '1px solid #FECDD3',
+            padding: '3px 9px', borderRadius: 99, fontSize: 11, fontWeight: 600,
+          }}>
+            <FileText style={{ width: 11, height: 11 }} />
+            {currentFicha}
+            <button
+              onClick={() => onSetFicha(servico.id, null)}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, display: 'flex', marginLeft: 2 }}
+              title="Remover obrigatoriedade de ficha"
+            >
+              <X style={{ width: 11, height: 11, color: '#E11D48' }} />
+            </button>
+          </span>
+        </div>
+      ) : (
+        <span style={{ fontSize: 11, color: '#D1D5DB', fontStyle: 'italic', display: 'block', marginBottom: 4 }}>
+          Nenhuma ficha vinculada
+        </span>
+      )}
+
+      {/* Link dropdown */}
+      <details style={{ position: 'relative' }}>
+        <summary style={{
+          fontSize: 11, fontWeight: 600, color: '#C73B6D', cursor: 'pointer',
+          listStyle: 'none', display: 'flex', alignItems: 'center', gap: 4,
+        }}>
+          <FileText style={{ width: 12, height: 12 }} />{currentFicha ? 'Alterar ficha vinculada' : 'Vincular ficha de anamnese'}
+        </summary>
+        <div style={{
+          marginTop: 6, background: '#fff', border: '1px solid #E5E7EB',
+          borderRadius: 8, padding: 6, boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
+          maxHeight: 180, overflowY: 'auto', zIndex: 10, position: 'relative',
+        }}>
+          {TIPOS_FICHA_OPCOES.map(tipo => (
+            <button
+              key={tipo}
+              onClick={(e) => {
+                onSetFicha(servico.id, tipo);
+                const det = e.currentTarget.closest('details');
+                if (det) det.removeAttribute('open');
+              }}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 8,
+                width: '100%', textAlign: 'left', background: tipo === currentFicha ? '#FDF2F8' : 'none',
+                border: 'none', cursor: 'pointer', padding: '6px 8px',
+                borderRadius: 6, fontSize: 12, color: tipo === currentFicha ? '#C73B6D' : '#374151',
+                fontWeight: tipo === currentFicha ? 700 : 500,
+                transition: 'background 0.1s',
+              }}
+              onMouseEnter={e => { if (tipo !== currentFicha) e.currentTarget.style.background = '#F9FAFB'; }}
+              onMouseLeave={e => { if (tipo !== currentFicha) e.currentTarget.style.background = 'transparent'; }}
+            >
+              <FileText style={{ width: 13, height: 13, color: '#C73B6D' }} />
+              {tipo}
+            </button>
+          ))}
+          {currentFicha && (
+            <button
+              onClick={(e) => {
+                onSetFicha(servico.id, null);
+                const det = e.currentTarget.closest('details');
+                if (det) det.removeAttribute('open');
+              }}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 8,
+                width: '100%', textAlign: 'left', background: 'none',
+                borderTop: '1px solid #F3F4F6', cursor: 'pointer', padding: '6px 8px',
+                borderRadius: 6, fontSize: 11, color: '#EF4444', fontWeight: 600,
+                marginTop: 4,
+              }}
+            >
+              <X style={{ width: 12, height: 12 }} />
+              Remover vínculo de ficha
+            </button>
+          )}
+        </div>
+      </details>
+    </div>
+  );
+}
+
 // ─── Main Component ─────────────────────────────────────────
 export default function Services() {
-  const { servicos, addServico, updateServico, removeServico, toggleAtivo } = useServicos();
+  const { servicos, addServico, updateServico, removeServico, toggleAtivo, setFichaObrigatoria } = useServicos();
   const { profissionais, addServicoToProfissional, removeServicoFromProfissional } = useProfissionais();
 
   const [editModal, setEditModal] = useState(null); // null | 'new' | servico object
@@ -282,11 +385,17 @@ export default function Services() {
         {filtrados.map(s => (
           <div key={s.id} className="card" style={{ opacity: s.ativo ? 1 : 0.6 }}>
             {/* Top badges */}
-            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 12 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
               <span className={`badge ${CAT_COLORS[s.categoria] || 'badge-neutral'}`}>{s.categoria}</span>
+              {s.fichaObrigatoria && (
+                <span className="badge badge-danger" style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }} title={`Requer ${s.fichaObrigatoria}`}>
+                  <FileText style={{ width: 10, height: 10 }} />
+                  {s.fichaObrigatoria}
+                </span>
+              )}
               <span
                 className={`badge ${s.ativo ? 'badge-success' : 'badge-neutral'}`}
-                style={{ cursor: 'pointer' }}
+                style={{ cursor: 'pointer', marginLeft: 'auto' }}
                 onClick={() => toggleAtivo(s.id)}
                 title={s.ativo ? 'Clique para desativar' : 'Clique para ativar'}
               >
@@ -323,6 +432,12 @@ export default function Services() {
               onUnlink={handleUnlink}
             />
 
+            {/* Anamnesis Ficha linking */}
+            <FichaPanel
+              servico={s}
+              onSetFicha={setFichaObrigatoria}
+            />
+
             {/* Actions */}
             <div style={{ display: 'flex', gap: 6, marginTop: 14 }}>
               <button className="btn btn-ghost btn-sm" style={{ flex: 1 }} onClick={() => setEditModal(s)}>
@@ -345,3 +460,4 @@ export default function Services() {
     </div>
   );
 }
+

@@ -5,16 +5,18 @@ import {
   Clock, User, Scissors, AlertCircle, Calendar, UserPlus,
   Trash2, Edit3, Phone, DollarSign, TrendingUp,
   CalendarCheck, Grid, List, CheckSquare, X,
-  Ban, Coffee, UtensilsCrossed, Lock, AlertTriangle, Repeat2,
+  Ban, Coffee, UtensilsCrossed, Lock, AlertTriangle, Repeat2, FileText
 } from 'lucide-react';
 import { useProfissionais } from '../lib/profissionais';
+import { useServicos } from '../lib/servicos';
 import {
   fetchClients,
   insertClient,
   fetchAppointments,
   insertAppointment,
   updateAppointment,
-  deleteAppointment
+  deleteAppointment,
+  fetchAnamneses
 } from '../services/supabaseService';
 
 // ─── Constants ───────────────────────────────────────────────
@@ -652,15 +654,57 @@ function scoreClientMatch(clientName, clientPhone, rawQuery) {
   return 0;
 }
 
+// ─── Anamnese Blocked Alert Modal ──────────────────────────────
+function AnamneseBlockedModal({ info, onClose }) {
+  const navigate = useNavigate();
+  if (!info) return null;
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,20,30,0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 12000, backdropFilter: 'blur(6px)', padding: 16 }} onClick={onClose}>
+      <div style={{ background: '#fff', borderRadius: 22, width: '100%', maxWidth: 450, padding: 28, boxShadow: '0 24px 64px rgba(0,0,0,0.3)', textAlign: 'center' }} onClick={e => e.stopPropagation()}>
+        <div style={{ width: 56, height: 56, borderRadius: '50%', background: '#FEE2E2', border: '1px solid #FCA5A5', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px' }}>
+          <AlertTriangle style={{ width: 28, height: 28, color: '#DC2626' }} />
+        </div>
+        <div style={{ fontSize: 18, fontWeight: 700, color: '#1F2937', marginBottom: 8 }}>
+          Agendamento Bloqueado
+        </div>
+        <div style={{ fontSize: 13, color: '#4B5563', lineHeight: 1.6, marginBottom: 20 }}>
+          O agendamento para o procedimento <strong style={{ color: '#1F2937' }}>"{info.servico}"</strong> não pode ser concluído porque o(a) cliente <strong style={{ color: '#1F2937' }}>"{info.paciente}"</strong> não possui a <span style={{ color: '#DC2626', fontWeight: 700 }}>"{info.fichaExigida}"</span> preenchida em seu perfil.
+        </div>
+        <div style={{ background: '#FFF1F2', borderRadius: 12, padding: 12, border: '1px solid #FECDD3', fontSize: 12, color: '#9F1239', marginBottom: 24, textAlign: 'left', display: 'flex', alignItems: 'center', gap: 10 }}>
+          <FileText style={{ width: 20, height: 20, flexShrink: 0, color: '#E11D48' }} />
+          <span>Trava de segurança: é obrigatório preencher a ficha de anamnese antes de realizar a marcação deste serviço.</span>
+        </div>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button onClick={onClose} style={{ flex: 1, padding: '10px 16px', borderRadius: 10, border: '1.5px solid #E5E7EB', background: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer', color: '#6B7280' }}>
+            Voltar
+          </button>
+          <button
+            onClick={() => {
+              onClose();
+              navigate('/anamnese');
+            }}
+            style={{ flex: 1, padding: '10px 16px', borderRadius: 10, border: 'none', background: 'linear-gradient(135deg,#C73B6D,#A83158)', fontSize: 13, fontWeight: 700, cursor: 'pointer', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+            <FileText style={{ width: 14, height: 14 }} /> Preencher Ficha
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ═══════════════════════════════════════════════════════════════
 // ─── AgendamentoModal ─────────────────────────────────────────
 // ═══════════════════════════════════════════════════════════════
 function AgendamentoModal({ onClose, date, profissional: prefillProf, hora: prefillHora, profissionais, apt, onSave }) {
   const isEdit = !!apt;
+  const { servicos: todosServicos } = useServicos();
   const [pacientes, setPacientes] = useState([]);
   const [showNewClient, setShowNewClient] = useState(false);
   const [clienteBusca, setClienteBusca] = useState(isEdit ? apt.paciente : '');
   const [showClienteList, setShowClienteList] = useState(false);
+  const [blockedInfo, setBlockedInfo] = useState(null);
+  const [isChecking, setIsChecking] = useState(false);
   const clienteRef = useRef(null);
 
   useEffect(() => {
@@ -757,8 +801,60 @@ function AgendamentoModal({ onClose, date, profissional: prefillProf, hora: pref
   const servicos = profObj ? profObj.servicos : [];
   const canSave = form.paciente && form.profissional && form.servico && form.hora && form.data;
 
-  const handleSave = () => {
-    if (!canSave) return;
+  const handleSave = async () => {
+    if (!canSave || isChecking) return;
+
+    // Check if the service has a required Ficha de Anamnese
+    const targetService = (todosServicos || []).find(s => s.nome === form.servico);
+    const requiredFicha = targetService?.fichaObrigatoria;
+
+    if (requiredFicha) {
+      setIsChecking(true);
+      try {
+        const { data: anamnesesData } = await fetchAnamneses();
+        const { data: clientsData } = await fetchClients();
+
+        const clientObj = (clientsData || []).find(c =>
+          (c.name && c.name.trim().toLowerCase() === form.paciente.trim().toLowerCase()) ||
+          (c.nome && c.nome.trim().toLowerCase() === form.paciente.trim().toLowerCase())
+        );
+
+        const clientIdStr = clientObj ? String(clientObj.id) : null;
+        const pacienteNameNorm = form.paciente.trim().toLowerCase();
+
+        const clientAnamneses = (anamnesesData || []).filter(a => {
+          const matchId = clientIdStr && String(a.client_id) === clientIdStr;
+          const matchName = a.form_data?.paciente && a.form_data.paciente.trim().toLowerCase() === pacienteNameNorm;
+          const matchClientName = a.client_name && a.client_name.trim().toLowerCase() === pacienteNameNorm;
+          return matchId || matchName || matchClientName;
+        });
+
+        let hasFicha = false;
+        if (requiredFicha === 'Qualquer Ficha') {
+          hasFicha = clientAnamneses.length > 0;
+        } else {
+          hasFicha = clientAnamneses.some(a => {
+            const tipo = a.form_data?.tipoFicha || a.tipo_ficha || a.tipoFicha;
+            return tipo === requiredFicha;
+          });
+        }
+
+        if (!hasFicha) {
+          setIsChecking(false);
+          setBlockedInfo({
+            paciente: form.paciente,
+            servico: form.servico,
+            fichaExigida: requiredFicha,
+          });
+          return; // BLOCK APPOINTMENT SAVE!
+        }
+      } catch (err) {
+        console.warn('[Anamnese Check Warning]', err);
+      } finally {
+        setIsChecking(false);
+      }
+    }
+
     const isFixo = repetir && previewRecDates.length > 0;
     const base = { ...form, horaFim: calcEndTime(form.hora, Number(form.duracao) || 60), duracao: Number(form.duracao) || 60, valor: Number(form.valor) || 0, fixo: isFixo || false };
     if (isFixo && !isEdit) {
@@ -776,6 +872,9 @@ function AgendamentoModal({ onClose, date, profissional: prefillProf, hora: pref
 
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,20,30,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10000, backdropFilter: 'blur(6px)', padding: 16 }} onClick={onClose}>
+      {blockedInfo && (
+        <AnamneseBlockedModal info={blockedInfo} onClose={() => setBlockedInfo(null)} />
+      )}
       {showNewClient && (
         <QuickClientModal onClose={() => setShowNewClient(false)} onSave={async (c) => {
           const clientData = {
