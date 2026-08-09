@@ -321,21 +321,257 @@ export async function updateComissao(id, updates) {
 
 // ─── Cashier State ────────────────────────────────────────────
 
-export async function fetchCashierState() {
+/** Busca o registro de caixa do dia atual (status = 'open', date = hoje) */
+export async function fetchTodayCashier() {
   if (!isSupabaseConfigured()) return handleError('Supabase not configured', null);
+  const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
   const { data, error } = await supabase
     .from('cashier_state')
     .select('*')
+    .eq('status', 'open')
+    .eq('date', today)
     .maybeSingle();
   if (error) return handleError(error, null);
   return { data, error: null };
 }
 
+/** Busca qualquer registro de caixa do dia atual (aberto ou fechado) */
+export async function fetchAnyCashierToday() {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured', null);
+  const today = new Date().toISOString().split('T')[0];
+  const { data, error } = await supabase
+    .from('cashier_state')
+    .select('*')
+    .eq('date', today)
+    .order('opened_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) return handleError(error, null);
+  return { data, error: null };
+}
+
+/** Busca o closing_balance do último caixa fechado (para herdar como opening_balance do próximo) */
+export async function fetchLastClosingBalance() {
+  if (!isSupabaseConfigured()) return { balance: 0, data: null, error: null };
+  try {
+    // Tenta primeiro no cashier_state (novo schema)
+    const { data, error } = await supabase
+      .from('cashier_state')
+      .select('closing_balance, opening_balance, total_cash_in, total_cash_out, date')
+      .eq('status', 'closed')
+      .order('date', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (!error && data) {
+      const bal = Number(
+        data.closing_balance ??
+        (Number(data.opening_balance || 0) + Number(data.total_cash_in || 0) - Number(data.total_cash_out || 0))
+      );
+      return { balance: bal, data, error: null };
+    }
+
+    // Fallback: daily_reports (schema antigo)
+    const { data: dr } = await supabase
+      .from('daily_reports')
+      .select('fundo_final_real, fundo_final_calculado')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (dr) {
+      const bal = Number(dr.fundo_final_real ?? dr.fundo_final_calculado ?? 0);
+      return { balance: bal, data: dr, error: null };
+    }
+  } catch (err) {
+    console.warn('[Supabase] fetchLastClosingBalance exception:', err);
+  }
+  return { balance: 0, data: null, error: null };
+}
+
+/** Cria um novo caixa para hoje com o saldo herdado */
+export async function openNewCashier(openingBalance = 0) {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured');
+  const today = new Date().toISOString().split('T')[0];
+  const userId = await getUserId();
+  const payload = {
+    date: today,
+    status: 'open',
+    opening_balance: Number(openingBalance) || 0,
+    closing_balance: null,
+    total_cash_in: 0,
+    total_cash_out: 0,
+    opened_at: new Date().toISOString(),
+    closed_at: null,
+    auto_closed: false,
+    // campos legacy para compatibilidade
+    saldo: Number(openingBalance) || 0,
+    horaAbertura: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+    dataAbertura: new Date().toLocaleDateString('pt-BR'),
+    sangrias: [],
+  };
+  if (userId) payload.user_id = userId;
+
+  // Verifica se já existe um registro para hoje
+  const { data: existing } = await supabase
+    .from('cashier_state')
+    .select('id')
+    .eq('date', today)
+    .maybeSingle();
+
+  if (existing?.id) {
+    const { data, error } = await supabase
+      .from('cashier_state')
+      .update(payload)
+      .eq('id', existing.id)
+      .select()
+      .single();
+    if (error) return handleError(error);
+    return { data, error: null };
+  }
+
+  const { data, error } = await supabase
+    .from('cashier_state')
+    .insert([payload])
+    .select()
+    .single();
+  if (error) return handleError(error);
+  return { data, error: null };
+}
+
+/** Fecha um caixa existente pelo id */
+export async function closeCashierById(id, { closingBalance, autoClosed = false, totalCashIn = 0, totalCashOut = 0 }) {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured');
+  const { data, error } = await supabase
+    .from('cashier_state')
+    .update({
+      status: 'closed',
+      closing_balance: Number(closingBalance) || 0,
+      total_cash_in: Number(totalCashIn) || 0,
+      total_cash_out: Number(totalCashOut) || 0,
+      closed_at: new Date().toISOString(),
+      auto_closed: autoClosed,
+    })
+    .eq('id', id)
+    .select()
+    .single();
+  if (error) return handleError(error);
+  return { data, error: null };
+}
+
+/** Atualiza total_cash_in e total_cash_out do caixa de hoje */
+export async function updateCashierTotals(id, { totalCashIn, totalCashOut }) {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured');
+  const { data, error } = await supabase
+    .from('cashier_state')
+    .update({
+      total_cash_in: Number(totalCashIn) || 0,
+      total_cash_out: Number(totalCashOut) || 0,
+    })
+    .eq('id', id)
+    .select()
+    .single();
+  if (error) return handleError(error);
+  return { data, error: null };
+}
+
+/** Histórico dos últimos 30 dias de caixas */
+export async function fetchCashierHistory(limit = 30) {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured', []);
+  const { data, error } = await supabase
+    .from('cashier_state')
+    .select('*')
+    .order('date', { ascending: false })
+    .limit(limit);
+  if (error) return handleError(error, []);
+  return { data: data || [], error: null };
+}
+
+/** Insere uma sangria em cashier_sangrias e retorna o registro */
+export async function insertSangria({ valor, motivo, cashierDate }) {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured');
+  const userId = await getUserId();
+  const today = cashierDate || new Date().toISOString().split('T')[0];
+  const payload = { valor: Number(valor), motivo: motivo || '', cashier_date: today };
+  if (userId) payload.user_id = userId;
+  const { data, error } = await supabase.from('cashier_sangrias').insert([payload]).select().single();
+  if (error) return handleError(error);
+  return { data, error: null };
+}
+
+/** Busca sangrias do dia atual */
+export async function fetchTodaySangrias() {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured', []);
+  const today = new Date().toISOString().split('T')[0];
+  const { data, error } = await supabase
+    .from('cashier_sangrias')
+    .select('*')
+    .eq('cashier_date', today)
+    .order('created_at', { ascending: true });
+  if (error) return handleError(error, []);
+  return { data: data || [], error: null };
+}
+
+/** Fecha caixas de dias anteriores que ainda estão abertos (auto-close frontend) */
+export async function autoClosePreviousCashiers() {
+  if (!isSupabaseConfigured()) return { closed: 0, error: null };
+  const today = new Date().toISOString().split('T')[0];
+  try {
+    const { data: openOld, error } = await supabase
+      .from('cashier_state')
+      .select('*')
+      .eq('status', 'open')
+      .lt('date', today);
+
+    if (error || !openOld?.length) return { closed: 0, error };
+
+    for (const record of openOld) {
+      const closingBal = Number(record.opening_balance || 0) + Number(record.total_cash_in || 0) - Number(record.total_cash_out || 0);
+      await supabase.from('cashier_state').update({
+        status: 'closed',
+        closing_balance: closingBal,
+        closed_at: new Date().toISOString(),
+        auto_closed: true,
+      }).eq('id', record.id);
+    }
+    return { closed: openOld.length, error: null };
+  } catch (err) {
+    console.warn('[Supabase] autoClosePreviousCashiers exception:', err);
+    return { closed: 0, error: err };
+  }
+}
+
+/** Compatibilidade com código legado */
+export async function fetchCashierState() {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured', null);
+  const { data, error } = await supabase
+    .from('cashier_state')
+    .select('*')
+    .order('date', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) return handleError(error, null);
+  return { data, error: null };
+}
+
+/** Compatibilidade com código legado */
 export async function upsertCashierState(state) {
   if (!isSupabaseConfigured()) return handleError('Supabase not configured');
   const userId = state.user_id || await getUserId();
-  const stateWithUser = { ...state, user_id: userId };
-  const { data: existing } = await supabase.from('cashier_state').select('id').eq('user_id', userId).maybeSingle();
+  const today = new Date().toISOString().split('T')[0];
+  const stateWithUser = {
+    ...state,
+    user_id: userId,
+    date: state.date || today,
+    opening_balance: state.opening_balance ?? state.saldo ?? 0,
+    opened_at: state.opened_at || new Date().toISOString(),
+  };
+
+  const { data: existing } = await supabase
+    .from('cashier_state')
+    .select('id')
+    .eq('date', today)
+    .maybeSingle();
+
   if (existing?.id) {
     const { data, error } = await supabase.from('cashier_state').update(stateWithUser).eq('id', existing.id).select().single();
     if (error) return handleError(error);

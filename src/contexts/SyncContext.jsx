@@ -14,9 +14,13 @@ import {
   fetchSheetConnections, upsertSheetConnection as sbUpsertSheetConnection,
   fetchSheetTransactions as sbFetchSheetTransactions,
   fetchSheetTransactionsSummary as sbFetchSheetSummary,
+  // ─── Novo sistema de caixa real ───
+  fetchTodayCashier, fetchLastClosingBalance, openNewCashier, closeCashierById,
+  fetchCashierHistory, insertSangria as sbInsertSangria, fetchTodaySangrias,
+  autoClosePreviousCashiers, updateCashierTotals,
 } from '../services/supabaseService';
 import { defaultCashier, defaultSplitConfig } from '../mocks/financial';
-import { syncSheetToSupabase } from '../services/googleSheetsSync';
+import { syncSheetToSupabase, fetchSheetMetadataDirect } from '../services/googleSheetsSync';
 
 const SyncContext = createContext(null);
 
@@ -59,6 +63,13 @@ export function SyncProvider({ children }) {
   // ─── sheet_transactions: fonte real dos dados financeiros ───
   const [sheetTransactions, setSheetTransactions] = useState([]);
   const [sheetSummary, setSheetSummary] = useState({ receitas: 0, despesas: 0, sangrias: 0, count: { receitas: 0, despesas: 0, sangrias: 0 } });
+  // ─── Metadata da Planilha (Fundos C1 e F1) ───
+  const [sheetMetadata, setSheetMetadata] = useState({ fundoInicial: 0, fundoFinal: 0 });
+  // ─── Novo estado do caixa real ───
+  const [todayCashier, setTodayCashier] = useState(null);   // registro do dia no Supabase
+  const [cashierSangrias, setCashierSangrias] = useState([]); // sangrias do dia
+  const [cashierHistory, setCashierHistory] = useState([]);   // histórico 30 dias
+  const [autoClosed, setAutoClosed] = useState(false);        // aviso de fechamento automático
 
 
   const pollTimerRef = useRef(null);
@@ -132,6 +143,14 @@ export function SyncProvider({ children }) {
           }
         }
 
+        // Executar leitura inicial da planilha para carregar C1 (fundoInicial) e F1 (fundoFinal) imediatamente
+        const targetUrl = syncConfig?.sheet_url || sheetsRes.data?.[0]?.sheet_url || 'https://docs.google.com/spreadsheets/d/1uXB-p9iWev-ID7HVZVUj42FBu2J4PkWMo1cocTW2GXI/edit';
+        fetchSheetMetadataDirect(targetUrl).then(meta => {
+          if (meta && (meta.fundoInicial > 0 || meta.fundoFinal > 0)) {
+            setSheetMetadata(meta);
+          }
+        }).catch(err => console.warn('[SyncContext] Initial sheet metadata warning:', err));
+
         if (logsRes.data?.length > 0) {
           const formattedLogs = logsRes.data.map(l => ({
             id: l.id,
@@ -182,19 +201,22 @@ export function SyncProvider({ children }) {
       let consecutiveErrors = 0; // Track consecutive failures to avoid log spam
 
       const doSync = async () => {
-        // Determine interval based on tab visibility:
-        // - Visible: fast polling (VISIBLE_POLLING_MS = 20s) for near-real-time updates
-        // - Hidden: slow polling (HIDDEN_POLLING_MS = 60s) to keep background sync alive
         const isHidden = typeof document !== 'undefined' && document.visibilityState !== 'visible';
-        const currentInterval = isHidden ? HIDDEN_POLLING_MS : VISIBLE_POLLING_MS;
 
         try {
           const result = await syncSheetToSupabase(sheetUrl, { connectionId: syncConfig?.id });
           if (result.success) {
             consecutiveErrors = 0; // Reset on success
-            console.log(`[SyncContext] Auto-sync concluído: ${result.rowCount || 0} registros (${isHidden ? 'background' : 'foreground'})`);
+            console.log(`[SyncContext] Auto-sync concluído: ${result.rowCount || 0} registros. Fundos C1/F1: ${result.fundoInicial}/${result.fundoFinal}`);
             setLastSyncAt(new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }));
             setSyncedRowCount(result.rowCount || 0);
+
+            if (result.fundoInicial !== undefined) {
+              setSheetMetadata({
+                fundoInicial: Number(result.fundoInicial) || 0,
+                fundoFinal: Number(result.fundoFinal) || 0,
+              });
+            }
 
             // Atualização imediata do estado local com os dados mais recentes do Supabase
             const [stRes, summaryRes] = await Promise.all([
@@ -446,34 +468,198 @@ export function SyncProvider({ children }) {
     if (isSupabaseConfigured() && supabaseReady) sbUpdateCom(id, { status }).catch(() => {});
   }, [supabaseReady, requireConnection]);
 
-  // ─── Cashier actions ────────────────────────────────────────
-  // ─── Helper para buscar último saldo em dinheiro do caixa fechado ──
+  // ─── Cashier actions — Sistema Real ──────────────────────────
+
+  /** Carrega caixa de hoje + sangrias + histórico do Supabase */
+  const loadCaixaHoje = useCallback(async () => {
+    try {
+      // 1. Fechar automaticamente caixas de dias anteriores que ficaram abertos
+      const { closed } = await autoClosePreviousCashiers();
+      if (closed > 0) {
+        setAutoClosed(true);
+        addLog('warning', `${closed} caixa(s) de dias anteriores fechados automaticamente.`);
+      }
+
+      // 2. Buscar caixa aberto de hoje
+      const { data: caixaHoje } = await fetchTodayCashier();
+
+      if (caixaHoje) {
+        setTodayCashier(caixaHoje);
+        // Sincronizar com o cashier legado para compatibilidade com header
+        setCashier(prev => ({
+          ...prev,
+          status: 'aberto',
+          saldo: Number(caixaHoje.opening_balance || 0),
+          dataAbertura: new Date().toLocaleDateString('pt-BR'),
+          sangrias: prev.sangrias || [],
+        }));
+      } else {
+        setTodayCashier(null);
+        // Verificar se existe caixa fechado de hoje
+        const { data: fechadoHoje } = await supabase
+          .from('cashier_state')
+          .select('*')
+          .eq('date', new Date().toISOString().split('T')[0])
+          .eq('status', 'closed')
+          .limit(1)
+          .maybeSingle();
+        if (fechadoHoje) {
+          setCashier(prev => ({ ...prev, status: 'fechado', saldo: Number(fechadoHoje.closing_balance || 0) }));
+        } else {
+          setCashier(prev => ({ ...prev, status: 'fechado' }));
+        }
+      }
+
+      // 3. Carregar sangrias de hoje
+      const { data: sangriasHoje } = await fetchTodaySangrias();
+      if (sangriasHoje) setCashierSangrias(sangriasHoje);
+
+      // 4. Carregar histórico
+      const { data: hist } = await fetchCashierHistory(30);
+      if (hist) setCashierHistory(hist);
+
+    } catch (e) {
+      console.warn('[SyncContext] loadCaixaHoje error:', e);
+    }
+  }, [addLog]);
+
+  /** Abre caixa de hoje automaticamente herdando o saldo do último fechamento ou da planilha */
+  const abrirCaixaHoje = useCallback(async (customBalance = null) => {
+    if (!requireConnection('abrir caixa')) return null;
+    try {
+      let openingBal = customBalance;
+      if (openingBal === null || openingBal === undefined || Number(openingBal) === 0) {
+        if (sheetMetadata?.fundoInicial > 0) {
+          openingBal = sheetMetadata.fundoInicial;
+        } else {
+          const { balance } = await fetchLastClosingBalance();
+          openingBal = Number(balance) || 0;
+        }
+      }
+      openingBal = Number(openingBal) || 0;
+
+      const { data, error } = await openNewCashier(openingBal);
+      if (error) {
+        addLog('error', `Erro ao abrir caixa: ${error.message || error}`);
+        return null;
+      }
+      setTodayCashier(data);
+      setCashierSangrias([]);
+      setCashier(prev => ({
+        ...prev,
+        status: 'aberto',
+        saldo: openingBal,
+        dataAbertura: new Date().toLocaleDateString('pt-BR'),
+        sangrias: [],
+      }));
+      addLog('info', `Caixa aberto — Fundo Inicial: R$ ${openingBal.toFixed(2)}`);
+      return data;
+    } catch (e) {
+      console.warn('[SyncContext] abrirCaixaHoje error:', e);
+      return null;
+    }
+  }, [requireConnection, addLog, sheetMetadata]);
+
+  /** Garante que o caixa está aberto antes de uma operação (auto-open silencioso) */
+  const ensureCaixaAberto = useCallback(async () => {
+    if (todayCashier && todayCashier.status === 'open') return todayCashier;
+    // Verificar no banco antes de abrir
+    const { data: found } = await fetchTodayCashier();
+    if (found) {
+      setTodayCashier(found);
+      setCashier(prev => ({ ...prev, status: 'aberto', saldo: Number(found.opening_balance || 0) }));
+      return found;
+    }
+    return await abrirCaixaHoje();
+  }, [todayCashier, abrirCaixaHoje]);
+
+  /** Fecha o caixa do dia manualmente */
+  const fecharCaixa = useCallback(async () => {
+    if (!requireConnection('fechar caixa')) return { success: false, error: 'Supabase desconectado' };
+    if (!todayCashier?.id) return { success: false, error: 'Nenhum caixa aberto hoje' };
+    try {
+      const totalSangrias = cashierSangrias.reduce((a, s) => a + Number(s.valor || 0), 0);
+      const closingBal = Number(todayCashier.opening_balance || 0)
+        + Number(todayCashier.total_cash_in || 0)
+        - totalSangrias;
+
+      const { data, error } = await closeCashierById(todayCashier.id, {
+        closingBalance: closingBal,
+        autoClosed: false,
+        totalCashIn: todayCashier.total_cash_in || 0,
+        totalCashOut: totalSangrias,
+      });
+      if (error) return { success: false, error };
+
+      setTodayCashier(data);
+      setCashier(prev => ({ ...prev, status: 'fechado', saldo: closingBal }));
+      addLog('info', `Caixa fechado — Saldo Final em Dinheiro: R$ ${closingBal.toFixed(2)}`);
+
+      // Recarregar histórico
+      const { data: hist } = await fetchCashierHistory(30);
+      if (hist) setCashierHistory(hist);
+
+      return { success: true, closingBalance: closingBal };
+    } catch (e) {
+      addLog('error', `Erro ao fechar caixa: ${e.message}`);
+      return { success: false, error: e.message };
+    }
+  }, [todayCashier, cashierSangrias, requireConnection, addLog]);
+
+  /** Compatibilidade legado: abre caixa (usa novo sistema internamente) */
+  const abrirCaixa = useCallback(async (saldoInicial = null) => {
+    return await abrirCaixaHoje();
+  }, [abrirCaixaHoje]);
+
+  /** Realiza sangria em dinheiro físico — persiste no Supabase */
+  const realizarSangria = useCallback(async (valor, motivo) => {
+    if (!requireConnection('realizar sangria')) return;
+    if (!todayCashier?.id) {
+      addLog('warning', 'Abra o caixa antes de realizar uma sangria.');
+      return;
+    }
+    try {
+      const { data, error } = await sbInsertSangria({
+        valor: Number(valor),
+        motivo,
+        cashierDate: new Date().toISOString().split('T')[0],
+      });
+      if (error) {
+        addLog('error', `Erro ao registrar sangria: ${error.message || error}`);
+        return;
+      }
+      // Atualizar lista local de sangrias
+      setCashierSangrias(prev => [...prev, data]);
+      // Atualizar total_cash_out no banco
+      const newTotalOut = cashierSangrias.reduce((a, s) => a + Number(s.valor || 0), 0) + Number(valor);
+      await updateCashierTotals(todayCashier.id, {
+        totalCashIn: todayCashier.total_cash_in || 0,
+        totalCashOut: newTotalOut,
+      });
+      // Atualizar estado local do todayCashier
+      setTodayCashier(prev => prev ? { ...prev, total_cash_out: newTotalOut } : prev);
+      // Compatibilidade com cashier legado
+      setCashier(prev => ({
+        ...prev,
+        saldo: (prev.saldo || 0) - Number(valor),
+        sangrias: [{ id: data.id, valor: Number(valor), motivo, hora: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }), data: new Date().toLocaleDateString('pt-BR') }, ...(prev.sangrias || [])],
+      }));
+      addLog('warning', `Sangria em Dinheiro: R$ ${Number(valor).toFixed(2)} — ${motivo}`);
+    } catch (e) {
+      addLog('error', `Sangria falhou: ${e.message}`);
+    }
+  }, [todayCashier, cashierSangrias, requireConnection, addLog]);
+
+  /** Helpers legado para compatibilidade com Financial.jsx header */
   const getFundoInicialHerdado = useCallback(async () => {
-    const { balance } = await fetchLastClosedCashierBalance();
+    const { balance } = await fetchLastClosingBalance();
     return Number(balance) || 0;
   }, []);
 
-  // ─── Cashier actions ────────────────────────────────────────
-  const abrirCaixa = useCallback(async (saldoInicial = null) => {
-    if (!requireConnection('abrir caixa')) return;
-
-    let saldo = saldoInicial;
-    if (saldo === null || saldo === undefined) {
-      saldo = await getFundoInicialHerdado();
-    }
-
-    const newState = {
-      status: 'aberto',
-      saldo: Number(saldo) || 0,
-      horaAbertura: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
-      dataAbertura: new Date().toLocaleDateString('pt-BR'),
-      sangrias: [],
-    };
-    setCashier(newState);
-    syncToSupabase('cashier_state', newState);
-    addLog('info', `Caixa aberto com Fundo Inicial em Dinheiro: R$ ${newState.saldo.toFixed(2)}`);
-    return newState;
-  }, [syncToSupabase, addLog, requireConnection, getFundoInicialHerdado]);
+  const isDiaAtendimento = useCallback((dateObj = new Date()) => {
+    const day = dateObj.getDay();
+    return day >= 2 && day <= 6;
+  }, []);
 
   // ─── Daily Sheet (read-only from Google Sheets) ─────────────
   const updateDailySheet = useCallback((sheetData) => {
@@ -484,15 +670,8 @@ export function SyncProvider({ children }) {
   const saveDailyReport = useCallback(async (customData = {}) => {
     const hojeStr = new Date().toLocaleDateString('pt-BR');
     const dataRef = customData.data || dailySheet?.dataCaixa || cashier.dataAbertura || hojeStr;
-
-    // Filtrar transações reais da planilha (sheet_transactions) para a data
     const txsDoDia = (sheetTransactions || []).filter(t => (t.date_ref === dataRef || t.data === dataRef || !t.date_ref));
-
-    let totalDinheiro = 0;
-    let totalPix = 0;
-    let totalCredito = 0;
-    let totalDebito = 0;
-
+    let totalDinheiro = 0, totalPix = 0, totalCredito = 0, totalDebito = 0;
     txsDoDia.forEach(t => {
       totalDinheiro += Number(t.dinheiro || 0);
       totalPix += Number(t.pix || 0);
@@ -508,14 +687,10 @@ export function SyncProvider({ children }) {
         else totalPix += v;
       }
     });
-
-    const fondoInicial = Number(customData.fundo_inicial ?? customData.fundoInicial ?? cashier.saldo ?? 0);
-    const totalSangrias = (cashier.sangrias || []).reduce((a, s) => a + Number(s.valor || 0), 0);
-    const fundoFinalCalculado = fondoInicial + totalDinheiro - totalSangrias;
-    const fundoFinalReal = Number(customData.fundo_final_real ?? customData.fundoFinalReal ?? fundoFinalCalculado);
-    const diferenca = fundoFinalReal - fundoFinalCalculado;
-    const status = diferenca === 0 ? 'ok' : 'erro';
-
+    const fondoInicial = Number(customData.fundo_inicial ?? todayCashier?.opening_balance ?? cashier.saldo ?? 0);
+    const totalSangriasBd = cashierSangrias.reduce((a, s) => a + Number(s.valor || 0), 0);
+    const fundoFinalCalculado = fondoInicial + totalDinheiro - totalSangriasBd;
+    const fundoFinalReal = Number(customData.fundo_final_real ?? fundoFinalCalculado);
     const report = {
       data: dataRef,
       data_caixa: dataRef.includes('/') ? dataRef.split('/').reverse().join('-') : dataRef,
@@ -526,112 +701,41 @@ export function SyncProvider({ children }) {
       total_debito: totalDebito,
       fundo_final_calculado: fundoFinalCalculado,
       fundo_final_real: fundoFinalReal,
-      diferenca: diferenca,
-      status: status,
+      diferenca: fundoFinalReal - fundoFinalCalculado,
+      status: fundoFinalReal === fundoFinalCalculado ? 'ok' : 'erro',
       sheet_snapshot: dailySheet?.rows || txsDoDia,
     };
-
-    console.log('[SyncContext] Salvando relatório do caixa:', report);
-
     if (isSupabaseConfigured() && supabaseReady) {
       const result = await sbInsertDailyReport(report);
-      if (result.error) {
-        console.error('[SyncContext] Failed to save daily report:', result.error);
-        addLog('error', `Falha ao salvar relatório do caixa: ${result.error}`);
-      } else {
-        addLog('success', `Relatório do caixa salvo: Fundo Final Dinheiro R$ ${fundoFinalReal.toFixed(2)}`);
-      }
+      if (!result.error) addLog('success', `Relatório salvo: R$ ${fundoFinalReal.toFixed(2)}`);
       return result;
-    } else {
-      addLog('warning', 'Supabase não disponível — relatório salvo apenas localmente');
-      return { data: report, error: null };
     }
-  }, [dailySheet, sheetTransactions, cashier, supabaseReady, addLog]);
+    return { data: report, error: null };
+  }, [dailySheet, sheetTransactions, cashier, todayCashier, cashierSangrias, supabaseReady, addLog]);
 
-  const fecharCaixa = useCallback(async () => {
-    if (!requireConnection('fechar caixa')) return { success: false, error: 'Supabase desconectado' };
-
-    // Save daily report to Supabase first
-    const reportResult = await saveDailyReport();
-    if (reportResult.error) {
-      addLog('error', `Erro ao salvar relatório: ${reportResult.error}`);
-      return { success: false, error: reportResult.error };
-    }
-
-    // Calcular saldo final retido em dinheiro
-    const saldoFinal = reportResult.data?.fundo_final_real ?? reportResult.data?.fundo_final_calculado ?? cashier.saldo;
-
-    // Fechar o caixa
-    const newState = { ...cashier, status: 'fechado', saldo: saldoFinal, horaAbertura: null, dataAbertura: null };
-    setCashier(newState);
-    syncToSupabase('cashier_state', newState);
-    addLog('info', `Caixa fechado com sucesso — Saldo acumulado em dinheiro: R$ ${saldoFinal.toFixed(2)}`);
-    return { success: true, report: reportResult.data };
-  }, [cashier, syncToSupabase, addLog, requireConnection, saveDailyReport]);
-
-  // ─── Helper para verificar se hoje é dia de expediente (Terça a Sábado: 2..6) ──
-  const isDiaAtendimento = useCallback((dateObj = new Date()) => {
-    const day = dateObj.getDay();
-    return day >= 2 && day <= 6;
-  }, []);
-
-  // ─── Auto-Abertura Inteligente de Caixa para Operações ─────
-  const ensureCaixaAberto = useCallback(async () => {
-    const hojeStr = new Date().toLocaleDateString('pt-BR');
-    const hojeObj = new Date();
-    const eExpediente = isDiaAtendimento(hojeObj);
-
-    if (cashier.status === 'aberto') {
-      if (cashier.dataAbertura && cashier.dataAbertura !== hojeStr) {
-        addLog('info', `Fechando caixa do dia anterior (${cashier.dataAbertura}) e abrindo caixa de hoje (${hojeStr})...`);
-        await fecharCaixa();
-        return await abrirCaixa();
-      }
-      return cashier;
-    }
-
-    // Se o caixa estiver fechado, abre automaticamente herdando o fundo do último dia fechado (ex: Sábado -> Terça)
-    if (!eExpediente) {
-      addLog('info', `Hoje (${hojeStr}) é fora do expediente padrão (Terça a Sábado). Iniciando caixa sob demanda...`);
-    } else {
-      addLog('info', `Caixa fechado detectado. Abrindo caixa de hoje (${hojeStr}) automaticamente com fundo herdado...`);
-    }
-    return await abrirCaixa();
-  }, [cashier, fecharCaixa, abrirCaixa, addLog, isDiaAtendimento]);
-
-  // ─── Virada de Dia Automática (00:00) ──────────────────────
+  // ─── Virada de Dia — verificação periódica ─────────────────
   useEffect(() => {
     const checkTurnover = async () => {
-      const hojeStr = new Date().toLocaleDateString('pt-BR');
-      if (cashier.status === 'aberto' && cashier.dataAbertura && cashier.dataAbertura !== hojeStr) {
-        console.log(`[SyncContext] Mudança de dia detectada: ${cashier.dataAbertura} -> ${hojeStr}`);
-        addLog('warning', `Virada de dia detectada! Fechando caixa do dia ${cashier.dataAbertura} e iniciando caixa de ${hojeStr}...`);
-        await fecharCaixa();
-        await abrirCaixa();
+      if (!isSupabaseConfigured()) return;
+      const today = new Date().toISOString().split('T')[0];
+      // Fecha caixas de dias anteriores automaticamente
+      const { closed } = await autoClosePreviousCashiers();
+      if (closed > 0) {
+        setAutoClosed(true);
+        addLog('warning', `Virada de dia: ${closed} caixa(s) fechados automaticamente.`);
+        await loadCaixaHoje();
       }
     };
-    const timer = setInterval(checkTurnover, 60000);
+    const timer = setInterval(checkTurnover, 60000); // verifica a cada 1 minuto
     return () => clearInterval(timer);
-  }, [cashier, fecharCaixa, abrirCaixa, addLog]);
+  }, [addLog, loadCaixaHoje]);
 
-  const realizarSangria = useCallback((valor, motivo) => {
-    if (!requireConnection('realizar sangria')) return;
-    const sangria = {
-      id: 'sangria_' + Date.now(),
-      valor,
-      motivo,
-      hora: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
-      data: new Date().toLocaleDateString('pt-BR'),
-    };
-    const newState = {
-      ...cashier,
-      saldo: cashier.saldo - valor,
-      sangrias: [sangria, ...cashier.sangrias],
-    };
-    setCashier(newState);
-    syncToSupabase('cashier_state', newState);
-    addLog('warning', `Sangria em Dinheiro realizada: R$ ${valor.toLocaleString('pt-BR')} - ${motivo}`);
-  }, [cashier, syncToSupabase, addLog, requireConnection]);
+  // ─── Carregar caixa ao inicializar ─────────────────────────
+  useEffect(() => {
+    if (supabaseReady) {
+      loadCaixaHoje();
+    }
+  }, [supabaseReady, loadCaixaHoje]);
 
   // ─── Split config ───────────────────────────────────────────
   const updateSplitConfig = useCallback((profissional, percentual) => {
@@ -836,7 +940,12 @@ export function SyncProvider({ children }) {
     addTransaction, removeTransaction,
     addExpense, removeExpense,
     addComissao, removeComissao, updateComissaoStatus,
-    abrirCaixa, fecharCaixa, realizarSangria, ensureCaixaAberto, getFundoInicialHerdado, isDiaAtendimento,
+    // ─── Caixa Real & Sheet Metadata ───
+    sheetMetadata, setSheetMetadata,
+    todayCashier, cashierSangrias, cashierHistory, autoClosed,
+    abrirCaixa, fecharCaixa, realizarSangria, ensureCaixaAberto,
+    loadCaixaHoje, abrirCaixaHoje,
+    getFundoInicialHerdado, isDiaAtendimento,
     updateSplitConfig,
 
     importFromSheet,

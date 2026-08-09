@@ -27,8 +27,17 @@ const STATUS_LABELS = { paid: 'Pago', pending: 'Pendente', cancelled: 'Cancelado
 const STATUS_COLORS = { paid: 'var(--success)', pending: '#E6A800', cancelled: 'var(--danger)' };
 const STATUS_BG = { paid: 'var(--success-bg)', pending: '#FFF8E1', cancelled: 'var(--danger-bg)' };
 
+function safeNum(v) {
+  if (v === null || v === undefined || v === '') return 0;
+  const n = Number(v);
+  return isNaN(n) ? 0 : n;
+}
+
 function hoje() { return new Date().toLocaleDateString('pt-BR'); }
-function fmtCurrency(v) { return v === undefined || v === null || isNaN(v) ? 'R$ --' : `R$ ${v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; }
+function fmtCurrency(v) {
+  const n = safeNum(v);
+  return `R$ ${n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
 function normalizeTx(t) {
   const total = t.total ?? t.valor ?? 0;
   const split = t.clinica !== undefined ? { clinica: t.clinica, profissional: t.profissional } : calcularSplit(total, 40);
@@ -60,12 +69,17 @@ export default function Financial() {
     sheetTransactions, setSheetTransactions,
     sheetSummary, setSheetSummary,
     setExpenses,
+    // ─── Novo sistema de caixa real ───
+    sheetMetadata, setSheetMetadata,
+    todayCashier, cashierSangrias, cashierHistory, autoClosed,
+    loadCaixaHoje, abrirCaixaHoje,
   } = useSync();
 
   const [activeTab, setActiveTab] = useState('transacoes');
   const [sangriaModal, setSangriaModal] = useState(false);
-  const [caixaConfirm, setCaixaConfirm] = useState(null); // { type: 'abrir' | 'fechar' | 'fechar-pendente', title, message }
+  const [caixaConfirm, setCaixaConfirm] = useState(null);
   const [caixaLoading, setCaixaLoading] = useState(false);
+  const [sangriaLoading, setSangriaLoading] = useState(false);
   const [txModal, setTxModal] = useState(false);
   const [despesaModal, setDespesaModal] = useState(false);
   const [splitEdit, setSplitEdit] = useState(null);
@@ -73,6 +87,8 @@ export default function Financial() {
   const [txForm, setTxForm] = useState({ cliente: '', procedimento: '', total: '', pagamento: 'Pix', status: 'paid', profissionalNome: '' });
   const [despesaForm, setDespesaForm] = useState({ descricao: '', categoria: '', valor: '', metodoPagamento: 'Pix' });
   const [txFiltroStatus, setTxFiltroStatus] = useState('todos');
+  const [fechamentoModal, setFechamentoModal] = useState(false);
+
   const [expFiltroCat, setExpFiltroCat] = useState('todos');
   const [syncing, setSyncing] = useState(false);
 
@@ -141,8 +157,24 @@ export default function Financial() {
       });
 
       if (result.success) {
-        addLog('success', `Planilha sincronizada com sucesso! ${result.rowCount || 0} registros processados.`);
-        // Realtime listener irá re-buscar os dados automaticamente após o upsert
+        if (result.fundoInicial !== undefined && setSheetMetadata) {
+          setSheetMetadata({
+            fundoInicial: Number(result.fundoInicial) || 0,
+            fundoFinal: Number(result.fundoFinal) || 0,
+          });
+
+          // Se a planilha trouxe Fundo Inicial (C1) e o caixa atual ainda não tem saldo ou não foi aberto:
+          if (result.fundoInicial > 0 && (!todayCashier || Number(todayCashier.opening_balance) === 0)) {
+            await abrirCaixaHoje(result.fundoInicial);
+          }
+        }
+
+        // Auto-abrir caixa do dia se estivesse fechado
+        if (ensureCaixaAberto) {
+          await ensureCaixaAberto();
+        }
+
+        addLog('success', `Planilha sincronizada! ${result.rowCount || 0} registros. Fundo Inicial: R$ ${(result.fundoInicial || 0).toFixed(2)}, Fundo Final: R$ ${(result.fundoFinal || 0).toFixed(2)}`);
       } else {
         addLog('error', `Erro na sincronização: ${result.error}`);
         alert(`Erro ao sincronizar: ${result.error}`);
@@ -266,34 +298,29 @@ export default function Financial() {
   // Comissões: soma de commission_value das receitas da planilha
   const comissoesHoje = receitasSheet.reduce((a, t) => a + (Number(t.commission_value) || 0), 0);
   const lucroLiquido = faturamentoHoje - totalDespesasHoje - comissoesHoje;
-  const despesasCount = safeExpenses.length + despesasCountSheet;
-  const sangriasCount = safeSangrias.length  + sangriasCountSheet;
-
-  // ─ Lógica do Caixa Físico (Dinheiro em Espécie na Mão) ─
-  const isCaixaAberto = cashier?.status === 'aberto';
-  const fundoInicial = isCaixaAberto ? Number(cashier?.saldo || 0) : 0;
+  
+  // ─ Lógica do Caixa Físico (Novo Sistema Real) ─
+  const isCaixaAberto = todayCashier?.status === 'open';
+  const fundoInicial = safeNum(todayCashier?.opening_balance) || safeNum(sheetMetadata?.fundoInicial) || safeNum(cashier?.saldo);
+  const totalSangriasHoje = (cashierSangrias || []).reduce((a, s) => a + safeNum(s.valor), 0);
 
   // Entradas exclusivamente em Dinheiro Físico (Espécie)
   const entradasDinheiroFisico = receitasSheet.reduce((a, t) => {
-    if (Number(t.dinheiro) > 0) return a + Number(t.dinheiro);
+    if (safeNum(t.dinheiro) > 0) return a + safeNum(t.dinheiro);
     const pg = (t.payment_method || t.pagamento || '').toLowerCase();
-    if (!Number(t.pix) && !Number(t.credito) && !Number(t.debito) && (pg.includes('dinheiro') || pg.includes('especie') || pg.includes('cash'))) {
-      return a + Number(t.gross || t.total || 0);
+    if (!safeNum(t.pix) && !safeNum(t.credito) && !safeNum(t.debito) && (pg.includes('dinheiro') || pg.includes('especie') || pg.includes('cash'))) {
+      return a + safeNum(t.gross || t.total);
     }
     return a;
   }, 0);
 
-  // Despesas pagas em dinheiro físico
-  const saídasDespesasDinheiro = safeExpenses.reduce((a, e) => {
-    const pg = (e.metodoPagamento || e.metodo || '').toLowerCase();
-    if (pg.includes('dinheiro') || pg.includes('especie') || pg.includes('cash')) {
-      return a + Number(e.valor || 0);
-    }
-    return a;
-  }, 0);
+  const saldoAtual = fundoInicial + entradasDinheiroFisico - totalSangriasHoje;
+  const fundoFinalDinheiro = isCaixaAberto
+    ? saldoAtual
+    : (safeNum(todayCashier?.closing_balance) || safeNum(sheetMetadata?.fundoFinal) || saldoAtual);
 
-  const saídasSangriasFisico = sangriasHoje;
-  const fundoFinalDinheiro = fundoInicial + entradasDinheiroFisico - saídasDespesasDinheiro - saídasSangriasFisico;
+  const despesasCount = safeExpenses.length + despesasCountSheet;
+  const sangriasCount = safeSangrias.length  + sangriasCountSheet;
 
 
   // Formas de pagamento calculadas das receitas da planilha (sheet_transactions)
@@ -340,14 +367,17 @@ export default function Financial() {
     return all.filter(e => expFiltroCat === 'todos' || e.categoria === expFiltroCat);
   }, [safeExpenses, dailySheet, expFiltroCat]);
 
-  const handleSangria = () => {
+  const handleSangria = async () => {
     const v = parseFloat(sangriaForm.valor);
     if (!v || v <= 0) { alert('Informe um valor válido.'); return; }
     if (!sangriaForm.motivo.trim()) { alert('Informe o motivo.'); return; }
-    realizarSangria(v, sangriaForm.motivo.trim());
+    setSangriaLoading(true);
+    await realizarSangria(v, sangriaForm.motivo.trim());
     setSangriaForm({ valor: '', motivo: '' });
     setSangriaModal(false);
+    setSangriaLoading(false);
   };
+
 
   const handleAddTx = () => {
     if (!supabaseConnected) { alert('Modo somente leitura: Supabase desconectado.'); return; }
@@ -654,7 +684,7 @@ export default function Financial() {
               fontSize: 13, fontWeight: 800, padding: '4px 12px', borderRadius: 6,
               letterSpacing: 0.2,
             }}>
-              {isCaixaAberto ? fmtCurrency(fundoInicial) : 'R$ --'}
+              {fmtCurrency(fundoInicial)}
             </span>
           </div>
 
@@ -674,7 +704,7 @@ export default function Financial() {
               fontSize: 13, fontWeight: 800, padding: '4px 12px', borderRadius: 6,
               letterSpacing: 0.2,
             }}>
-              {isCaixaAberto ? fmtCurrency(fundoFinalDinheiro) : 'R$ --'}
+              {fmtCurrency(fundoFinalDinheiro)}
             </span>
           </div>
 
@@ -852,86 +882,252 @@ export default function Financial() {
         </div>
       </div>
 
-      {/* Tab: Caixa */}
+      {/* Tab: Caixa — Sistema Real */}
       {activeTab === 'caixa' && (
         <div>
-          <div className="grid-2 section-gap">
-            {/* Payment Methods */}
-            <div className="card">
-              <div className="card-header">
-                <span className="card-title"><CreditCard />Formas de Pagamento — Hoje</span>
+          {/* Aviso de Fechamento Automático */}
+          {autoClosed && (
+            <div style={{
+              background: 'linear-gradient(135deg, #FFF8F0, #FFF3E0)',
+              border: '1px solid #FED7AA', borderLeft: '4px solid #F97316',
+              borderRadius: 12, padding: '14px 18px', marginBottom: 20,
+              display: 'flex', alignItems: 'center', gap: 12,
+            }}>
+              <AlertTriangle style={{ width: 18, height: 18, color: '#EA580C', flexShrink: 0 }} />
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 13, color: '#9A3412' }}>Caixa fechado automaticamente</div>
+                <p style={{ fontSize: 12, color: '#7C2D12', margin: 0 }}>
+                  O caixa do dia anterior foi fechado automaticamente pelo sistema.
+                  O novo caixa foi aberto com o saldo herdado de <strong>{fmtCurrency(fundoInicial)}</strong>.
+                </p>
               </div>
-              {isConnected && formasPagamento.filter(pm => pm.ativo).map(pm => (
-                <div key={pm.id} style={{ marginBottom: 14 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 6 }}>
-                    <span style={{ fontWeight: 600, color: 'var(--text-dark)' }}>{pm.nome}</span>
-                    <span style={{ color: 'var(--text-medium)' }}>{fmtCurrency(pm.valor)}</span>
+            </div>
+          )}
+
+          <div className="grid-2 section-gap">
+            {/* Card Principal do Caixa */}
+            <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+              {/* Header colorido */}
+              <div style={{
+                background: isCaixaAberto
+                  ? 'linear-gradient(135deg, #1A4D2E 0%, #2D6A4F 100%)'
+                  : 'linear-gradient(135deg, #374151 0%, #4B5563 100%)',
+                padding: '20px 24px', color: '#fff',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                  <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, color: 'rgba(255,255,255,0.7)' }}>
+                    {new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' })}
+                  </span>
+                  <span style={{
+                    fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 20,
+                    background: isCaixaAberto ? '#4CAF50' : '#EF4444',
+                    color: '#fff', textTransform: 'uppercase', letterSpacing: 0.5,
+                  }}>
+                    {isCaixaAberto ? '● Aberto' : '● Fechado'}
+                  </span>
+                </div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: 'rgba(255,255,255,0.85)' }}>
+                  {isCaixaAberto
+                    ? `Aberto às ${todayCashier?.opened_at ? new Date(todayCashier.opened_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '--:--'}`
+                    : todayCashier?.closed_at
+                    ? `Fechado às ${new Date(todayCashier.closed_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`
+                    : 'Nenhum caixa aberto hoje'}
+                </div>
+              </div>
+
+              {/* Corpo com valores */}
+              <div style={{ padding: '20px 24px' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  {/* Saldo Inicial */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <div style={{ width: 32, height: 32, borderRadius: 8, background: '#F0FDF4', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <Unlock style={{ width: 15, height: 15, color: '#16A34A' }} />
+                      </div>
+                      <span style={{ fontSize: 13, color: '#555' }}>Saldo Inicial</span>
+                    </div>
+                    <span style={{ fontSize: 14, fontWeight: 700, color: '#16A34A' }}>{fmtCurrency(fundoInicial)}</span>
                   </div>
-                  <div style={{ height: 8, background: 'var(--border-color)', borderRadius: 99, overflow: 'hidden' }}>
-                    <div style={{
-                      height: '100%',
-                      width: `${pm.pct}%`,
-                      background: pm.id === 'pix' ? '#32BCAD' : pm.id === 'credito' ? '#185ABD' : pm.id === 'debito' ? '#0F9D58' : '#E6A800',
-                      borderRadius: 99,
-                      transition: 'width 0.5s',
-                    }} />
+
+                  {/* Entradas Dinheiro */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <div style={{ width: 32, height: 32, borderRadius: 8, background: '#F0FDF4', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <Banknote style={{ width: 15, height: 15, color: '#16A34A' }} />
+                      </div>
+                      <span style={{ fontSize: 13, color: '#555' }}>+ Entradas em Dinheiro</span>
+                    </div>
+                    <span style={{ fontSize: 14, fontWeight: 700, color: '#16A34A' }}>+ {fmtCurrency(entradasDinheiroFisico)}</span>
+                  </div>
+
+                  {/* Sangrias */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <div style={{ width: 32, height: 32, borderRadius: 8, background: '#FFF1F2', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <Minus style={{ width: 15, height: 15, color: '#EF4444' }} />
+                      </div>
+                      <span style={{ fontSize: 13, color: '#555' }}>- Sangrias ({(cashierSangrias || []).length})</span>
+                    </div>
+                    <span style={{ fontSize: 14, fontWeight: 700, color: '#EF4444' }}>- {fmtCurrency(totalSangriasHoje)}</span>
+                  </div>
+
+                  {/* Divisor */}
+                  <div style={{ borderTop: '2px dashed #E5E7EB', margin: '4px 0' }} />
+
+                  {/* Saldo Atual/Final */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <div style={{ width: 32, height: 32, borderRadius: 8, background: isCaixaAberto ? '#EFF6FF' : '#F3F4F6', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <Wallet style={{ width: 15, height: 15, color: isCaixaAberto ? '#3B82F6' : '#6B7280' }} />
+                      </div>
+                      <span style={{ fontSize: 14, fontWeight: 700, color: '#111' }}>
+                        {isCaixaAberto ? '= Saldo Atual' : '= Saldo Final'}
+                      </span>
+                    </div>
+                    <span style={{ fontSize: 20, fontWeight: 800, color: isCaixaAberto ? '#1D4ED8' : '#374151' }}>
+                      {fmtCurrency(fundoFinalDinheiro)}
+                    </span>
                   </div>
                 </div>
-              ))}
-              {!isConnected && (
-                <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: 13, padding: 30 }}>
-                  <CreditCard style={{ width: 32, height: 32, opacity: 0.3, margin: '0 auto 10px' }} />
-                  <p>Conecte a planilha para ver as formas de pagamento</p>
+
+                {/* Botoes */}
+                <div style={{ display: 'flex', gap: 10, marginTop: 20 }}>
+                  {isCaixaAberto ? (
+                    <>
+                      <button
+                        className="btn btn-sm"
+                        onClick={() => setSangriaModal(true)}
+                        style={{ flex: 1, justifyContent: 'center', background: '#FFF1F2', color: '#EF4444', border: '1px solid #FECACA', fontWeight: 600 }}
+                      >
+                        <Minus style={{ width: 14, height: 14 }} /> Sangria
+                      </button>
+                      <button
+                        className="btn btn-sm"
+                        onClick={async () => {
+                          setCaixaLoading(true);
+                          const r = await fecharCaixa();
+                          setCaixaLoading(false);
+                          if (r?.success) addLog('success', 'Caixa fechado com sucesso!');
+                        }}
+                        disabled={caixaLoading}
+                        style={{ flex: 1, justifyContent: 'center', background: '#374151', color: '#fff', border: 'none', fontWeight: 600 }}
+                      >
+                        <Lock style={{ width: 14, height: 14 }} />
+                        {caixaLoading ? 'Fechando...' : 'Fechar Caixa'}
+                      </button>
+                    </>
+                  ) : (
+                    <div style={{ flex: 1, padding: '12px 16px', background: '#F9FAFB', borderRadius: 8, fontSize: 12, color: '#6B7280', textAlign: 'center' }}>
+                      O caixa será aberto automaticamente ao sincronizar.
+                    </div>
+                  )}
                 </div>
-              )}
+              </div>
             </div>
 
-            {/* Cashier Actions */}
-            <div className="card">
-              <div className="card-header">
-                <span className="card-title"><Wallet />Ações do Caixa</span>
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                <button
-                  className="btn btn-sm"
-                  onClick={cashier.status === 'aberto' ? handlePromptFecharCaixa : handlePromptAbrirCaixa}
-                  disabled={caixaLoading}
-                  style={{
-                    justifyContent: 'flex-start',
-                    background: cashier.status === 'aberto' ? 'var(--danger-bg)' : 'var(--success-bg)',
-                    color: cashier.status === 'aberto' ? 'var(--danger)' : 'var(--success)',
-                    border: 'none',
-                    fontWeight: 600,
-                    opacity: caixaLoading ? 0.6 : 1,
-                    cursor: caixaLoading ? 'not-allowed' : 'pointer',
-                  }}
-                >
-                  {cashier.status === 'aberto' ? <Lock style={{ width: 14, height: 14 }} /> : <Unlock style={{ width: 14, height: 14 }} />}
-                  {cashier.status === 'aberto' ? 'Fechar Caixa' : 'Abrir Caixa'}
-                </button>
-                <button className="btn btn-ghost btn-sm" onClick={() => setSangriaModal(true)} style={{ justifyContent: 'flex-start' }}>
-                  <Minus style={{ width: 14, height: 14 }} />Realizar Sangria
-                </button>
-                <button className="btn btn-ghost btn-sm" onClick={() => window.print()} style={{ justifyContent: 'flex-start' }}>
-                  <Printer style={{ width: 14, height: 14 }} />Imprimir Relatório
-                </button>
+            {/* Card de Sangrias do Dia + Formas de Pagamento */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              {/* Formas de Pagamento */}
+              <div className="card">
+                <div className="card-header">
+                  <span className="card-title"><CreditCard />Formas de Pagamento — Hoje</span>
+                </div>
+                {isConnected && formasPagamento.filter(pm => pm.ativo).map(pm => (
+                  <div key={pm.id} style={{ marginBottom: 14 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 6 }}>
+                      <span style={{ fontWeight: 600, color: 'var(--text-dark)' }}>{pm.nome}</span>
+                      <span style={{ color: 'var(--text-medium)' }}>{fmtCurrency(pm.valor)}</span>
+                    </div>
+                    <div style={{ height: 8, background: 'var(--border-color)', borderRadius: 99, overflow: 'hidden' }}>
+                      <div style={{
+                        height: '100%', width: `${pm.pct}%`,
+                        background: pm.id === 'pix' ? '#32BCAD' : pm.id === 'credito' ? '#185ABD' : pm.id === 'debito' ? '#0F9D58' : '#E6A800',
+                        borderRadius: 99, transition: 'width 0.5s',
+                      }} />
+                    </div>
+                  </div>
+                ))}
+                {!isConnected && (
+                  <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: 13, padding: 30 }}>
+                    <CreditCard style={{ width: 32, height: 32, opacity: 0.3, margin: '0 auto 10px' }} />
+                    <p>Conecte a planilha para ver as formas de pagamento</p>
+                  </div>
+                )}
               </div>
 
-              {/* Sangrias list */}
-              {safeSangrias.length > 0 && (
-                <div style={{ marginTop: 16, borderTop: '1px solid var(--border-color)', paddingTop: 12 }}>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 8 }}>Sangrias Realizadas</div>
-                  {safeSangrias.map(s => (
-                    <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, padding: '6px 0', borderBottom: '1px solid var(--border-light)' }}>
-                      <span style={{ color: 'var(--text-medium)' }}>{s.motivo}</span>
-                      <span style={{ fontWeight: 700, color: 'var(--danger)' }}>- {fmtCurrency(s.valor)}</span>
+              {/* Sangrias do Dia */}
+              {(cashierSangrias || []).length > 0 && (
+                <div className="card">
+                  <div className="card-header">
+                    <span className="card-title"><Minus />Sangrias do Dia</span>
+                  </div>
+                  {cashierSangrias.map(s => (
+                    <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid var(--border-light)', alignItems: 'center' }}>
+                      <div>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: '#333' }}>{s.motivo || 'Sangria'}</div>
+                        <div style={{ fontSize: 11, color: '#999' }}>{s.created_at ? new Date(s.created_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : ''}</div>
+                      </div>
+                      <span style={{ fontWeight: 700, color: '#EF4444', fontSize: 14 }}>- {fmtCurrency(Number(s.valor))}</span>
                     </div>
                   ))}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: 10, marginTop: 4 }}>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: '#555' }}>Total Sangrias</span>
+                    <span style={{ fontSize: 14, fontWeight: 800, color: '#EF4444' }}>- {fmtCurrency(totalSangriasHoje)}</span>
+                  </div>
                 </div>
               )}
             </div>
           </div>
 
+          {/* Histórico de Caixas */}
+          {(cashierHistory || []).length > 0 && (
+            <div className="card" style={{ padding: 0, overflow: 'hidden', marginTop: 24 }}>
+              <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span style={{ fontSize: 14, fontWeight: 700, color: '#333' }}>Histórico de Caixas — Últimos 30 dias</span>
+                <span style={{ fontSize: 11, color: '#999' }}>{cashierHistory.length} registros</span>
+              </div>
+              <div className="table-wrapper">
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr>
+                      <th style={{ color: '#666', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', padding: '12px 16px', textAlign: 'left' }}>Data</th>
+                      <th style={{ color: '#666', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', padding: '12px 16px', textAlign: 'right' }}>Saldo Inicial</th>
+                      <th style={{ color: '#666', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', padding: '12px 16px', textAlign: 'right' }}>Entradas</th>
+                      <th style={{ color: '#666', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', padding: '12px 16px', textAlign: 'right' }}>Sangrias</th>
+                      <th style={{ color: '#666', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', padding: '12px 16px', textAlign: 'right' }}>Saldo Final</th>
+                      <th style={{ color: '#666', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', padding: '12px 16px', textAlign: 'center' }}>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {cashierHistory.map((c, idx) => {
+                      const closing = c.closing_balance ?? (Number(c.opening_balance || 0) + Number(c.total_cash_in || 0) - Number(c.total_cash_out || 0));
+                      const isOpen = c.status === 'open';
+                      return (
+                        <tr key={c.id || idx} style={{ borderBottom: '1px solid var(--border-light)', background: isOpen ? '#F0FDF4' : 'transparent' }}>
+                          <td style={{ padding: '14px 16px', fontWeight: 600, fontSize: 13 }}>
+                            {c.date ? new Date(c.date + 'T00:00:00').toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric' }) : '--'}
+                          </td>
+                          <td style={{ padding: '14px 16px', textAlign: 'right', fontSize: 13, color: '#555' }}>{fmtCurrency(Number(c.opening_balance || 0))}</td>
+                          <td style={{ padding: '14px 16px', textAlign: 'right', fontSize: 13, color: '#16A34A', fontWeight: 600 }}>+ {fmtCurrency(Number(c.total_cash_in || 0))}</td>
+                          <td style={{ padding: '14px 16px', textAlign: 'right', fontSize: 13, color: '#EF4444', fontWeight: 600 }}>- {fmtCurrency(Number(c.total_cash_out || 0))}</td>
+                          <td style={{ padding: '14px 16px', textAlign: 'right', fontSize: 14, fontWeight: 800, color: '#111' }}>{isOpen ? fmtCurrency(saldoAtual) : fmtCurrency(closing)}</td>
+                          <td style={{ padding: '14px 16px', textAlign: 'center' }}>
+                            <span style={{
+                              fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 20,
+                              background: isOpen ? '#D1FAE5' : c.auto_closed ? '#FFF3CD' : '#F3F4F6',
+                              color: isOpen ? '#065F46' : c.auto_closed ? '#92400E' : '#374151',
+                            }}>
+                              {isOpen ? 'Aberto' : c.auto_closed ? 'Auto-fechado' : 'Fechado'}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

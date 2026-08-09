@@ -123,17 +123,59 @@ function parseSheetRows(table) {
 
   const parseNum = (v) => {
     if (v === null || v === undefined) return 0;
+    if (typeof v === 'number') return v;
     const c = String(v).replace(/[R$\s.]/g, '').replace(',', '.');
     return parseFloat(c) || 0;
   };
 
-  // 2. Extrair data de referência do título (R0) se presente
+  // 2. Extrair data de referência do título (R0) e Fundos C1 (Inicial) e F1 (Final)
   let dateRef = new Date().toISOString().split('T')[0];
-  if (rows[0]?.c?.[0]?.v) {
-    const headerTitle = String(rows[0].c[0].v);
-    const dateMatch = headerTitle.match(/(\d{1,2}\/\d{1,2}\/\d{4})/);
-    if (dateMatch) {
-      dateRef = formatDateForDb(dateMatch[1]);
+  let fundoInicial = 0;
+  let fundoFinal = 0;
+
+  if (rows && rows.length > 0) {
+    const row0Cells = rows[0]?.c || [];
+    
+    // Título / data
+    if (row0Cells[0]?.v) {
+      const headerTitle = String(row0Cells[0].v);
+      const dateMatch = headerTitle.match(/(\d{1,2}\/\d{1,2}\/\d{4})/);
+      if (dateMatch) {
+        dateRef = formatDateForDb(dateMatch[1]);
+      }
+    }
+
+    // C1 (Célula índice 2 da Linha 1 = Fundo Inicial)
+    if (row0Cells[2]) {
+      fundoInicial = parseNum(row0Cells[2].v ?? row0Cells[2].f);
+    }
+
+    // F1 (Célula índice 5 da Linha 1 = Fundo Final)
+    if (row0Cells[5]) {
+      fundoFinal = parseNum(row0Cells[5].v ?? row0Cells[5].f);
+    }
+
+    // Varredura de segurança dinâmica nas 2 primeiras linhas
+    for (let rIdx = 0; rIdx <= Math.min(1, rows.length - 1); rIdx++) {
+      const cellsInRow = rows[rIdx]?.c || [];
+      cellsInRow.forEach((cell, cIdx) => {
+        if (!cell) return;
+        const cellText = String(cell.v ?? cell.f ?? '').toUpperCase().trim();
+        if (cellText.includes('FUNDO INICIAL')) {
+          const nextValCell = cellsInRow[cIdx + 1] || cellsInRow[cIdx + 2];
+          if (nextValCell) {
+            const v = parseNum(nextValCell.v ?? nextValCell.f);
+            if (v > 0) fundoInicial = v;
+          }
+        }
+        if (cellText.includes('FUNDO FINAL')) {
+          const nextValCell = cellsInRow[cIdx + 1] || cellsInRow[cIdx + 2];
+          if (nextValCell) {
+            const v = parseNum(nextValCell.v ?? nextValCell.f);
+            if (v > 0) fundoFinal = v;
+          }
+        }
+      });
     }
   }
 
@@ -232,7 +274,28 @@ function parseSheetRows(table) {
     });
   });
 
-  return { sheetRows };
+  return { sheetRows, fundoInicial, fundoFinal, dateRef };
+}
+
+/**
+ * Extrai os valores exatos de FUNDO INICIAL (C1) e FUNDO FINAL (F1) diretamente da planilha Google.
+ * Funciona 100% no navegador via gviz/tq independente de Edge Function.
+ */
+export async function fetchSheetMetadataDirect(sheetUrl) {
+  const defaultUrl = 'https://docs.google.com/spreadsheets/d/1uXB-p9iWev-ID7HVZVUj42FBu2J4PkWMo1cocTW2GXI/edit';
+  const urlToUse = sheetUrl || defaultUrl;
+  const sheetId = extractSheetId(urlToUse);
+  if (!sheetId) return { fundoInicial: 0, fundoFinal: 0 };
+  const gid = extractGid(urlToUse);
+
+  try {
+    const table = await fetchSheetData(sheetId, gid, 'A1:F2');
+    const { fundoInicial, fundoFinal } = parseSheetRows(table);
+    return { fundoInicial: fundoInicial || 0, fundoFinal: fundoFinal || 0 };
+  } catch (err) {
+    console.warn('[GoogleSheetsSync] fetchSheetMetadataDirect error:', err);
+    return { fundoInicial: 0, fundoFinal: 0 };
+  }
 }
 
 /**
@@ -248,6 +311,9 @@ export async function syncSheetToSupabase(sheetUrl, options = {}) {
 
   const connectionId = options.connectionId || options.id;
 
+  // Buscar metadados C1 (Inicial) e F1 (Final) diretamente via gviz para garantir que não dependam da Edge Function
+  const directMeta = await fetchSheetMetadataDirect(urlToUse);
+
   // 1. Tentar Edge Function sync-google-sheet do Supabase primeiro
   if (connectionId) {
     try {
@@ -259,6 +325,8 @@ export async function syncSheetToSupabase(sheetUrl, options = {}) {
         return {
           success: true,
           rowCount: data.rowsProcessed || data.rowsInserted || 0,
+          fundoInicial: directMeta.fundoInicial || data.fundoInicial || 0,
+          fundoFinal: directMeta.fundoFinal || data.fundoFinal || 0,
           error: null,
           isEdgeFunction: true,
         };
@@ -273,10 +341,20 @@ export async function syncSheetToSupabase(sheetUrl, options = {}) {
 
   try {
     const table = await fetchSheetData(sheetId, gid, options.range);
-    const { sheetRows } = parseSheetRows(table);
+    const { sheetRows, fundoInicial, fundoFinal, dateRef } = parseSheetRows(table);
+    const finalInicial = directMeta.fundoInicial || fundoInicial || 0;
+    const finalFinal = directMeta.fundoFinal || fundoFinal || 0;
     
     if (!sheetRows || sheetRows.length === 0) {
-      return { success: true, rowCount: 0, error: null, warning: 'Nenhum dado encontrado na planilha.' };
+      return {
+        success: true,
+        rowCount: 0,
+        fundoInicial: finalInicial,
+        fundoFinal: finalFinal,
+        dateRef,
+        error: null,
+        warning: 'Nenhum dado encontrado na planilha.',
+      };
     }
 
     const results = await Promise.allSettled(
@@ -309,7 +387,7 @@ export async function syncSheetToSupabase(sheetUrl, options = {}) {
       await supabase.from('sync_logs').insert([{
         event: 'sync_complete',
         status: 'success',
-        details: `Sincronizado ${succeeded} registros na tabela sheet_transactions`,
+        details: `Sincronizado ${succeeded} registros na tabela sheet_transactions (Fundo Inicial: R$ ${fundoInicial}, Fundo Final: R$ ${fundoFinal})`,
         message: `Sync Google Sheets (JS): ${succeeded} registros importados`,
         type: 'success',
         user_id: userId,
@@ -319,6 +397,9 @@ export async function syncSheetToSupabase(sheetUrl, options = {}) {
     return {
       success: true,
       rowCount: succeeded,
+      fundoInicial: finalInicial,
+      fundoFinal: finalFinal,
+      dateRef,
       error: null,
     };
   } catch (error) {
