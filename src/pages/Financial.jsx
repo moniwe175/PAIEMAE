@@ -628,16 +628,49 @@ export default function Financial() {
       )}
 
       {/* Page Header */}
-      <div className="page-header" style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
-        <div>
-          <h1 className="page-title" style={{ fontFamily: 'serif', fontSize: 24, color: '#1A4D2E', marginBottom: 4 }}>Financeiro</h1>
-          <p className="page-subtitle" style={{ fontSize: 13, color: '#888', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-            <span>{receitasCount} receitas • {despesasCount} despesas • {sangriasCount} sangrias</span>
-            <span style={{ background: '#F3F4F6', color: '#4B5563', padding: '2px 8px', borderRadius: 99, fontSize: 11, fontWeight: 600 }}>
-              🗓️ Expediente: Terça a Sábado
-            </span>
-          </p>
+      <div className="page-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12, marginBottom: 20 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 24, flexWrap: 'wrap' }}>
+          <div>
+            <h1 className="page-title" style={{ fontFamily: 'serif', fontSize: 24, color: '#1A4D2E', marginBottom: 2 }}>Financeiro</h1>
+            <p className="page-subtitle" style={{ fontSize: 12, color: '#888', margin: 0 }}>
+              {receitasCount} receitas • {despesasCount} despesas • {sangriasCount} sangrias
+            </p>
+          </div>
+
+          {/* Fundos do Caixa (Posicionados exatamente onde o usuário marcou com caneta preta) */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            {/* FUNDO INICIAL */}
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 10,
+              background: '#FFF8F0', border: '1px solid #FED7AA',
+              padding: '6px 16px', borderRadius: 8, height: 38,
+            }}>
+              <Unlock style={{ width: 14, height: 14, color: '#C2410C', flexShrink: 0 }} />
+              <div style={{ display: 'flex', flexDirection: 'column' }}>
+                <span style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, color: '#9A3412', lineHeight: 1 }}>FUNDO INICIAL</span>
+                <span style={{ fontSize: 14, fontWeight: 800, color: '#C2410C', lineHeight: 1.2, marginTop: 1 }}>
+                  {isCaixaAberto ? fmtCurrency(fundoInicial) : 'R$ --'}
+                </span>
+              </div>
+            </div>
+
+            {/* FUNDO FINAL */}
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 10,
+              background: '#FFF8F0', border: '1px solid #FED7AA',
+              padding: '6px 16px', borderRadius: 8, height: 38,
+            }}>
+              <Lock style={{ width: 14, height: 14, color: '#C2410C', flexShrink: 0 }} />
+              <div style={{ display: 'flex', flexDirection: 'column' }}>
+                <span style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, color: '#9A3412', lineHeight: 1 }}>FUNDO FINAL</span>
+                <span style={{ fontSize: 14, fontWeight: 800, color: '#C2410C', lineHeight: 1.2, marginTop: 1 }}>
+                  {isCaixaAberto ? fmtCurrency(fundoFinalDinheiro) : 'R$ --'}
+                </span>
+              </div>
+            </div>
+          </div>
         </div>
+
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           <button
             className="btn btn-sm"
@@ -649,9 +682,12 @@ export default function Financial() {
               color: '#D97706',
               fontWeight: 600,
               padding: '8px 16px',
+              height: 38,
               borderRadius: 8,
               cursor: syncing ? 'wait' : 'pointer',
               opacity: syncing ? 0.7 : 1,
+              display: 'flex',
+              alignItems: 'center',
             }}
           >
             <RefreshCw style={{ width: 14, height: 14, marginRight: 6, animation: syncing ? 'spin 1s linear infinite' : 'none' }} />
@@ -708,79 +744,41 @@ export default function Financial() {
 
 
 
-      {/* KPI Cards (Sistema de Caixa Real + Indicadores) */}
-      <div className="grid-6 section-gap">
-        {/* FUNDO INICIAL */}
-        <div className="stat-card" style={{ background: '#FFF8F0', border: '1px solid #FED7AA', position: 'relative' }}>
-          <div style={{
-            position: 'absolute', top: 14, right: 14, width: 26, height: 26, borderRadius: '50%',
-            background: '#FFEDD5', display: 'flex', alignItems: 'center', justifyContent: 'center'
-          }}>
-            <Unlock style={{ width: 13, height: 13, color: '#C2410C' }} />
-          </div>
-          <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, color: '#9A3412', marginBottom: 8 }}>
-            FUNDO INICIAL
-          </div>
-          <div style={{ fontSize: 24, fontWeight: 800, marginBottom: 4, color: '#C2410C' }}>
-            {isCaixaAberto ? fmtCurrency(fundoInicial) : 'R$ --'}
-          </div>
-          <div style={{ fontSize: 11, color: '#9A3412' }}>
-            Saldo de abertura do dia
-          </div>
-        </div>
-
-        {/* FUNDO FINAL */}
-        <div className="stat-card" style={{ background: '#FFF8F0', border: '1px solid #FED7AA', position: 'relative' }}>
-          <div style={{
-            position: 'absolute', top: 14, right: 14, width: 26, height: 26, borderRadius: '50%',
-            background: '#FFEDD5', display: 'flex', alignItems: 'center', justifyContent: 'center'
-          }}>
-            <Lock style={{ width: 13, height: 13, color: '#C2410C' }} />
-          </div>
-          <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, color: '#9A3412', marginBottom: 8 }}>
-            FUNDO FINAL
-          </div>
-          <div style={{ fontSize: 24, fontWeight: 800, marginBottom: 4, color: '#C2410C' }}>
-            {isCaixaAberto ? fmtCurrency(fundoFinalDinheiro) : 'R$ --'}
-          </div>
-          <div style={{ fontSize: 11, color: '#9A3412' }}>
-            Dinheiro físico em espécie
-          </div>
-        </div>
-
+      {/* KPI Cards (4 Cards Originais) */}
+      <div className="grid-4 section-gap">
         {/* Faturamento Total */}
         <div className="stat-card" style={{ background: '#1A4D2E', color: '#fff', border: 'none', position: 'relative' }}>
-          <div style={{ position: 'absolute', top: 14, right: 14, width: 6, height: 6, borderRadius: '50%', background: '#4CAF50' }} />
+          <div style={{ position: 'absolute', top: 16, right: 16, width: 6, height: 6, borderRadius: '50%', background: '#4CAF50' }} />
           <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, color: '#A8D5BA', marginBottom: 8 }}>
             FATURAMENTO TOTAL
           </div>
-          <div style={{ fontSize: 24, fontWeight: 800, marginBottom: 4, color: '#4CAF50' }}>
+          <div style={{ fontSize: 28, fontWeight: 800, marginBottom: 4, color: '#4CAF50' }}>
             {fmtCurrency(faturamentoHoje)}
           </div>
-          <div style={{ fontSize: 11, color: '#A8D5BA', marginBottom: 12 }}>
+          <div style={{ fontSize: 11, color: '#A8D5BA', marginBottom: 16 }}>
             {receitasCount} receitas
           </div>
-          <div style={{ display: 'flex', borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: 8 }}>
+          <div style={{ display: 'flex', borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: 12 }}>
             <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 9, color: '#A8D5BA', marginBottom: 1 }}>Comissões</div>
-              <div style={{ fontSize: 12, fontWeight: 700, color: '#F39C12' }}>{fmtCurrency(comissoesHoje)}</div>
+              <div style={{ fontSize: 10, color: '#A8D5BA', marginBottom: 2 }}>Comissões</div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: '#F39C12' }}>{fmtCurrency(comissoesHoje)}</div>
             </div>
             <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 9, color: '#A8D5BA', marginBottom: 1 }}>Líquido</div>
-              <div style={{ fontSize: 12, fontWeight: 700, color: '#4CAF50' }}>{fmtCurrency(lucroLiquido)}</div>
+              <div style={{ fontSize: 10, color: '#A8D5BA', marginBottom: 2 }}>Líquido</div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: '#4CAF50' }}>{fmtCurrency(lucroLiquido)}</div>
             </div>
           </div>
         </div>
 
         {/* Total Despesas */}
         <div className="stat-card" style={{ background: '#fff', border: '1px solid var(--border-color)', position: 'relative' }}>
-          <div style={{ position: 'absolute', top: 14, right: 14, width: 24, height: 24, borderRadius: '50%', background: '#FEF2F2', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ position: 'absolute', top: 16, right: 16, width: 24, height: 24, borderRadius: '50%', background: '#FEF2F2', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
              <ArrowDownLeft style={{ width: 12, height: 12, color: '#EF4444' }} />
           </div>
           <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--text-muted)', marginBottom: 8 }}>
             TOTAL DESPESAS
           </div>
-          <div style={{ fontSize: 24, fontWeight: 800, marginBottom: 4, color: '#EF4444' }}>
+          <div style={{ fontSize: 28, fontWeight: 800, marginBottom: 4, color: '#EF4444' }}>
             {fmtCurrency(totalDespesasHoje)}
           </div>
           <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
@@ -790,13 +788,13 @@ export default function Financial() {
 
         {/* Lucro Líquido */}
         <div className="stat-card" style={{ background: '#fff', border: '1px solid var(--border-color)', position: 'relative' }}>
-          <div style={{ position: 'absolute', top: 14, right: 14, width: 24, height: 24, borderRadius: '50%', background: 'var(--success-bg)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ position: 'absolute', top: 16, right: 16, width: 24, height: 24, borderRadius: '50%', background: 'var(--success-bg)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
              <ArrowUpRight style={{ width: 12, height: 12, color: 'var(--success)' }} />
           </div>
           <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--text-muted)', marginBottom: 8 }}>
             LUCRO LÍQUIDO
           </div>
-          <div style={{ fontSize: 24, fontWeight: 800, marginBottom: 4, color: 'var(--success)' }}>
+          <div style={{ fontSize: 28, fontWeight: 800, marginBottom: 4, color: 'var(--success)' }}>
             {fmtCurrency(lucroLiquido)}
           </div>
           <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
@@ -806,13 +804,13 @@ export default function Financial() {
 
         {/* Ticket Médio */}
         <div className="stat-card" style={{ background: '#fff', border: '1px solid var(--border-color)', position: 'relative' }}>
-          <div style={{ position: 'absolute', top: 14, right: 14, width: 24, height: 24, borderRadius: '50%', background: 'var(--bg-main)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ position: 'absolute', top: 16, right: 16, width: 24, height: 24, borderRadius: '50%', background: 'var(--bg-main)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
              <Receipt style={{ width: 12, height: 12, color: 'var(--text-muted)' }} />
           </div>
           <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--text-muted)', marginBottom: 8 }}>
             TICKET MÉDIO
           </div>
-          <div style={{ fontSize: 24, fontWeight: 800, marginBottom: 4, color: '#111' }}>
+          <div style={{ fontSize: 28, fontWeight: 800, marginBottom: 4, color: '#111' }}>
             {fmtCurrency(ticketMedio)}
           </div>
           <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
