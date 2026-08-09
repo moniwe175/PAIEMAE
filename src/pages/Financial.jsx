@@ -628,50 +628,57 @@ export default function Financial() {
       )}
 
       {/* Page Header */}
-      <div className="page-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12, marginBottom: 20 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 24, flexWrap: 'wrap' }}>
-          <div>
-            <h1 className="page-title" style={{ fontFamily: 'serif', fontSize: 24, color: '#1A4D2E', marginBottom: 2 }}>Financeiro</h1>
-            <p className="page-subtitle" style={{ fontSize: 12, color: '#888', margin: 0 }}>
-              {receitasCount} receitas • {despesasCount} despesas • {sangriasCount} sangrias
-            </p>
-          </div>
-
-          {/* Fundos do Caixa (Posicionados exatamente onde o usuário marcou com caneta preta) */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-            {/* FUNDO INICIAL */}
-            <div style={{
-              display: 'flex', alignItems: 'center', gap: 10,
-              background: '#FFF8F0', border: '1px solid #FED7AA',
-              padding: '6px 16px', borderRadius: 8, height: 38,
-            }}>
-              <Unlock style={{ width: 14, height: 14, color: '#C2410C', flexShrink: 0 }} />
-              <div style={{ display: 'flex', flexDirection: 'column' }}>
-                <span style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, color: '#9A3412', lineHeight: 1 }}>FUNDO INICIAL</span>
-                <span style={{ fontSize: 14, fontWeight: 800, color: '#C2410C', lineHeight: 1.2, marginTop: 1 }}>
-                  {isCaixaAberto ? fmtCurrency(fundoInicial) : 'R$ --'}
-                </span>
-              </div>
-            </div>
-
-            {/* FUNDO FINAL */}
-            <div style={{
-              display: 'flex', alignItems: 'center', gap: 10,
-              background: '#FFF8F0', border: '1px solid #FED7AA',
-              padding: '6px 16px', borderRadius: 8, height: 38,
-            }}>
-              <Lock style={{ width: 14, height: 14, color: '#C2410C', flexShrink: 0 }} />
-              <div style={{ display: 'flex', flexDirection: 'column' }}>
-                <span style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, color: '#9A3412', lineHeight: 1 }}>FUNDO FINAL</span>
-                <span style={{ fontSize: 14, fontWeight: 800, color: '#C2410C', lineHeight: 1.2, marginTop: 1 }}>
-                  {isCaixaAberto ? fmtCurrency(fundoFinalDinheiro) : 'R$ --'}
-                </span>
-              </div>
-            </div>
-          </div>
+      <div className="page-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16, marginBottom: 24 }}>
+        <div>
+          <h1 className="page-title" style={{ fontFamily: 'serif', fontSize: 24, color: '#1A4D2E', marginBottom: 2 }}>Financeiro</h1>
+          <p className="page-subtitle" style={{ fontSize: 12, color: '#888', margin: 0 }}>
+            {receitasCount} receitas • {despesasCount} despesas • {sangriasCount} sangrias
+          </p>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        {/* Action Group no lado direito: Fundos de Caixa bem espaçados com design premium + Sincronizar */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+          {/* FUNDO INICIAL */}
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 10,
+            background: '#FFFDF9', border: '1px solid #FED7AA',
+            padding: '6px 14px 6px 16px', borderRadius: 10, height: 40,
+            boxShadow: '0 1px 4px rgba(0,0,0,0.03)',
+          }}>
+            <Unlock style={{ width: 14, height: 14, color: '#C2410C', flexShrink: 0 }} />
+            <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, color: '#9A3412' }}>
+              FUNDO INICIAL
+            </span>
+            <span style={{
+              background: '#FFF7ED', color: '#C2410C', border: '1px solid #FFEDD5',
+              fontSize: 13, fontWeight: 800, padding: '4px 12px', borderRadius: 6,
+              letterSpacing: 0.2,
+            }}>
+              {isCaixaAberto ? fmtCurrency(fundoInicial) : 'R$ --'}
+            </span>
+          </div>
+
+          {/* FUNDO FINAL */}
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 10,
+            background: '#FFFDF9', border: '1px solid #FED7AA',
+            padding: '6px 14px 6px 16px', borderRadius: 10, height: 40,
+            boxShadow: '0 1px 4px rgba(0,0,0,0.03)',
+          }}>
+            <Lock style={{ width: 14, height: 14, color: '#C2410C', flexShrink: 0 }} />
+            <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, color: '#9A3412' }}>
+              FUNDO FINAL
+            </span>
+            <span style={{
+              background: '#FEF3C7', color: '#B45309', border: '1px solid #FDE68A',
+              fontSize: 13, fontWeight: 800, padding: '4px 12px', borderRadius: 6,
+              letterSpacing: 0.2,
+            }}>
+              {isCaixaAberto ? fmtCurrency(fundoFinalDinheiro) : 'R$ --'}
+            </span>
+          </div>
+
+          {/* Botão Sincronizar */}
           <button
             className="btn btn-sm"
             onClick={handleManualSync}
@@ -682,12 +689,13 @@ export default function Financial() {
               color: '#D97706',
               fontWeight: 600,
               padding: '8px 16px',
-              height: 38,
-              borderRadius: 8,
+              height: 40,
+              borderRadius: 10,
               cursor: syncing ? 'wait' : 'pointer',
               opacity: syncing ? 0.7 : 1,
               display: 'flex',
               alignItems: 'center',
+              boxShadow: '0 1px 4px rgba(0,0,0,0.03)',
             }}
           >
             <RefreshCw style={{ width: 14, height: 14, marginRight: 6, animation: syncing ? 'spin 1s linear infinite' : 'none' }} />
