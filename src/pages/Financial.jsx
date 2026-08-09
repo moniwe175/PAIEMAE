@@ -1078,56 +1078,6 @@ export default function Financial() {
               )}
             </div>
           </div>
-
-          {/* Histórico de Caixas */}
-          {(cashierHistory || []).length > 0 && (
-            <div className="card" style={{ padding: 0, overflow: 'hidden', marginTop: 24 }}>
-              <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <span style={{ fontSize: 14, fontWeight: 700, color: '#333' }}>Histórico de Caixas — Últimos 30 dias</span>
-                <span style={{ fontSize: 11, color: '#999' }}>{cashierHistory.length} registros</span>
-              </div>
-              <div className="table-wrapper">
-                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                  <thead>
-                    <tr>
-                      <th style={{ color: '#666', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', padding: '12px 16px', textAlign: 'left' }}>Data</th>
-                      <th style={{ color: '#666', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', padding: '12px 16px', textAlign: 'right' }}>Saldo Inicial</th>
-                      <th style={{ color: '#666', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', padding: '12px 16px', textAlign: 'right' }}>Entradas</th>
-                      <th style={{ color: '#666', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', padding: '12px 16px', textAlign: 'right' }}>Sangrias</th>
-                      <th style={{ color: '#666', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', padding: '12px 16px', textAlign: 'right' }}>Saldo Final</th>
-                      <th style={{ color: '#666', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', padding: '12px 16px', textAlign: 'center' }}>Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {cashierHistory.map((c, idx) => {
-                      const closing = c.closing_balance ?? (Number(c.opening_balance || 0) + Number(c.total_cash_in || 0) - Number(c.total_cash_out || 0));
-                      const isOpen = c.status === 'open';
-                      return (
-                        <tr key={c.id || idx} style={{ borderBottom: '1px solid var(--border-light)', background: isOpen ? '#F0FDF4' : 'transparent' }}>
-                          <td style={{ padding: '14px 16px', fontWeight: 600, fontSize: 13 }}>
-                            {c.date ? new Date(c.date + 'T00:00:00').toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric' }) : '--'}
-                          </td>
-                          <td style={{ padding: '14px 16px', textAlign: 'right', fontSize: 13, color: '#555' }}>{fmtCurrency(Number(c.opening_balance || 0))}</td>
-                          <td style={{ padding: '14px 16px', textAlign: 'right', fontSize: 13, color: '#16A34A', fontWeight: 600 }}>+ {fmtCurrency(Number(c.total_cash_in || 0))}</td>
-                          <td style={{ padding: '14px 16px', textAlign: 'right', fontSize: 13, color: '#EF4444', fontWeight: 600 }}>- {fmtCurrency(Number(c.total_cash_out || 0))}</td>
-                          <td style={{ padding: '14px 16px', textAlign: 'right', fontSize: 14, fontWeight: 800, color: '#111' }}>{isOpen ? fmtCurrency(saldoAtual) : fmtCurrency(closing)}</td>
-                          <td style={{ padding: '14px 16px', textAlign: 'center' }}>
-                            <span style={{
-                              fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 20,
-                              background: isOpen ? '#D1FAE5' : c.auto_closed ? '#FFF3CD' : '#F3F4F6',
-                              color: isOpen ? '#065F46' : c.auto_closed ? '#92400E' : '#374151',
-                            }}>
-                              {isOpen ? 'Aberto' : c.auto_closed ? 'Auto-fechado' : 'Fechado'}
-                            </span>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
         </div>
       )}
 
