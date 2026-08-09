@@ -50,7 +50,7 @@ export default function Financial() {
   const {
     transactions, addTransaction,
     expenses, addExpense, removeExpense,
-    cashier, abrirCaixa, fecharCaixa, realizarSangria,
+    cashier, abrirCaixa, fecharCaixa, realizarSangria, ensureCaixaAberto,
     splitConfig, updateSplitConfig,
     syncStatus, syncConfig, addLog,
     supabaseConnected, connectionError,
@@ -130,6 +130,11 @@ export default function Financial() {
     setSyncing(true);
     addLog('info', 'Iniciando sincronização com a planilha Excel/Google Sheets...');
     try {
+      // Auto-abrir caixa do dia se estiver fechado antes da sincronização
+      if (ensureCaixaAberto) {
+        await ensureCaixaAberto();
+      }
+
       const result = await syncSheetToSupabase(syncConfig?.sheet_url, {
         connectionId: syncConfig?.id,
         id: syncConfig?.id,
@@ -263,6 +268,32 @@ export default function Financial() {
   const lucroLiquido = faturamentoHoje - totalDespesasHoje - comissoesHoje;
   const despesasCount = safeExpenses.length + despesasCountSheet;
   const sangriasCount = safeSangrias.length  + sangriasCountSheet;
+
+  // ─ Lógica do Caixa Físico (Dinheiro em Espécie na Mão) ─
+  const isCaixaAberto = cashier?.status === 'aberto';
+  const fundoInicial = isCaixaAberto ? Number(cashier?.saldo || 0) : 0;
+
+  // Entradas exclusivamente em Dinheiro Físico (Espécie)
+  const entradasDinheiroFisico = receitasSheet.reduce((a, t) => {
+    if (Number(t.dinheiro) > 0) return a + Number(t.dinheiro);
+    const pg = (t.payment_method || t.pagamento || '').toLowerCase();
+    if (!Number(t.pix) && !Number(t.credito) && !Number(t.debito) && (pg.includes('dinheiro') || pg.includes('especie') || pg.includes('cash'))) {
+      return a + Number(t.gross || t.total || 0);
+    }
+    return a;
+  }, 0);
+
+  // Despesas pagas em dinheiro físico
+  const saídasDespesasDinheiro = safeExpenses.reduce((a, e) => {
+    const pg = (e.metodoPagamento || e.metodo || '').toLowerCase();
+    if (pg.includes('dinheiro') || pg.includes('especie') || pg.includes('cash')) {
+      return a + Number(e.valor || 0);
+    }
+    return a;
+  }, 0);
+
+  const saídasSangriasFisico = sangriasHoje;
+  const fundoFinalDinheiro = fundoInicial + entradasDinheiroFisico - saídasDespesasDinheiro - saídasSangriasFisico;
 
 
   // Formas de pagamento calculadas das receitas da planilha (sheet_transactions)
@@ -674,41 +705,79 @@ export default function Financial() {
 
 
 
-      {/* KPI Cards */}
-      <div className="grid-4 section-gap">
+      {/* KPI Cards (Sistema de Caixa Real + Indicadores) */}
+      <div className="grid-6 section-gap">
+        {/* FUNDO INICIAL */}
+        <div className="stat-card" style={{ background: '#FFF8F0', border: '1px solid #FED7AA', position: 'relative' }}>
+          <div style={{
+            position: 'absolute', top: 14, right: 14, width: 26, height: 26, borderRadius: '50%',
+            background: '#FFEDD5', display: 'flex', alignItems: 'center', justifyContent: 'center'
+          }}>
+            <Unlock style={{ width: 13, height: 13, color: '#C2410C' }} />
+          </div>
+          <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, color: '#9A3412', marginBottom: 8 }}>
+            FUNDO INICIAL
+          </div>
+          <div style={{ fontSize: 24, fontWeight: 800, marginBottom: 4, color: '#C2410C' }}>
+            {isCaixaAberto ? fmtCurrency(fundoInicial) : 'R$ --'}
+          </div>
+          <div style={{ fontSize: 11, color: '#9A3412' }}>
+            Saldo de abertura do dia
+          </div>
+        </div>
+
+        {/* FUNDO FINAL */}
+        <div className="stat-card" style={{ background: '#FFF8F0', border: '1px solid #FED7AA', position: 'relative' }}>
+          <div style={{
+            position: 'absolute', top: 14, right: 14, width: 26, height: 26, borderRadius: '50%',
+            background: '#FFEDD5', display: 'flex', alignItems: 'center', justifyContent: 'center'
+          }}>
+            <Lock style={{ width: 13, height: 13, color: '#C2410C' }} />
+          </div>
+          <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, color: '#9A3412', marginBottom: 8 }}>
+            FUNDO FINAL
+          </div>
+          <div style={{ fontSize: 24, fontWeight: 800, marginBottom: 4, color: '#C2410C' }}>
+            {isCaixaAberto ? fmtCurrency(fundoFinalDinheiro) : 'R$ --'}
+          </div>
+          <div style={{ fontSize: 11, color: '#9A3412' }}>
+            Dinheiro físico em espécie
+          </div>
+        </div>
+
         {/* Faturamento Total */}
         <div className="stat-card" style={{ background: '#1A4D2E', color: '#fff', border: 'none', position: 'relative' }}>
-          <div style={{ position: 'absolute', top: 16, right: 16, width: 6, height: 6, borderRadius: '50%', background: '#4CAF50' }} />
+          <div style={{ position: 'absolute', top: 14, right: 14, width: 6, height: 6, borderRadius: '50%', background: '#4CAF50' }} />
           <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, color: '#A8D5BA', marginBottom: 8 }}>
             FATURAMENTO TOTAL
           </div>
-          <div style={{ fontSize: 28, fontWeight: 800, marginBottom: 4, color: '#4CAF50' }}>
+          <div style={{ fontSize: 24, fontWeight: 800, marginBottom: 4, color: '#4CAF50' }}>
             {fmtCurrency(faturamentoHoje)}
           </div>
-          <div style={{ fontSize: 11, color: '#A8D5BA', marginBottom: 16 }}>
+          <div style={{ fontSize: 11, color: '#A8D5BA', marginBottom: 12 }}>
             {receitasCount} receitas
           </div>
-          <div style={{ display: 'flex', borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: 12 }}>
+          <div style={{ display: 'flex', borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: 8 }}>
             <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 10, color: '#A8D5BA', marginBottom: 2 }}>Comissões</div>
-              <div style={{ fontSize: 13, fontWeight: 700, color: '#F39C12' }}>{fmtCurrency(comissoesHoje)}</div>
+              <div style={{ fontSize: 9, color: '#A8D5BA', marginBottom: 1 }}>Comissões</div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: '#F39C12' }}>{fmtCurrency(comissoesHoje)}</div>
             </div>
             <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 10, color: '#A8D5BA', marginBottom: 2 }}>Líquido</div>
-              <div style={{ fontSize: 13, fontWeight: 700, color: '#4CAF50' }}>{fmtCurrency(lucroLiquido)}</div>
+              <div style={{ fontSize: 9, color: '#A8D5BA', marginBottom: 1 }}>Líquido</div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: '#4CAF50' }}>{fmtCurrency(lucroLiquido)}</div>
             </div>
           </div>
         </div>
 
         {/* Total Despesas */}
         <div className="stat-card" style={{ background: '#fff', border: '1px solid var(--border-color)', position: 'relative' }}>
-          <div style={{ position: 'absolute', top: 16, right: 16, width: 24, height: 24, borderRadius: '50%', background: '#FEF2F2', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ position: 'absolute', top: 14, right: 14, width: 24, height: 24, borderRadius: '50%', background: '#FEF2F2', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
              <ArrowDownLeft style={{ width: 12, height: 12, color: '#EF4444' }} />
           </div>
           <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--text-muted)', marginBottom: 8 }}>
             TOTAL DESPESAS
           </div>
-          <div style={{ fontSize: 28, fontWeight: 800, marginBottom: 4, color: '#EF4444' }}>
+          <div style={{ fontSize: 24, fontWeight: 800, marginBottom: 4, color: '#EF4444' }}>
             {fmtCurrency(totalDespesasHoje)}
           </div>
           <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
@@ -718,13 +787,13 @@ export default function Financial() {
 
         {/* Lucro Líquido */}
         <div className="stat-card" style={{ background: '#fff', border: '1px solid var(--border-color)', position: 'relative' }}>
-          <div style={{ position: 'absolute', top: 16, right: 16, width: 24, height: 24, borderRadius: '50%', background: 'var(--success-bg)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ position: 'absolute', top: 14, right: 14, width: 24, height: 24, borderRadius: '50%', background: 'var(--success-bg)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
              <ArrowUpRight style={{ width: 12, height: 12, color: 'var(--success)' }} />
           </div>
           <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--text-muted)', marginBottom: 8 }}>
             LUCRO LÍQUIDO
           </div>
-          <div style={{ fontSize: 28, fontWeight: 800, marginBottom: 4, color: 'var(--success)' }}>
+          <div style={{ fontSize: 24, fontWeight: 800, marginBottom: 4, color: 'var(--success)' }}>
             {fmtCurrency(lucroLiquido)}
           </div>
           <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
@@ -734,13 +803,13 @@ export default function Financial() {
 
         {/* Ticket Médio */}
         <div className="stat-card" style={{ background: '#fff', border: '1px solid var(--border-color)', position: 'relative' }}>
-          <div style={{ position: 'absolute', top: 16, right: 16, width: 24, height: 24, borderRadius: '50%', background: 'var(--bg-main)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ position: 'absolute', top: 14, right: 14, width: 24, height: 24, borderRadius: '50%', background: 'var(--bg-main)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
              <Receipt style={{ width: 12, height: 12, color: 'var(--text-muted)' }} />
           </div>
           <div style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--text-muted)', marginBottom: 8 }}>
             TICKET MÉDIO
           </div>
-          <div style={{ fontSize: 28, fontWeight: 800, marginBottom: 4, color: '#111' }}>
+          <div style={{ fontSize: 24, fontWeight: 800, marginBottom: 4, color: '#111' }}>
             {fmtCurrency(ticketMedio)}
           </div>
           <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>

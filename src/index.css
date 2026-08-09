@@ -422,7 +422,12 @@ body {
   margin-top: 2px;
 }
 
-/* ===== GRID LAYOUTS ===== */
+.grid-6 {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 16px;
+}
+
 .grid-4 {
   display: grid;
   grid-template-columns: repeat(4, 1fr);

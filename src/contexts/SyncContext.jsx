@@ -10,7 +10,7 @@ import {
   fetchCashierState, upsertCashierState,
   fetchSplitConfig, upsertSplitConfig,
   insertSyncLog as sbInsertLog, clearSyncLogs as sbClearLogs, fetchSyncLogs,
-  insertDailyReport as sbInsertDailyReport, fetchDailyReports as sbFetchDailyReports,
+  insertDailyReport as sbInsertDailyReport, fetchDailyReports as sbFetchDailyReports, fetchLastClosedCashierBalance,
   fetchSheetConnections, upsertSheetConnection as sbUpsertSheetConnection,
   fetchSheetTransactions as sbFetchSheetTransactions,
   fetchSheetTransactionsSummary as sbFetchSheetSummary,
@@ -447,19 +447,33 @@ export function SyncProvider({ children }) {
   }, [supabaseReady, requireConnection]);
 
   // ─── Cashier actions ────────────────────────────────────────
-  const abrirCaixa = useCallback((saldoInicial = 0) => {
+  // ─── Helper para buscar último saldo em dinheiro do caixa fechado ──
+  const getFundoInicialHerdado = useCallback(async () => {
+    const { balance } = await fetchLastClosedCashierBalance();
+    return Number(balance) || 0;
+  }, []);
+
+  // ─── Cashier actions ────────────────────────────────────────
+  const abrirCaixa = useCallback(async (saldoInicial = null) => {
     if (!requireConnection('abrir caixa')) return;
+
+    let saldo = saldoInicial;
+    if (saldo === null || saldo === undefined) {
+      saldo = await getFundoInicialHerdado();
+    }
+
     const newState = {
       status: 'aberto',
-      saldo: saldoInicial,
+      saldo: Number(saldo) || 0,
       horaAbertura: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
       dataAbertura: new Date().toLocaleDateString('pt-BR'),
       sangrias: [],
     };
     setCashier(newState);
     syncToSupabase('cashier_state', newState);
-    addLog('info', 'Caixa aberto');
-  }, [syncToSupabase, addLog, requireConnection]);
+    addLog('info', `Caixa aberto com Fundo Inicial em Dinheiro: R$ ${newState.saldo.toFixed(2)}`);
+    return newState;
+  }, [syncToSupabase, addLog, requireConnection, getFundoInicialHerdado]);
 
   // ─── Daily Sheet (read-only from Google Sheets) ─────────────
   const updateDailySheet = useCallback((sheetData) => {
@@ -469,10 +483,10 @@ export function SyncProvider({ children }) {
   // ─── Save Daily Report to Supabase (Sistema de Caixa) ────
   const saveDailyReport = useCallback(async (customData = {}) => {
     const hojeStr = new Date().toLocaleDateString('pt-BR');
-    const dataRef = customData.data || dailySheet?.dataCaixa || hojeStr;
+    const dataRef = customData.data || dailySheet?.dataCaixa || cashier.dataAbertura || hojeStr;
 
-    // Filtrar transações para a data
-    const txsDoDia = transactions.filter(t => (t.data === dataRef || !t.data || t.data === hojeStr));
+    // Filtrar transações reais da planilha (sheet_transactions) para a data
+    const txsDoDia = (sheetTransactions || []).filter(t => (t.date_ref === dataRef || t.data === dataRef || !t.date_ref));
 
     let totalDinheiro = 0;
     let totalPix = 0;
@@ -480,25 +494,32 @@ export function SyncProvider({ children }) {
     let totalDebito = 0;
 
     txsDoDia.forEach(t => {
-      const v = Number(t.total ?? t.valor ?? 0);
-      const pg = String(t.pagamento || t.forma_pagamento || '').toLowerCase();
-      if (pg.includes('dinheiro') || pg.includes('cash') || pg.includes('especie')) totalDinheiro += v;
-      else if (pg.includes('pix') || pg.includes('transf')) totalPix += v;
-      else if (pg.includes('credito')) totalCredito += v;
-      else if (pg.includes('debito')) totalDebito += v;
-      else totalPix += v;
+      totalDinheiro += Number(t.dinheiro || 0);
+      totalPix += Number(t.pix || 0);
+      totalCredito += Number(t.credito || 0);
+      totalDebito += Number(t.debito || 0);
+      if (!t.dinheiro && !t.pix && !t.credito && !t.debito) {
+        const v = Number(t.gross ?? t.total ?? 0);
+        const pg = String(t.payment_method || t.pagamento || '').toLowerCase();
+        if (pg.includes('dinheiro') || pg.includes('cash') || pg.includes('especie')) totalDinheiro += v;
+        else if (pg.includes('pix')) totalPix += v;
+        else if (pg.includes('credito')) totalCredito += v;
+        else if (pg.includes('debito')) totalDebito += v;
+        else totalPix += v;
+      }
     });
 
-    const fundoInicial = Number(customData.fundo_inicial ?? customData.fundoInicial ?? dailySheet?.fundoInicial ?? 0);
-    const fundoFinalReal = Number(customData.fundo_final_real ?? customData.fundoFinalReal ?? customData.fundoFinal ?? dailySheet?.fundoFinal ?? 0);
-    const fundoFinalCalculado = fundoInicial + totalDinheiro;
+    const fondoInicial = Number(customData.fundo_inicial ?? customData.fundoInicial ?? cashier.saldo ?? 0);
+    const totalSangrias = (cashier.sangrias || []).reduce((a, s) => a + Number(s.valor || 0), 0);
+    const fundoFinalCalculado = fondoInicial + totalDinheiro - totalSangrias;
+    const fundoFinalReal = Number(customData.fundo_final_real ?? customData.fundoFinalReal ?? fundoFinalCalculado);
     const diferenca = fundoFinalReal - fundoFinalCalculado;
     const status = diferenca === 0 ? 'ok' : 'erro';
 
     const report = {
       data: dataRef,
       data_caixa: dataRef.includes('/') ? dataRef.split('/').reverse().join('-') : dataRef,
-      fundo_inicial: fundoInicial,
+      fundo_inicial: fondoInicial,
       total_dinheiro: totalDinheiro,
       total_pix: totalPix,
       total_credito: totalCredito,
@@ -518,14 +539,14 @@ export function SyncProvider({ children }) {
         console.error('[SyncContext] Failed to save daily report:', result.error);
         addLog('error', `Falha ao salvar relatório do caixa: ${result.error}`);
       } else {
-        addLog('success', `Relatório do caixa salvo com status [${status.toUpperCase()}]: Diferença R$ ${diferenca.toFixed(2)}`);
+        addLog('success', `Relatório do caixa salvo: Fundo Final Dinheiro R$ ${fundoFinalReal.toFixed(2)}`);
       }
       return result;
     } else {
       addLog('warning', 'Supabase não disponível — relatório salvo apenas localmente');
       return { data: report, error: null };
     }
-  }, [dailySheet, transactions, supabaseReady, addLog]);
+  }, [dailySheet, sheetTransactions, cashier, supabaseReady, addLog]);
 
   const fecharCaixa = useCallback(async () => {
     if (!requireConnection('fechar caixa')) return { success: false, error: 'Supabase desconectado' };
@@ -537,13 +558,47 @@ export function SyncProvider({ children }) {
       return { success: false, error: reportResult.error };
     }
 
-    // Then close the cashier
-    const newState = { ...cashier, status: 'fechado', horaAbertura: null, dataAbertura: null };
+    // Calcular saldo final retido em dinheiro
+    const saldoFinal = reportResult.data?.fundo_final_real ?? reportResult.data?.fundo_final_calculado ?? cashier.saldo;
+
+    // Fechar o caixa
+    const newState = { ...cashier, status: 'fechado', saldo: saldoFinal, horaAbertura: null, dataAbertura: null };
     setCashier(newState);
     syncToSupabase('cashier_state', newState);
-    addLog('info', `Caixa fechado — Faturamento: R$ ${(dailySheet?.faturamentoBruto || 0).toFixed(2)}`);
+    addLog('info', `Caixa fechado com sucesso — Saldo acumulado em dinheiro: R$ ${saldoFinal.toFixed(2)}`);
     return { success: true, report: reportResult.data };
-  }, [cashier, syncToSupabase, addLog, requireConnection, saveDailyReport, dailySheet]);
+  }, [cashier, syncToSupabase, addLog, requireConnection, saveDailyReport]);
+
+  // ─── Auto-Abertura Inteligente de Caixa para Operações ─────
+  const ensureCaixaAberto = useCallback(async () => {
+    const hojeStr = new Date().toLocaleDateString('pt-BR');
+    if (cashier.status === 'aberto') {
+      if (cashier.dataAbertura && cashier.dataAbertura !== hojeStr) {
+        addLog('info', `Fechando caixa anterior (${cashier.dataAbertura}) e abrindo caixa de hoje (${hojeStr})...`);
+        await fecharCaixa();
+        return await abrirCaixa();
+      }
+      return cashier;
+    }
+    // Se o caixa estiver fechado, abre automaticamente herdando o fundo do dia anterior
+    addLog('info', `Caixa fechado detectado. Abrindo caixa do dia (${hojeStr}) automaticamente...`);
+    return await abrirCaixa();
+  }, [cashier, fecharCaixa, abrirCaixa, addLog]);
+
+  // ─── Virada de Dia Automática (00:00) ──────────────────────
+  useEffect(() => {
+    const checkTurnover = async () => {
+      const hojeStr = new Date().toLocaleDateString('pt-BR');
+      if (cashier.status === 'aberto' && cashier.dataAbertura && cashier.dataAbertura !== hojeStr) {
+        console.log(`[SyncContext] Mudança de dia detectada: ${cashier.dataAbertura} -> ${hojeStr}`);
+        addLog('warning', `Virada de dia detectada! Fechando caixa do dia ${cashier.dataAbertura} e iniciando caixa de ${hojeStr}...`);
+        await fecharCaixa();
+        await abrirCaixa();
+      }
+    };
+    const timer = setInterval(checkTurnover, 60000);
+    return () => clearInterval(timer);
+  }, [cashier, fecharCaixa, abrirCaixa, addLog]);
 
   const realizarSangria = useCallback((valor, motivo) => {
     if (!requireConnection('realizar sangria')) return;
@@ -561,7 +616,7 @@ export function SyncProvider({ children }) {
     };
     setCashier(newState);
     syncToSupabase('cashier_state', newState);
-    addLog('warning', `Sangria realizada: R$ ${valor.toLocaleString('pt-BR')} - ${motivo}`);
+    addLog('warning', `Sangria em Dinheiro realizada: R$ ${valor.toLocaleString('pt-BR')} - ${motivo}`);
   }, [cashier, syncToSupabase, addLog, requireConnection]);
 
   // ─── Split config ───────────────────────────────────────────
@@ -767,7 +822,7 @@ export function SyncProvider({ children }) {
     addTransaction, removeTransaction,
     addExpense, removeExpense,
     addComissao, removeComissao, updateComissaoStatus,
-    abrirCaixa, fecharCaixa, realizarSangria,
+    abrirCaixa, fecharCaixa, realizarSangria, ensureCaixaAberto, getFundoInicialHerdado,
     updateSplitConfig,
 
     importFromSheet,

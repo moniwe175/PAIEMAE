@@ -599,6 +599,31 @@ export async function fetchDailyReportByDate(dateStr) {
   return { data, error: null };
 }
 
+export async function fetchLastClosedCashierBalance() {
+  if (!isSupabaseConfigured()) return { balance: 0, error: null };
+  try {
+    const { data, error } = await supabase
+      .from('daily_reports')
+      .select('fundo_final_real, fundo_final_calculado, fundo_inicial, total_dinheiro, created_at')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      console.warn('[Supabase] fetchLastClosedCashierBalance warning:', error.message);
+      return { balance: 0, error };
+    }
+
+    if (data) {
+      const lastVal = Number(data.fundo_final_real ?? data.fundo_final_calculado ?? 0);
+      return { balance: lastVal, error: null };
+    }
+  } catch (err) {
+    console.warn('[Supabase] fetchLastClosedCashierBalance exception:', err);
+  }
+  return { balance: 0, error: null };
+}
+
 // ─── Campaigns (Marketing) ─────────────────────────────────
 
 export async function fetchCampaigns() {
