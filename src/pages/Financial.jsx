@@ -631,8 +631,11 @@ export default function Financial() {
       <div className="page-header" style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
         <div>
           <h1 className="page-title" style={{ fontFamily: 'serif', fontSize: 24, color: '#1A4D2E', marginBottom: 4 }}>Financeiro</h1>
-          <p className="page-subtitle" style={{ fontSize: 13, color: '#888' }}>
-            {receitasCount} receitas • {despesasCount} despesas • {sangriasCount} sangrias
+          <p className="page-subtitle" style={{ fontSize: 13, color: '#888', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <span>{receitasCount} receitas • {despesasCount} despesas • {sangriasCount} sangrias</span>
+            <span style={{ background: '#F3F4F6', color: '#4B5563', padding: '2px 8px', borderRadius: 99, fontSize: 11, fontWeight: 600 }}>
+              🗓️ Expediente: Terça a Sábado
+            </span>
           </p>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>

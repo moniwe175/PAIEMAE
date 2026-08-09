@@ -569,21 +569,35 @@ export function SyncProvider({ children }) {
     return { success: true, report: reportResult.data };
   }, [cashier, syncToSupabase, addLog, requireConnection, saveDailyReport]);
 
+  // ─── Helper para verificar se hoje é dia de expediente (Terça a Sábado: 2..6) ──
+  const isDiaAtendimento = useCallback((dateObj = new Date()) => {
+    const day = dateObj.getDay();
+    return day >= 2 && day <= 6;
+  }, []);
+
   // ─── Auto-Abertura Inteligente de Caixa para Operações ─────
   const ensureCaixaAberto = useCallback(async () => {
     const hojeStr = new Date().toLocaleDateString('pt-BR');
+    const hojeObj = new Date();
+    const eExpediente = isDiaAtendimento(hojeObj);
+
     if (cashier.status === 'aberto') {
       if (cashier.dataAbertura && cashier.dataAbertura !== hojeStr) {
-        addLog('info', `Fechando caixa anterior (${cashier.dataAbertura}) e abrindo caixa de hoje (${hojeStr})...`);
+        addLog('info', `Fechando caixa do dia anterior (${cashier.dataAbertura}) e abrindo caixa de hoje (${hojeStr})...`);
         await fecharCaixa();
         return await abrirCaixa();
       }
       return cashier;
     }
-    // Se o caixa estiver fechado, abre automaticamente herdando o fundo do dia anterior
-    addLog('info', `Caixa fechado detectado. Abrindo caixa do dia (${hojeStr}) automaticamente...`);
+
+    // Se o caixa estiver fechado, abre automaticamente herdando o fundo do último dia fechado (ex: Sábado -> Terça)
+    if (!eExpediente) {
+      addLog('info', `Hoje (${hojeStr}) é fora do expediente padrão (Terça a Sábado). Iniciando caixa sob demanda...`);
+    } else {
+      addLog('info', `Caixa fechado detectado. Abrindo caixa de hoje (${hojeStr}) automaticamente com fundo herdado...`);
+    }
     return await abrirCaixa();
-  }, [cashier, fecharCaixa, abrirCaixa, addLog]);
+  }, [cashier, fecharCaixa, abrirCaixa, addLog, isDiaAtendimento]);
 
   // ─── Virada de Dia Automática (00:00) ──────────────────────
   useEffect(() => {
@@ -822,7 +836,7 @@ export function SyncProvider({ children }) {
     addTransaction, removeTransaction,
     addExpense, removeExpense,
     addComissao, removeComissao, updateComissaoStatus,
-    abrirCaixa, fecharCaixa, realizarSangria, ensureCaixaAberto, getFundoInicialHerdado,
+    abrirCaixa, fecharCaixa, realizarSangria, ensureCaixaAberto, getFundoInicialHerdado, isDiaAtendimento,
     updateSplitConfig,
 
     importFromSheet,
