@@ -494,19 +494,24 @@ export function SyncProvider({ children }) {
           sangrias: prev.sangrias || [],
         }));
       } else {
-        setTodayCashier(null);
-        // Verificar se existe caixa fechado de hoje
+        // Nenhum caixa aberto — verificar se existe caixa fechado de hoje
         const { data: fechadoHoje } = await supabase
           .from('cashier_state')
           .select('*')
           .eq('date', new Date().toISOString().split('T')[0])
-          .eq('status', 'closed')
+          .eq('status', 'fechado')
           .limit(1)
           .maybeSingle();
         if (fechadoHoje) {
+          setTodayCashier(fechadoHoje);
           setCashier(prev => ({ ...prev, status: 'fechado', saldo: Number(fechadoHoje.closing_balance || 0) }));
         } else {
-          setCashier(prev => ({ ...prev, status: 'fechado' }));
+          // Nenhum caixa existe para hoje — abrir automaticamente com saldo do último fechamento
+          console.log('[SyncContext] Nenhum caixa para hoje, abrindo automaticamente...');
+          const result = await abrirCaixaHoje();
+          if (!result) {
+            setCashier(prev => ({ ...prev, status: 'fechado' }));
+          }
         }
       }
 
@@ -521,7 +526,7 @@ export function SyncProvider({ children }) {
     } catch (e) {
       console.warn('[SyncContext] loadCaixaHoje error:', e);
     }
-  }, [addLog]);
+  }, [addLog, abrirCaixaHoje]);
 
   /** Abre caixa de hoje automaticamente herdando o saldo do último fechamento ou da planilha */
   const abrirCaixaHoje = useCallback(async (customBalance = null) => {
@@ -562,7 +567,7 @@ export function SyncProvider({ children }) {
 
   /** Garante que o caixa está aberto antes de uma operação (auto-open silencioso) */
   const ensureCaixaAberto = useCallback(async () => {
-    if (todayCashier && todayCashier.status === 'open') return todayCashier;
+    if (todayCashier && todayCashier.status === 'aberto') return todayCashier;
     // Verificar no banco antes de abrir
     const { data: found } = await fetchTodayCashier();
     if (found) {

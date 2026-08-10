@@ -59,7 +59,7 @@ export default function Financial() {
   const {
     transactions, addTransaction,
     expenses, addExpense, removeExpense,
-    cashier, abrirCaixa, fecharCaixa, realizarSangria, ensureCaixaAberto,
+    cashier, fecharCaixa, realizarSangria, ensureCaixaAberto,
     splitConfig, updateSplitConfig,
     syncStatus, syncConfig, addLog,
     supabaseConnected, connectionError,
@@ -189,43 +189,7 @@ export default function Financial() {
 
 
 
-  // ─── Caixa confirmation handlers ────────────────────────────
-  const handlePromptAbrirCaixa = () => {
-    if (cashier.status === 'aberto') {
-      const hojeStr = hoje();
-      const isDiaAnterior = cashier.dataAbertura && cashier.dataAbertura !== hojeStr;
-      setCaixaConfirm({
-        type: 'fechar-pendente',
-        title: isDiaAnterior ? 'Caixa do dia anterior em aberto' : 'Caixa já está aberto',
-        message: isDiaAnterior
-          ? `O caixa do dia ${cashier.dataAbertura} ainda não foi fechado. O sistema irá fechá-lo e abrir o caixa de hoje (${hojeStr}). Deseja continuar?`
-          : `O caixa já está aberto desde ${cashier.horaAbertura}. Deseja fechá-lo e reabrir?`,
-        action: async () => {
-          setCaixaLoading(true);
-          await new Promise(r => setTimeout(r, 600));
-          fecharCaixa();
-          await new Promise(r => setTimeout(r, 300));
-          abrirCaixa(0);
-          setCaixaLoading(false);
-          setCaixaConfirm(null);
-        },
-      });
-    } else {
-      setCaixaConfirm({
-        type: 'abrir',
-        title: 'Abrir Caixa',
-        message: `Você está prestes a abrir o caixa do dia ${hoje()}. O sistema irá iniciar um novo período de recebimentos e despesas. Tem certeza?`,
-        action: async () => {
-          setCaixaLoading(true);
-          await new Promise(r => setTimeout(r, 600));
-          abrirCaixa(0);
-          setCaixaLoading(false);
-          setCaixaConfirm(null);
-        },
-      });
-    }
-  };
-
+  // ─── Caixa: fechar caixa (override manual) ────────────────────
   const handlePromptFecharCaixa = () => {
     const resumo = dailySheet
       ? `\n\nResumo da planilha:\n• Faturamento Bruto: R$ ${dailySheet.faturamentoBruto.toFixed(2)}\n• Despesas (Sangria): R$ ${(dailySheet.totalDespesas || 0).toFixed(2)}\n• Faturamento Líquido: R$ ${(dailySheet.faturamentoLiquido ?? dailySheet.faturamentoBruto).toFixed(2)}\n• PIX: R$ ${dailySheet.totalPix.toFixed(2)} | Crédito: R$ ${dailySheet.totalCredito.toFixed(2)}\n• Débito: R$ ${dailySheet.totalDebito.toFixed(2)} | Dinheiro: R$ ${dailySheet.totalDinheiro.toFixed(2)}\n• Total de transações: ${dailySheet.totalTransacoes}`
@@ -300,7 +264,7 @@ export default function Financial() {
   const lucroLiquido = faturamentoHoje - totalDespesasHoje - comissoesHoje;
   
   // ─ Lógica do Caixa Físico (Novo Sistema Real) ─
-  const isCaixaAberto = todayCashier?.status === 'open';
+  const isCaixaAberto = todayCashier?.status === 'aberto';
   const fundoInicial = safeNum(todayCashier?.opening_balance) || safeNum(sheetMetadata?.fundoInicial) || safeNum(cashier?.saldo);
   const totalSangriasHoje = (cashierSangrias || []).reduce((a, s) => a + safeNum(s.valor), 0);
 
@@ -318,6 +282,12 @@ export default function Financial() {
   const fundoFinalDinheiro = isCaixaAberto
     ? saldoAtual
     : (safeNum(todayCashier?.closing_balance) || safeNum(sheetMetadata?.fundoFinal) || saldoAtual);
+
+  // Totais informativos (não afetam saldo físico)
+  const pixTotalHoje = receitasSheet.reduce((a, t) => a + safeNum(t.pix), 0);
+  const cartaoCreditoHoje = receitasSheet.reduce((a, t) => a + safeNum(t.credito), 0);
+  const cartaoDebitoHoje = receitasSheet.reduce((a, t) => a + safeNum(t.debito), 0);
+  const cartaoTotalHoje = cartaoCreditoHoje + cartaoDebitoHoje;
 
   const despesasCount = safeExpenses.length + despesasCountSheet;
   const sangriasCount = safeSangrias.length  + sangriasCountSheet;
@@ -966,7 +936,7 @@ export default function Financial() {
                       <div style={{ width: 32, height: 32, borderRadius: 8, background: '#FFF1F2', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                         <Minus style={{ width: 15, height: 15, color: '#EF4444' }} />
                       </div>
-                      <span style={{ fontSize: 13, color: '#555' }}>- Sangrias ({(cashierSangrias || []).length})</span>
+                      <span style={{ fontSize: 13, color: '#555' }}>- Saídas / Sangrias ({(cashierSangrias || []).length})</span>
                     </div>
                     <span style={{ fontSize: 14, fontWeight: 700, color: '#EF4444' }}>- {fmtCurrency(totalSangriasHoje)}</span>
                   </div>
@@ -987,6 +957,31 @@ export default function Financial() {
                     <span style={{ fontSize: 20, fontWeight: 800, color: isCaixaAberto ? '#1D4ED8' : '#374151' }}>
                       {fmtCurrency(fundoFinalDinheiro)}
                     </span>
+                  </div>
+
+                  {/* Divisor */}
+                  <div style={{ borderTop: '1px solid #E5E7EB', margin: '4px 0' }} />
+
+                  {/* Pix do dia (informativo) */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <div style={{ width: 32, height: 32, borderRadius: 8, background: '#F0FDFA', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <Landmark style={{ width: 15, height: 15, color: '#14B8A6' }} />
+                      </div>
+                      <span style={{ fontSize: 13, color: '#555' }}>Pix do dia</span>
+                    </div>
+                    <span style={{ fontSize: 14, fontWeight: 700, color: '#14B8A6' }}>{fmtCurrency(pixTotalHoje)}</span>
+                  </div>
+
+                  {/* Cartão do dia (informativo) */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <div style={{ width: 32, height: 32, borderRadius: 8, background: '#EFF6FF', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <CreditCard style={{ width: 15, height: 15, color: '#3B82F6' }} />
+                      </div>
+                      <span style={{ fontSize: 13, color: '#555' }}>Cartão do dia (Crédito + Débito)</span>
+                    </div>
+                    <span style={{ fontSize: 14, fontWeight: 700, color: '#3B82F6' }}>{fmtCurrency(cartaoTotalHoje)}</span>
                   </div>
                 </div>
 
@@ -1017,9 +1012,13 @@ export default function Financial() {
                       </button>
                     </>
                   ) : (
-                    <div style={{ flex: 1, padding: '12px 16px', background: '#F9FAFB', borderRadius: 8, fontSize: 12, color: '#6B7280', textAlign: 'center' }}>
-                      O caixa será aberto automaticamente ao sincronizar.
-                    </div>
+                    <button
+                      className="btn btn-sm"
+                      onClick={() => setSangriaModal(true)}
+                      style={{ flex: 1, justifyContent: 'center', background: '#FFF1F2', color: '#EF4444', border: '1px solid #FECACA', fontWeight: 600 }}
+                    >
+                      <Minus style={{ width: 14, height: 14 }} /> Sangria
+                    </button>
                   )}
                 </div>
               </div>

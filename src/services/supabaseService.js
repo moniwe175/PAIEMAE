@@ -321,14 +321,14 @@ export async function updateComissao(id, updates) {
 
 // ─── Cashier State ────────────────────────────────────────────
 
-/** Busca o registro de caixa do dia atual (status = 'open', date = hoje) */
+/** Busca o registro de caixa do dia atual (status = 'aberto', date = hoje) */
 export async function fetchTodayCashier() {
   if (!isSupabaseConfigured()) return handleError('Supabase not configured', null);
   const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
   const { data, error } = await supabase
     .from('cashier_state')
     .select('*')
-    .eq('status', 'open')
+    .eq('status', 'aberto')
     .eq('date', today)
     .maybeSingle();
   if (error) return handleError(error, null);
@@ -358,7 +358,7 @@ export async function fetchLastClosingBalance() {
     const { data, error } = await supabase
       .from('cashier_state')
       .select('closing_balance, opening_balance, total_cash_in, total_cash_out, date')
-      .eq('status', 'closed')
+      .eq('status', 'fechado')
       .order('date', { ascending: false })
       .limit(1)
       .maybeSingle();
@@ -395,7 +395,7 @@ export async function openNewCashier(openingBalance = 0) {
   const userId = await getUserId();
   const payload = {
     date: today,
-    status: 'open',
+    status: 'aberto',
     opening_balance: Number(openingBalance) || 0,
     closing_balance: null,
     total_cash_in: 0,
@@ -444,7 +444,7 @@ export async function closeCashierById(id, { closingBalance, autoClosed = false,
   const { data, error } = await supabase
     .from('cashier_state')
     .update({
-      status: 'closed',
+      status: 'fechado',
       closing_balance: Number(closingBalance) || 0,
       total_cash_in: Number(totalCashIn) || 0,
       total_cash_out: Number(totalCashOut) || 0,
@@ -519,7 +519,7 @@ export async function autoClosePreviousCashiers() {
     const { data: openOld, error } = await supabase
       .from('cashier_state')
       .select('*')
-      .eq('status', 'open')
+      .eq('status', 'aberto')
       .lt('date', today);
 
     if (error || !openOld?.length) return { closed: 0, error };
@@ -527,7 +527,7 @@ export async function autoClosePreviousCashiers() {
     for (const record of openOld) {
       const closingBal = Number(record.opening_balance || 0) + Number(record.total_cash_in || 0) - Number(record.total_cash_out || 0);
       await supabase.from('cashier_state').update({
-        status: 'closed',
+        status: 'fechado',
         closing_balance: closingBal,
         closed_at: new Date().toISOString(),
         auto_closed: true,
