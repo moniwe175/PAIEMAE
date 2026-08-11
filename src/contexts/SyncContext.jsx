@@ -928,7 +928,7 @@ export function SyncProvider({ children }) {
     setNextSyncIn(null);
   }, []);
 
-  const _syncCtxValue = {
+  const value = {
     transactions, setTransactions,
     // ─ sheet_transactions: fonte real dos dados financeiros ─
     sheetTransactions, setSheetTransactions,
@@ -960,7 +960,7 @@ export function SyncProvider({ children }) {
   };
 
   return (
-    <SyncContext.Provider value={_syncCtxValue}>
+    <SyncContext.Provider value={value}>
       {children}
     </SyncContext.Provider>
   );
