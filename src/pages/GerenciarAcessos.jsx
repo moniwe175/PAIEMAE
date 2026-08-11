@@ -3,7 +3,7 @@ import {
   Shield, Loader2, Lock, UserPlus, ExternalLink,
   DollarSign, Zap, Settings, Save, CheckCircle, RefreshCw, AlertTriangle,
 } from 'lucide-react';
-import * as Switch from '@radix-ui/react-switch';
+
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -376,21 +376,24 @@ function MemberRow({ member, isCurrentUser, saving, saved, onAdminToggle, onPerm
           }}>
             {member.role === 'admin' ? 'Administrador' : 'Staff'}
           </span>
-          <Switch.Root
-            checked={member.role === 'admin'}
-            onCheckedChange={onAdminToggle}
+          <button
+            type="button"
+            role="switch"
+            aria-checked={member.role === 'admin'}
+            onClick={() => onAdminToggle(member.role !== 'admin')}
             style={{
               width: 42, height: 24,
               borderRadius: 99,
               border: 'none',
               cursor: 'pointer',
               position: 'relative',
+              padding: 0,
               background: member.role === 'admin' ? 'var(--color-primary)' : 'var(--border-color)',
               transition: 'background 0.2s',
               flexShrink: 0,
             }}
           >
-            <Switch.Thumb style={{
+            <span style={{
               display: 'block',
               width: 18, height: 18,
               borderRadius: '50%',
@@ -399,7 +402,7 @@ function MemberRow({ member, isCurrentUser, saving, saved, onAdminToggle, onPerm
               transform: member.role === 'admin' ? 'translateX(21px)' : 'translateX(3px)',
               boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
             }} />
-          </Switch.Root>
+          </button>
         </div>
       </div>
 
