@@ -59,7 +59,7 @@ export default function Reports() {
   // ─── Date range computation ─────────────────────────────────
   const { startDateStr, endDateStr, daysCount } = useMemo(() => {
     const today = new Date();
-    const end = new Date(today);
+    let end = new Date(today);
     end.setHours(23, 59, 59, 999);
     let start = new Date(today);
     start.setHours(0, 0, 0, 0);
