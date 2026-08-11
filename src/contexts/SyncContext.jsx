@@ -17,7 +17,7 @@ import {
   // ─── Novo sistema de caixa real ───
   fetchTodayCashier, fetchLastClosingBalance, openNewCashier, closeCashierById,
   fetchCashierHistory, insertSangria as sbInsertSangria, fetchTodaySangrias,
-  autoClosePreviousCashiers, updateCashierTotals,
+  updateCashierTotals,
 } from '../services/supabaseService';
 import { defaultCashier, defaultSplitConfig } from '../mocks/financial';
 import { syncSheetToSupabase, fetchSheetMetadataDirect } from '../services/googleSheetsSync';
@@ -510,14 +510,9 @@ export function SyncProvider({ children }) {
   /** Carrega caixa de hoje + sangrias + histórico do Supabase */
   const loadCaixaHoje = useCallback(async () => {
     try {
-      // 1. Fechar automaticamente caixas de dias anteriores que ficaram abertos
-      const { closed } = await autoClosePreviousCashiers();
-      if (closed > 0) {
-        setAutoClosed(true);
-        addLog('warning', `${closed} caixa(s) de dias anteriores fechados automaticamente.`);
-      }
+      // Auto-close agora roda server-side via Edge Function + pg_cron (23:59 diário)
 
-      // 2. Buscar caixa aberto de hoje
+      // 1. Buscar caixa aberto de hoje
       const { data: caixaHoje } = await fetchTodayCashier();
 
       if (caixaHoje) {
@@ -718,22 +713,7 @@ export function SyncProvider({ children }) {
     return { data: report, error: null };
   }, [dailySheet, sheetTransactions, cashier, todayCashier, cashierSangrias, supabaseReady, addLog]);
 
-  // ─── Virada de Dia — verificação periódica ─────────────────
-  useEffect(() => {
-    const checkTurnover = async () => {
-      if (!isSupabaseConfigured()) return;
-      const today = new Date().toISOString().split('T')[0];
-      // Fecha caixas de dias anteriores automaticamente
-      const { closed } = await autoClosePreviousCashiers();
-      if (closed > 0) {
-        setAutoClosed(true);
-        addLog('warning', `Virada de dia: ${closed} caixa(s) fechados automaticamente.`);
-        await loadCaixaHoje();
-      }
-    };
-    const timer = setInterval(checkTurnover, 60000); // verifica a cada 1 minuto
-    return () => clearInterval(timer);
-  }, [addLog, loadCaixaHoje]);
+  // ─── Virada de Dia — agora server-side via Edge Function + pg_cron ───
 
   // ─── Carregar caixa ao inicializar ─────────────────────────
   useEffect(() => {
