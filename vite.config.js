@@ -14,6 +14,12 @@ export default defineConfig({
     port: 3000,
     allowedHosts: true,
   },
+  build: {
+    sourcemap: true,
+    rollupOptions: {
+      treeshake: false,
+    },
+  },
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
