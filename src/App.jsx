@@ -1,3 +1,4 @@
+import { lazy, Suspense } from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 
 // Import AuthContext provider and ProtectedRoute
@@ -29,7 +30,9 @@ import Reports from './pages/Reports';
 import ClientBooking from './pages/ClientBooking';
 import Anamnese from './pages/Anamnese';
 import Estrategia from './pages/Estrategia';
-import GerenciarAcessos from './pages/GerenciarAcessos';
+
+// Lazy-loaded pages (separate chunks, no main-bundle init impact)
+const GerenciarAcessos = lazy(() => import('./pages/GerenciarAcessos'));
 
 // Import Sidebar component
 import Sidebar from './components/ui/sidebar';
@@ -66,7 +69,11 @@ function MainLayout() {
           <Route path="/reports" element={<Reports />} />
           <Route path="/anamnese" element={<Anamnese />} />
           <Route path="/estrategia" element={<Estrategia />} />
-          <Route path="/gerenciar-acessos" element={<GerenciarAcessos />} />
+          <Route path="/gerenciar-acessos" element={
+            <Suspense fallback={<div style={{padding:40,textAlign:'center',color:'#8C7573'}}>Carregando...</div>}>
+              <GerenciarAcessos />
+            </Suspense>
+          } />
         </Routes>
       </main>
     </div>
