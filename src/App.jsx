@@ -29,6 +29,7 @@ import Reports from './pages/Reports';
 import ClientBooking from './pages/ClientBooking';
 import Anamnese from './pages/Anamnese';
 import Estrategia from './pages/Estrategia';
+import GerenciarAcessos from './pages/GerenciarAcessos';
 
 // Import Sidebar component
 import Sidebar from './components/ui/sidebar';
@@ -65,6 +66,7 @@ function MainLayout() {
           <Route path="/reports" element={<Reports />} />
           <Route path="/anamnese" element={<Anamnese />} />
           <Route path="/estrategia" element={<Estrategia />} />
+          <Route path="/gerenciar-acessos" element={<GerenciarAcessos />} />
         </Routes>
       </main>
     </div>

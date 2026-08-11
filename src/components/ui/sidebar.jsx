@@ -18,10 +18,12 @@ import {
   LogOut,
   Sparkles,
   ClipboardCheck,
-  Target
+  Target,
+  Shield
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { fetchQueuePendingCount } from '../../services/supabaseService';
+import { supabase } from '../../lib/supabase';
 
 const menuItems = [
   { name: 'Dashboard', path: '/', icon: LayoutDashboard },
@@ -46,6 +48,22 @@ const Sidebar = () => {
   const navigate = useNavigate();
   const { user, signOut } = useAuth();
   const [pendingCount, setPendingCount] = useState(0);
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  // Check if current user is admin
+  useEffect(() => {
+    let cancelled = false;
+    if (!user?.id) { setIsAdmin(false); return; }
+    (async () => {
+      const { data } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', user.id)
+        .single();
+      if (!cancelled) setIsAdmin(data?.role === 'admin');
+    })();
+    return () => { cancelled = true; };
+  }, [user?.id]);
 
   // Poll pending messages count every 30s
   useEffect(() => {
@@ -117,6 +135,19 @@ const Sidebar = () => {
             <span className="sidebar-tooltip">{item.name}</span>
           </NavLink>
         ))}
+      {/* Admin-only menu item */}
+      {isAdmin && (
+        <NavLink
+          to="/gerenciar-acessos"
+          className={({ isActive }) => `sidebar-item${isActive ? ' active' : ''}`}
+        >
+          <span className="sidebar-item-icon">
+            <Shield className="w-5 h-5" />
+          </span>
+          <span className="sidebar-item-label">Acessos</span>
+          <span className="sidebar-tooltip">Gerenciar Acessos</span>
+        </NavLink>
+      )}
       </nav>
 
       {/* Navigation Bottom Items */}
