@@ -35,9 +35,10 @@ Deno.serve(async (req) => {
     if (openCashiers && openCashiers.length > 0) {
       for (const record of openCashiers) {
         const openingBal = Number(record.opening_balance || 0)
-        const cashIn = Number(record.total_cash_in || 0)
-        const cashOut = Number(record.total_cash_out || 0)
-        const closingBal = openingBal + cashIn - cashOut
+        // dinheiro_entradas/saidas = SOMENTE dinheiro físico (espécie)
+        const dinEntradas = Number(record.dinheiro_entradas || 0)
+        const dinSaidas = Number(record.dinheiro_saidas || record.total_cash_out || 0)
+        const closingBal = openingBal + dinEntradas - dinSaidas
 
         const { error: updateError } = await supabase
           .from('cashier_state')
@@ -56,7 +57,7 @@ Deno.serve(async (req) => {
 
         closedIds.push(record.id)
         lastClosingBalance = closingBal
-        console.log(`Closed cashier ${record.id} (date: ${record.date}) with closing_balance: ${closingBal}`)
+        console.log(`Closed cashier ${record.id} (date: ${record.date}) — opening: ${openingBal}, entradas: ${dinEntradas}, saidas: ${dinSaidas}, closing: ${closingBal}`)
       }
     }
 
@@ -96,6 +97,8 @@ Deno.serve(async (req) => {
           opened_at: new Date().toISOString(),
           closed_at: null,
           auto_closed: false,
+          dinheiro_entradas: 0,
+          dinheiro_saidas: 0,
           total_cash_in: 0,
           total_cash_out: 0,
           // legacy compat
@@ -119,6 +122,8 @@ Deno.serve(async (req) => {
           opened_at: new Date().toISOString(),
           closed_at: null,
           auto_closed: false,
+          dinheiro_entradas: 0,
+          dinheiro_saidas: 0,
           total_cash_in: 0,
           total_cash_out: 0,
         })
