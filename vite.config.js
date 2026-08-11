@@ -16,9 +16,6 @@ export default defineConfig({
   },
   build: {
     sourcemap: true,
-    rollupOptions: {
-      treeshake: false,
-    },
   },
   resolve: {
     alias: {

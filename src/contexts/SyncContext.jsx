@@ -470,6 +470,43 @@ export function SyncProvider({ children }) {
 
   // ─── Cashier actions — Sistema Real ──────────────────────────
 
+  /** Abre caixa de hoje automaticamente herdando o saldo do último fechamento ou da planilha */
+  const abrirCaixaHoje = useCallback(async (customBalance = null) => {
+    if (!requireConnection('abrir caixa')) return null;
+    try {
+      let openingBal = customBalance;
+      if (openingBal === null || openingBal === undefined || Number(openingBal) === 0) {
+        if (sheetMetadata?.fundoInicial > 0) {
+          openingBal = sheetMetadata.fundoInicial;
+        } else {
+          const { balance } = await fetchLastClosingBalance();
+          openingBal = Number(balance) || 0;
+        }
+      }
+      openingBal = Number(openingBal) || 0;
+
+      const { data, error } = await openNewCashier(openingBal);
+      if (error) {
+        addLog('error', `Erro ao abrir caixa: ${error.message || error}`);
+        return null;
+      }
+      setTodayCashier(data);
+      setCashierSangrias([]);
+      setCashier(prev => ({
+        ...prev,
+        status: 'aberto',
+        saldo: openingBal,
+        dataAbertura: new Date().toLocaleDateString('pt-BR'),
+        sangrias: [],
+      }));
+      addLog('info', `Caixa aberto — Fundo Inicial: R$ ${openingBal.toFixed(2)}`);
+      return data;
+    } catch (e) {
+      console.warn('[SyncContext] abrirCaixaHoje error:', e);
+      return null;
+    }
+  }, [requireConnection, addLog, sheetMetadata]);
+
   /** Carrega caixa de hoje + sangrias + histórico do Supabase */
   const loadCaixaHoje = useCallback(async () => {
     try {
@@ -527,43 +564,6 @@ export function SyncProvider({ children }) {
       console.warn('[SyncContext] loadCaixaHoje error:', e);
     }
   }, [addLog, abrirCaixaHoje]);
-
-  /** Abre caixa de hoje automaticamente herdando o saldo do último fechamento ou da planilha */
-  const abrirCaixaHoje = useCallback(async (customBalance = null) => {
-    if (!requireConnection('abrir caixa')) return null;
-    try {
-      let openingBal = customBalance;
-      if (openingBal === null || openingBal === undefined || Number(openingBal) === 0) {
-        if (sheetMetadata?.fundoInicial > 0) {
-          openingBal = sheetMetadata.fundoInicial;
-        } else {
-          const { balance } = await fetchLastClosingBalance();
-          openingBal = Number(balance) || 0;
-        }
-      }
-      openingBal = Number(openingBal) || 0;
-
-      const { data, error } = await openNewCashier(openingBal);
-      if (error) {
-        addLog('error', `Erro ao abrir caixa: ${error.message || error}`);
-        return null;
-      }
-      setTodayCashier(data);
-      setCashierSangrias([]);
-      setCashier(prev => ({
-        ...prev,
-        status: 'aberto',
-        saldo: openingBal,
-        dataAbertura: new Date().toLocaleDateString('pt-BR'),
-        sangrias: [],
-      }));
-      addLog('info', `Caixa aberto — Fundo Inicial: R$ ${openingBal.toFixed(2)}`);
-      return data;
-    } catch (e) {
-      console.warn('[SyncContext] abrirCaixaHoje error:', e);
-      return null;
-    }
-  }, [requireConnection, addLog, sheetMetadata]);
 
   /** Garante que o caixa está aberto antes de uma operação (auto-open silencioso) */
   const ensureCaixaAberto = useCallback(async () => {
