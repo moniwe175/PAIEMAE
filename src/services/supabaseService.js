@@ -165,7 +165,6 @@ export async function upsertSheetTransaction(st) {
   if (!isSupabaseConfigured()) return handleError('Supabase not configured');
 
   const comandaStr = st.comanda ? String(st.comanda).trim() : null;
-  const userId = st.user_id || await getUserId();
 
   const payload = {
     date_ref: st.date_ref || new Date().toISOString().split('T')[0],
@@ -189,7 +188,6 @@ export async function upsertSheetTransaction(st) {
     deleted_at: null,
   };
 
-  if (userId) payload.user_id = userId;
   if (st.id) payload.id = st.id;
   if (st.connection_id) payload.connection_id = st.connection_id;
 
@@ -201,8 +199,6 @@ export async function upsertSheetTransaction(st) {
         .select('id')
         .eq('comanda', comandaStr)
         .is('deleted_at', null);
-
-      if (userId) query = query.eq('user_id', userId);
 
       const { data: existingList } = await query.order('created_at', { ascending: false }).limit(1);
 

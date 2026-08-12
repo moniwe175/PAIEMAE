@@ -70,6 +70,7 @@ export function SyncProvider({ children }) {
   const [cashierSangrias, setCashierSangrias] = useState([]); // sangrias do dia
   const [cashierHistory, setCashierHistory] = useState([]);   // histórico 30 dias
   const [autoClosed, setAutoClosed] = useState(false);        // aviso de fechamento automático
+  const [authed, setAuthed] = useState(false);                // só sincroniza com usuário logado
 
 
   const pollTimerRef = useRef(null);
@@ -79,6 +80,18 @@ export function SyncProvider({ children }) {
   const sheetPollTimerRef = useRef(null);
   const sheetPollUrlRef = useRef(null);
 
+  // ─── Sessão: nada de sync/polling/realtime sem usuário autenticado ──
+  // Impede que visitantes anônimos (tela de login) disparem leituras da
+  // planilha, realtime ou queries — nada vaza no console de quem não logou.
+  useEffect(() => {
+    if (!isSupabaseConfigured()) return;
+    supabase.auth.getSession().then(({ data }) => setAuthed(!!data.session));
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+      setAuthed(!!session);
+    });
+    return () => sub.subscription.unsubscribe();
+  }, []);
+
   // ─── Load from Supabase on mount + connectivity monitor ────
   useEffect(() => {
     if (!isSupabaseConfigured()) {
@@ -86,6 +99,7 @@ export function SyncProvider({ children }) {
       setConnectionError('Supabase não configurado. Verifique as variáveis de ambiente.');
       return;
     }
+    if (!authed) return; // visitante anônimo: não carrega nada
 
     async function verifyConnection() {
       const { connected, error } = await checkSupabaseConnection();
@@ -144,12 +158,15 @@ export function SyncProvider({ children }) {
         }
 
         // Executar leitura inicial da planilha para carregar C1 (fundoInicial) e F1 (fundoFinal) imediatamente
-        const targetUrl = syncConfig?.sheet_url || sheetsRes.data?.[0]?.sheet_url || 'https://docs.google.com/spreadsheets/d/1uXB-p9iWev-ID7HVZVUj42FBu2J4PkWMo1cocTW2GXI/edit';
-        fetchSheetMetadataDirect(targetUrl).then(meta => {
-          if (meta && (meta.fundoInicial > 0 || meta.fundoFinal > 0)) {
-            setSheetMetadata(meta);
-          }
-        }).catch(err => console.warn('[SyncContext] Initial sheet metadata warning:', err));
+        // (URL vem somente do banco — sem ID de planilha hardcoded no bundle)
+        const targetUrl = syncConfig?.sheet_url || sheetsRes.data?.[0]?.sheet_url;
+        if (targetUrl) {
+          fetchSheetMetadataDirect(targetUrl).then(meta => {
+            if (meta && (meta.fundoInicial > 0 || meta.fundoFinal > 0)) {
+              setSheetMetadata(meta);
+            }
+          }).catch(() => {});
+        }
 
         if (logsRes.data?.length > 0) {
           const formattedLogs = logsRes.data.map(l => ({
@@ -177,21 +194,20 @@ export function SyncProvider({ children }) {
     return () => {
       if (connectionCheckRef.current) clearInterval(connectionCheckRef.current);
     };
-  }, []);
+  }, [authed]);
 
   // ─── Global Sheet Polling — roda em background independente da página ──
   // Inicia o polling automático sempre que uma planilha conectada é detectada no syncConfig.
   // Usa intervalo mais curto quando visível (20s) e mais longo em background (60s).
   useEffect(() => {
     const sheetUrl = syncConfig?.sheet_url;
-    const isConnected = syncStatus === 'connected';
+    const isConnected = authed && syncStatus === 'connected';
 
     // Parar polling anterior se a URL mudou ou desconectou
     if (sheetPollTimerRef.current && (sheetPollUrlRef.current !== sheetUrl || !isConnected)) {
       clearInterval(sheetPollTimerRef.current);
       sheetPollTimerRef.current = null;
       sheetPollUrlRef.current = null;
-      console.log('[SyncContext] Sheet polling parado.');
     }
 
     // Iniciar novo polling se conectado e com URL válida
@@ -207,7 +223,6 @@ export function SyncProvider({ children }) {
           const result = await syncSheetToSupabase(sheetUrl, { connectionId: syncConfig?.id });
           if (result.success) {
             consecutiveErrors = 0; // Reset on success
-            console.log(`[SyncContext] Auto-sync concluído: ${result.rowCount || 0} registros. Fundos C1/F1: ${result.fundoInicial}/${result.fundoFinal}`);
             setLastSyncAt(new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }));
             setSyncedRowCount(result.rowCount || 0);
 
@@ -249,8 +264,6 @@ export function SyncProvider({ children }) {
         }
       };
 
-      console.log(`[SyncContext] Iniciando sheet polling: ${VISIBLE_POLLING_MS / 1000}s (visível) / ${HIDDEN_POLLING_MS / 1000}s (background) para: ${sheetUrl}`);
-
       // Sync imediato ao carregar/conectar
       doSync();
     }
@@ -258,12 +271,12 @@ export function SyncProvider({ children }) {
     return () => {
       // Cleanup only when URL or status changes (handled above)
     };
-  }, [syncConfig?.sheet_url, syncConfig?.id, syncStatus]);
+  }, [syncConfig?.sheet_url, syncConfig?.id, syncStatus, authed]);
 
   // ─── Supabase Realtime: escuta mudanças na tabela transactions ──
   // Quando o Python sync faz upsert/delete, o frontend atualiza automaticamente
   useEffect(() => {
-    if (!isSupabaseConfigured()) return;
+    if (!isSupabaseConfigured() || !authed) return;
 
     const channel = supabase
       .channel('transactions-realtime')
@@ -288,22 +301,18 @@ export function SyncProvider({ children }) {
           }
         }
       )
-      .subscribe((status) => {
-        if (status === 'SUBSCRIBED') {
-          console.log('[SyncContext] Realtime: subscrito na tabela transactions');
-        }
-      });
+      .subscribe();
 
     realtimeChannelRef.current = channel;
 
     return () => {
       supabase.removeChannel(channel);
     };
-  }, []);
+  }, [authed]);
 
   // ─── Supabase Realtime: escuta mudanças na tabela sheet_transactions ──
   useEffect(() => {
-    if (!isSupabaseConfigured()) return;
+    if (!isSupabaseConfigured() || !authed) return;
 
     const channel = supabase
       .channel('sheet-transactions-realtime')
@@ -323,20 +332,16 @@ export function SyncProvider({ children }) {
           }
         }
       )
-      .subscribe((status) => {
-        if (status === 'SUBSCRIBED') {
-          console.log('[SyncContext] Realtime: subscrito na tabela sheet_transactions');
-        }
-      });
+      .subscribe();
 
     return () => {
       supabase.removeChannel(channel);
     };
-  }, []);
+  }, [authed]);
 
   // ─── Supabase Realtime: escuta sync_logs para mostrar status do Python ──
   useEffect(() => {
-    if (!isSupabaseConfigured()) return;
+    if (!isSupabaseConfigured() || !authed) return;
 
     const channel = supabase
       .channel('sync-logs-realtime')
@@ -361,7 +366,7 @@ export function SyncProvider({ children }) {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, []);
+  }, [authed]);
 
   // State is persisted to Supabase via the mutation helpers below.
 

@@ -282,8 +282,8 @@ function parseSheetRows(table) {
  * Funciona 100% no navegador via gviz/tq independente de Edge Function.
  */
 export async function fetchSheetMetadataDirect(sheetUrl) {
-  const defaultUrl = 'https://docs.google.com/spreadsheets/d/1uXB-p9iWev-ID7HVZVUj42FBu2J4PkWMo1cocTW2GXI/edit';
-  const urlToUse = sheetUrl || defaultUrl;
+  // URL vem somente do caller (banco) — sem ID de planilha hardcoded no bundle
+  const urlToUse = sheetUrl;
   const sheetId = extractSheetId(urlToUse);
   if (!sheetId) return { fundoInicial: 0, fundoFinal: 0 };
   const gid = extractGid(urlToUse);
@@ -304,8 +304,8 @@ export async function fetchSheetMetadataDirect(sheetUrl) {
  * Caso falhe ou esteja offline, executa a sincronização direta em JavaScript no navegador.
  */
 export async function syncSheetToSupabase(sheetUrl, options = {}) {
-  const defaultUrl = 'https://docs.google.com/spreadsheets/d/1uXB-p9iWev-ID7HVZVUj42FBu2J4PkWMo1cocTW2GXI/edit';
-  const urlToUse = sheetUrl || defaultUrl;
+  // URL vem somente do caller (banco) — sem ID de planilha hardcoded no bundle
+  const urlToUse = sheetUrl;
   const sheetId = extractSheetId(urlToUse);
   if (!sheetId) return { success: false, rowCount: 0, error: 'URL inválida: não foi possível extrair o Sheet ID' };
 
@@ -321,7 +321,6 @@ export async function syncSheetToSupabase(sheetUrl, options = {}) {
         body: { connection_id: connectionId }
       });
       if (!error && data?.success) {
-        console.log('[GoogleSheetsSync] Sincronização via Edge Function executada com sucesso:', data);
         return {
           success: true,
           rowCount: data.rowsProcessed || data.rowsInserted || 0,
@@ -366,15 +365,11 @@ export async function syncSheetToSupabase(sheetUrl, options = {}) {
     // Espelhamento perfeito: deletar registros de planilha que foram removidos do Google Sheets
     const activeComandas = sheetRows.map(r => r.comanda).filter(Boolean);
     if (activeComandas.length > 0) {
-      const userId = await getUserId();
       try {
         let deleteQuery = supabase
           .from('sheet_transactions')
           .delete()
           .eq('origin', 'planilha');
-        if (userId) {
-          deleteQuery = deleteQuery.eq('user_id', userId);
-        }
         const comandaListStr = `(${activeComandas.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')})`;
         await deleteQuery.not('comanda', 'in', comandaListStr);
       } catch (err) {
