@@ -101,7 +101,6 @@ Deno.serve(async (req) => {
       .maybeSingle()
 
     let created = false
-    let updated = false
 
     if (!targetCashier) {
       const { error: insertError } = await supabase
@@ -126,26 +125,11 @@ Deno.serve(async (req) => {
       created = true
       console.log(`Created new cashier for ${targetDate} with opening_balance: ${lastClosingBalance}`)
     } else if (targetCashier.status === 'fechado') {
-      // Target-day cashier exists but is closed — re-open it with inherited balance
-      const { error: reopenError } = await supabase
-        .from('cashier_state')
-        .update({
-          status: 'aberto',
-          opening_balance: lastClosingBalance,
-          closing_balance: null,
-          opened_at: new Date().toISOString(),
-          closed_at: null,
-          auto_closed: false,
-          dinheiro_entradas: 0,
-          dinheiro_saidas: 0,
-          total_cash_in: 0,
-          total_cash_out: 0,
-        })
-        .eq('id', targetCashier.id)
-
-      if (reopenError) throw reopenError
-      updated = true
-      console.log(`Re-opened cashier for ${targetDate} with opening_balance: ${lastClosingBalance}`)
+      // Caixa do dia-alvo já fechado (fechamento manual durante o dia):
+      // respeita o fechamento — NÃO reabre nem zera contadores.
+      // A herança de amanhã usa o closing_balance gravado; syncs tardias
+      // ainda recalculam o closing via trigger, mantendo a cadeia íntegra.
+      console.log(`Cashier for ${targetDate} already closed (manual close) — preserving as is`)
     }
 
     // ── Step 5: Verify final state ───────────────────────────────────
@@ -161,7 +145,6 @@ Deno.serve(async (req) => {
         closed: closedIds.length,
         closedIds,
         created,
-        updated,
         today,
         targetDate,
         openingBalance: lastClosingBalance,
