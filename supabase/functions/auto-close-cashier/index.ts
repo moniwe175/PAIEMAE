@@ -5,6 +5,17 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
+// Dias de atendimento: terça a sábado. Se a data cair em domingo (0)
+// ou segunda (1), avança até a próxima terça — o caixa de sábado
+// herda direto para terça, sem caixa nesses dois dias.
+function nextOpenDate(dateStr: string): string {
+  const d = new Date(`${dateStr}T00:00:00Z`)
+  while (d.getUTCDay() === 0 || d.getUTCDay() === 1) {
+    d.setUTCDate(d.getUTCDate() + 1)
+  }
+  return d.toISOString().split('T')[0]
+}
+
 Deno.serve(async (req) => {
   // Handle CORS preflight
   if (req.method === 'OPTIONS') {
@@ -18,6 +29,10 @@ Deno.serve(async (req) => {
     )
 
     const today = new Date().toISOString().split('T')[0]
+    // Dia-alvo do próximo caixa: hoje em dia de atendimento,
+    // terça-feira quando roda em domingo/segunda (caminho único,
+    // a checagem de existência abaixo garante idempotência)
+    const targetDate = nextOpenDate(today)
     const closedIds: number[] = []
     let lastClosingBalance = 0
 
@@ -36,8 +51,10 @@ Deno.serve(async (req) => {
       for (const record of openCashiers) {
         const openingBal = Number(record.opening_balance || 0)
         // dinheiro_entradas/saidas = SOMENTE dinheiro físico (espécie)
+        // ?? em vez de || : dinheiro_saidas = 0 é legítimo (dia sem sangria)
+        // e não deve cair no fallback total_cash_out
         const dinEntradas = Number(record.dinheiro_entradas || 0)
-        const dinSaidas = Number(record.dinheiro_saidas || record.total_cash_out || 0)
+        const dinSaidas = Number(record.dinheiro_saidas ?? record.total_cash_out ?? 0)
         const closingBal = openingBal + dinEntradas - dinSaidas
 
         const { error: updateError } = await supabase
@@ -76,22 +93,22 @@ Deno.serve(async (req) => {
       }
     }
 
-    // ── Step 4: Create today's cashier if it doesn't exist ───────────
-    const { data: todayCashier } = await supabase
+    // ── Step 4: Create target-day cashier if it doesn't exist ────────
+    const { data: targetCashier } = await supabase
       .from('cashier_state')
       .select('id, status')
-      .eq('date', today)
+      .eq('date', targetDate)
       .maybeSingle()
 
     let created = false
     let updated = false
 
-    if (!todayCashier) {
+    if (!targetCashier) {
       const { error: insertError } = await supabase
         .from('cashier_state')
         .insert([{
           status: 'aberto',
-          date: today,
+          date: targetDate,
           opening_balance: lastClosingBalance,
           closing_balance: null,
           opened_at: new Date().toISOString(),
@@ -101,18 +118,15 @@ Deno.serve(async (req) => {
           dinheiro_saidas: 0,
           total_cash_in: 0,
           total_cash_out: 0,
-          // legacy compat
-          saldo: lastClosingBalance,
-          horaAbertura: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
-          dataAbertura: new Date().toLocaleDateString('pt-BR'),
-          sangrias: [],
+          // Somente colunas confirmadas em produção — sem campos legados
+          // (saldo/horaAbertura/dataAbertura/sangrias) para o insert nunca falhar
         }])
 
       if (insertError) throw insertError
       created = true
-      console.log(`Created new cashier for today (${today}) with opening_balance: ${lastClosingBalance}`)
-    } else if (todayCashier.status === 'fechado') {
-      // Today's cashier exists but is closed — re-open it with inherited balance
+      console.log(`Created new cashier for ${targetDate} with opening_balance: ${lastClosingBalance}`)
+    } else if (targetCashier.status === 'fechado') {
+      // Target-day cashier exists but is closed — re-open it with inherited balance
       const { error: reopenError } = await supabase
         .from('cashier_state')
         .update({
@@ -127,11 +141,11 @@ Deno.serve(async (req) => {
           total_cash_in: 0,
           total_cash_out: 0,
         })
-        .eq('id', todayCashier.id)
+        .eq('id', targetCashier.id)
 
       if (reopenError) throw reopenError
       updated = true
-      console.log(`Re-opened today's cashier (${today}) with opening_balance: ${lastClosingBalance}`)
+      console.log(`Re-opened cashier for ${targetDate} with opening_balance: ${lastClosingBalance}`)
     }
 
     // ── Step 5: Verify final state ───────────────────────────────────
@@ -149,6 +163,7 @@ Deno.serve(async (req) => {
         created,
         updated,
         today,
+        targetDate,
         openingBalance: lastClosingBalance,
         recentCashiers: finalState,
       }),

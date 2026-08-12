@@ -392,7 +392,8 @@ export async function fetchLastClosingBalance() {
 export async function openNewCashier(openingBalance = 0) {
   if (!isSupabaseConfigured()) return handleError('Supabase not configured');
   const today = new Date().toISOString().split('T')[0];
-  const userId = await getUserId();
+  // Somente colunas confirmadas em produção (sem campos legados
+  // saldo/horaAbertura/dataAbertura/sangrias/user_id — não existem na tabela)
   const payload = {
     date: today,
     status: 'aberto',
@@ -403,13 +404,7 @@ export async function openNewCashier(openingBalance = 0) {
     opened_at: new Date().toISOString(),
     closed_at: null,
     auto_closed: false,
-    // campos legacy para compatibilidade
-    saldo: Number(openingBalance) || 0,
-    horaAbertura: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
-    dataAbertura: new Date().toLocaleDateString('pt-BR'),
-    sangrias: [],
   };
-  if (userId) payload.user_id = userId;
 
   // Verifica se já existe um registro para hoje
   const { data: existing } = await supabase
