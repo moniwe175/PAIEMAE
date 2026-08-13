@@ -109,7 +109,7 @@ AS $$
   SELECT 
     p.id,
     u.email::text,
-    COALESCE(p.nome, u.raw_user_meta_data->>'full_name', u.email)::text as full_name,
+    COALESCE(u.raw_user_meta_data->>'full_name', u.email)::text as full_name,
     COALESCE(p.role, 'staff')::text as role,
     COALESCE(p.cargo, 'Recepcionista')::text as cargo,
     COALESCE(p.permissions, '{}'::jsonb) as permissions,
