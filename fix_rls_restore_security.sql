@@ -68,6 +68,7 @@ $$;
 DO $$
 DECLARE
   t text;
+  pol record;
   tables text[] := ARRAY[
     'anamneses','appointments','campaigns','cashier_sangrias','cashier_state',
     'clients','comissoes','daily_reports','expenses','inventory',
@@ -81,7 +82,12 @@ BEGIN
   FOREACH t IN ARRAY tables LOOP
     IF to_regclass('public.' || t) IS NOT NULL THEN
       EXECUTE format('ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY', t);
-      EXECUTE format('DROP POLICY IF EXISTS %I ON public.%I', t || '_authenticated_all', t);
+      -- Remove TODAS as policies antigas (incl. anon e "somente próprios dados"),
+      -- senão visitantes anônimos ou restrições legacy continuam valendo.
+      FOR pol IN SELECT policyname FROM pg_policies WHERE schemaname = 'public' AND tablename = t
+      LOOP
+        EXECUTE format('DROP POLICY IF EXISTS %I ON public.%I', pol.policyname, t);
+      END LOOP;
       EXECUTE format(
         'CREATE POLICY %I ON public.%I FOR ALL TO authenticated USING (true) WITH CHECK (true)',
         t || '_authenticated_all', t
@@ -101,20 +107,26 @@ END $$;
 
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 
--- Limpa policies antigas (nomes conhecidos + qualquer outra)
-DROP POLICY IF EXISTS "profiles_select_own"          ON public.profiles;
-DROP POLICY IF EXISTS "profiles_admin_manage"        ON public.profiles;
-DROP POLICY IF EXISTS "profiles_admin_all"           ON public.profiles;
-DROP POLICY IF EXISTS "profiles_authenticated_all"   ON public.profiles;
-DROP POLICY IF EXISTS "erp_profiles_policy"          ON public.profiles;
+-- Remove TODAS as policies antigas de profiles (incl. "Users can update own
+-- profile", que permitiria um staff se autopromover a admin)
+DO $$
+DECLARE pol record;
+BEGIN
+  FOR pol IN SELECT policyname FROM pg_policies WHERE schemaname = 'public' AND tablename = 'profiles'
+  LOOP
+    EXECUTE format('DROP POLICY IF EXISTS %I ON public.profiles', pol.policyname);
+  END LOOP;
+END $$;
 
 -- Cada usuário lê o próprio perfil; admins leem todos
+DROP POLICY IF EXISTS "profiles_select_own_or_admin" ON public.profiles;
 CREATE POLICY "profiles_select_own_or_admin"
   ON public.profiles FOR SELECT
   TO authenticated
   USING (id = auth.uid() OR public.is_admin());
 
 -- Somente admin cria/altera/exclui perfis (é o que o Gerenciar Acessos usa)
+DROP POLICY IF EXISTS "profiles_admin_manage" ON public.profiles;
 CREATE POLICY "profiles_admin_manage"
   ON public.profiles FOR ALL
   TO authenticated
@@ -128,11 +140,15 @@ CREATE POLICY "profiles_admin_manage"
 -- ═══════════════════════════════════════════════════════════════════════
 
 DO $$
+DECLARE
+  pol record;
 BEGIN
   IF to_regclass('public.user_access_requests') IS NOT NULL THEN
     EXECUTE 'ALTER TABLE public.user_access_requests ENABLE ROW LEVEL SECURITY';
-    EXECUTE 'DROP POLICY IF EXISTS "erp_user_access_requests_policy" ON public.user_access_requests';
-    EXECUTE 'DROP POLICY IF EXISTS "user_access_requests_admin_all" ON public.user_access_requests';
+    FOR pol IN SELECT policyname FROM pg_policies WHERE schemaname = 'public' AND tablename = 'user_access_requests'
+    LOOP
+      EXECUTE format('DROP POLICY IF EXISTS %I ON public.user_access_requests', pol.policyname);
+    END LOOP;
     EXECUTE 'CREATE POLICY "user_access_requests_admin_all"
              ON public.user_access_requests FOR ALL
              TO authenticated
