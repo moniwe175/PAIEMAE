@@ -46,11 +46,11 @@ const menuItems = [
 
 const Sidebar = () => {
   const navigate = useNavigate();
-  const { user, profile, canView, signOut } = useAuth();
+  const { user, profile, checkIsAdmin, canView, signOut } = useAuth();
   const [pendingCount, setPendingCount] = useState(0);
 
-  // Somente se profile for explicitamente 'admin'
-  const isAdmin = profile?.role === 'admin';
+  // Administrador tem acesso total irrestrito
+  const isAdmin = checkIsAdmin ? checkIsAdmin() : (profile?.role === 'admin');
 
   // Poll pending messages count every 30s
   useEffect(() => {

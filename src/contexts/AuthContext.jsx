@@ -61,11 +61,20 @@ export function AuthProvider({ children }) {
     return () => subscription.unsubscribe();
   }, []);
 
+  // Helper para checar se o usuário é Administrador Principal
+  const checkIsAdmin = () => {
+    if (!user) return false;
+    // Se no Supabase a role for 'admin' OU se for a conta do dono/admin principal
+    if (profile?.role === 'admin') return true;
+    if (user.email === 'iurydacosta@centaurotelecom.com.br' || user.email?.includes('iurydacosta') || user.email?.includes('lurycauamjesus')) return true;
+    return false;
+  };
+
   // Helper para checar se o usuário tem permissão de visualizar uma aba/setor
   const canView = (moduleKey) => {
     if (!user) return false;
     // Administrador tem acesso irrestrito a tudo
-    if (profile?.role === 'admin') return true;
+    if (checkIsAdmin()) return true;
     
     // Se o perfil for staff/colaborador com cargo atribuído
     if (profile?.role === 'staff' || profile?.permissions) {
@@ -75,14 +84,13 @@ export function AuthProvider({ children }) {
       return typeof modPerm === 'boolean' ? modPerm : !!modPerm.ver;
     }
 
-    // Se ainda não carregou o perfil, mantém por segurança até carregar
     return false;
   };
 
   // Helper para checar se o usuário tem permissão de editar num setor
   const canEdit = (moduleKey) => {
     if (!user) return false;
-    if (profile?.role === 'admin') return true; 
+    if (checkIsAdmin()) return true; 
     
     if (profile?.role === 'staff' || profile?.permissions) {
       const modPerm = permissions[moduleKey];
@@ -133,6 +141,7 @@ export function AuthProvider({ children }) {
       loading,
       canView,
       canEdit,
+      checkIsAdmin,
       reloadProfile: () => loadProfileData(user?.id),
       signIn,
       signUp,
