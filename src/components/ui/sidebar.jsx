@@ -49,7 +49,7 @@ const Sidebar = () => {
   const { user, profile, canView, signOut } = useAuth();
   const [pendingCount, setPendingCount] = useState(0);
 
-  const isAdmin = !profile || profile?.role === 'admin';
+  const isAdmin = profile?.role === 'admin';
 
   // Poll pending messages count every 30s
   useEffect(() => {
