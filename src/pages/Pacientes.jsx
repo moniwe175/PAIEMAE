@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { useAuth } from '../contexts/AuthContext';
 import { useLocation } from 'react-router-dom';
 import { Users, Plus, Search, Phone, Calendar, FileText, Star, XCircle, ChevronRight, Mail, Instagram, Upload, Trash2, AlertTriangle } from 'lucide-react';
 import { fetchClients, insertClient, deleteClient, updateClient, fetchAppointments } from '../services/supabaseService';
@@ -111,6 +112,7 @@ function PacienteModal({ onClose, onSave, initialData }) {
 }
 
 export default function Pacientes() {
+  const { canEdit } = useAuth();
   const location = useLocation();
   const [pacientes, setPacientes] = useState([]);
   const [modal, setModal] = useState(false);
@@ -456,7 +458,9 @@ export default function Pacientes() {
         <div className="content-header">
           <button className="btn btn-secondary"><Upload />Importar Planilha</button>
           <input type="file" accept=".csv" style={{display:'none'}} id="import-csv" onChange={handleImportCSV} />
-          <button className="btn btn-primary" onClick={()=>setModal(true)}><Plus />Novo Paciente</button>
+          {canEdit('pacientes') && (
+            <button className="btn btn-primary" onClick={()=>setModal(true)}><Plus />Novo Paciente</button>
+          )}
         </div>
 
         {modal && <PacienteModal onClose={()=>setModal(false)} onSave={handleSaveNovoPaciente} />}

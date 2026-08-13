@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useAuth } from '../contexts/AuthContext';
 import { ShoppingBag, Plus, XCircle, DollarSign, Clock, Tag, Trash2, AlertOctagon, Edit3 } from 'lucide-react';
 import { fetchPackages, insertPackage, updatePackage, deletePackage } from '../services/supabaseService';
 import { getCurrentUser } from '../lib/supabase';
@@ -120,6 +121,7 @@ function DeleteConfirmModal({ pacote, onClose, onConfirm }) {
 }
 
 export default function Packages() {
+  const { canEdit } = useAuth();
   const [modal, setModal] = useState(false);
   const [editTarget, setEditTarget] = useState(null);
   const [pacotes, setPacotes] = useState([]);
@@ -208,7 +210,9 @@ export default function Packages() {
           <h1 className="page-title">Pacotes</h1>
           <p className="page-subtitle">{pacotes.length} pacote(s) cadastrado(s)</p>
         </div>
-        <button className="btn btn-primary" onClick={()=>setModal(true)}><Plus />Novo Pacote</button>
+        {canEdit('pacotes') && (
+          <button className="btn btn-primary" onClick={()=>setModal(true)}><Plus />Novo Pacote</button>
+        )}
       </div>
 
       <div className="grid-4 section-gap">

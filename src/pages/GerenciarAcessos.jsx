@@ -86,10 +86,8 @@ const INITIAL_ROLES = [
 export default function GerenciarAcessos() {
   const { user } = useAuth();
   const [members, setMembers] = useState([]);
-  const [roles, setRoles] = useState(() => {
-    const saved = localStorage.getItem('paiemae_custom_roles_v2');
-    return saved ? JSON.parse(saved) : INITIAL_ROLES;
-  });
+  // Cargos vêm da tabela public.roles (fonte da verdade no banco)
+  const [roles, setRoles] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(null);
   const [savedMemberId, setSavedMemberId] = useState(null);
@@ -102,9 +100,22 @@ export default function GerenciarAcessos() {
   const [roleFormName, setRoleFormName] = useState('');
   const [roleFormPerms, setRoleFormPerms] = useState({});
 
-  useEffect(() => {
-    localStorage.setItem('paiemae_custom_roles_v2', JSON.stringify(roles));
-  }, [roles]);
+  // Carrega cargos da tabela roles (com fallback para seed local se a tabela ainda não existir)
+  const loadRoles = async () => {
+    const { data, error: rolesError } = await supabase
+      .from('roles')
+      .select('id, name, description, permissions');
+    if (rolesError) {
+      if (/roles/.test(rolesError.message)) {
+        setRoles(INITIAL_ROLES);
+        setError('Tabela "roles" não encontrada no banco. Execute cargos_permissions_schema.sql no SQL Editor do Supabase.');
+      } else {
+        setError(rolesError.message);
+      }
+      return;
+    }
+    setRoles((data || []).map(r => ({ id: r.id, name: r.name, description: r.description, permissions: r.permissions || {} })));
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -125,6 +136,7 @@ export default function GerenciarAcessos() {
         }
 
         setIsAdmin(true);
+        await loadRoles();
         const { data, error: rpcError } = await supabase.rpc('list_team_members');
         if (cancelled) return;
 
@@ -206,6 +218,14 @@ export default function GerenciarAcessos() {
     const updatedPerms = roleFormPerms;
 
     if (editingRole) {
+      const { error: updError } = await supabase
+        .from('roles')
+        .update({ name: updatedRoleName, permissions: updatedPerms })
+        .eq('id', editingRole.id);
+      if (updError) {
+        setError(updError.message);
+        return;
+      }
       setRoles(prev => prev.map(r => r.id === editingRole.id ? {
         ...r,
         name: updatedRoleName,
@@ -222,20 +242,40 @@ export default function GerenciarAcessos() {
             .eq('id', m.id);
         }
       }
+      // Reflete o novo cargo/permissoes na lista local de membros
+      setMembers(prev => prev.map(m =>
+        (m.assignedRole === editingRole.name || m.cargo === editingRole.name) && m.role !== 'admin'
+          ? { ...m, cargo: updatedRoleName, permissions: updatedPerms, assignedRole: updatedRoleName }
+          : m
+      ));
     } else {
-      const newRole = {
-        id: `role_${Date.now()}`,
-        name: updatedRoleName,
-        count: 0,
-        permissions: updatedPerms
-      };
-      setRoles(prev => [...prev, newRole]);
+      const newId = `role_${Date.now()}`;
+      const { error: insError } = await supabase
+        .from('roles')
+        .insert({ id: newId, name: updatedRoleName, permissions: updatedPerms });
+      if (insError) {
+        setError(insError.message);
+        return;
+      }
+      setRoles(prev => [...prev, { id: newId, name: updatedRoleName, permissions: updatedPerms }]);
     }
     handleCloseModal();
   };
 
-  const handleDeleteRole = (roleId) => {
+  const handleDeleteRole = async (roleId) => {
+    const role = roles.find(r => r.id === roleId);
+    if (!role) return;
+    const inUse = members.some(m => m.role !== 'admin' && (m.assignedRole === role.name || m.cargo === role.name));
+    if (inUse) {
+      alert('Este cargo não pode ser excluído: há colaboradores vinculados a ele.');
+      return;
+    }
     if (window.confirm('Tem certeza que deseja excluir este cargo?')) {
+      const { error: delError } = await supabase.from('roles').delete().eq('id', roleId);
+      if (delError) {
+        setError(delError.message);
+        return;
+      }
       setRoles(prev => prev.filter(r => r.id !== roleId));
       handleCloseModal();
     }
@@ -286,6 +326,7 @@ export default function GerenciarAcessos() {
   const reload = async () => {
     setLoading(true);
     setError(null);
+    await loadRoles();
     const { data, error: rpcError } = await supabase.rpc('list_team_members');
     if (rpcError) setError(rpcError.message);
     else setMembers((data || []).map(m => ({
@@ -436,7 +477,10 @@ export default function GerenciarAcessos() {
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--text-muted)', fontSize: 13 }}>
               <Users style={{ width: 14, height: 14 }} />
-              <span>{role.count} {role.count === 1 ? 'colaborador' : 'colaboradores'}</span>
+              <span>
+                {members.filter(m => m.role !== 'admin' && (m.assignedRole === role.name || m.cargo === role.name)).length}{' '}
+                {members.filter(m => m.role !== 'admin' && (m.assignedRole === role.name || m.cargo === role.name)).length === 1 ? 'colaborador' : 'colaboradores'}
+              </span>
             </div>
           </div>
         ))}

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useAuth } from '../contexts/AuthContext';
 import { Package, Plus, Search, AlertTriangle, XCircle, TrendingDown, Trash2, AlertOctagon, MoreVertical, Edit2, ExternalLink, ArrowUp, ArrowDown } from 'lucide-react';
 import { fetchInventory, insertInventoryItem, deleteInventoryItem, updateInventoryItem } from '../services/supabaseService';
 import { getCurrentUser } from '../lib/supabase';
@@ -294,6 +295,7 @@ function DeleteConfirmModal({ produto, onClose, onConfirm }) {
 }
 
 export default function Inventory() {
+  const { canEdit } = useAuth();
   const [modal, setModal] = useState(false);
   const [editTarget, setEditTarget] = useState(null);
   const [entradaTarget, setEntradaTarget] = useState(null);
@@ -395,7 +397,9 @@ export default function Inventory() {
           <button className="btn btn-ghost" style={{padding: '10px 16px', borderRadius: 12, border: '1.5px solid #E5E7EB', background: '#fff', fontSize: 14, fontWeight: 600, color: '#374151', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8}} onClick={() => alert('Em breve: Relatório de Movimentações')}>
             <ArrowDown style={{width: 16, height: 16}} /> Movimentação
           </button>
-          <button className="btn btn-primary" onClick={() => setModal(true)}><Plus />Novo Produto</button>
+          {canEdit('estoque') && (
+            <button className="btn btn-primary" onClick={() => setModal(true)}><Plus />Novo Produto</button>
+          )}
         </div>
       </div>
 

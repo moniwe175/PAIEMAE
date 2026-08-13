@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useAuth } from '../contexts/AuthContext';
 import {
   Scissors, Plus, Search, XCircle, Clock, DollarSign,
   Edit3, Trash2, CheckCircle, Users, X, UserPlus, UserMinus, FileText, AlertTriangle
@@ -336,6 +337,7 @@ function FichaPanel({ servico, onSaveFichas }) {
 
 // ─── Main Component ─────────────────────────────────────────
 export default function Services() {
+  const { canEdit } = useAuth();
   const { servicos, addServico, updateServico, removeServico, toggleAtivo, setFichasObrigatorias } = useServicos();
   const { profissionais, addServicoToProfissional, removeServicoFromProfissional } = useProfissionais();
 
@@ -405,7 +407,9 @@ export default function Services() {
           <h1 className="page-title">Serviços</h1>
           <p className="page-subtitle">{servicos.length} serviços cadastrados</p>
         </div>
-        <button className="btn btn-primary" onClick={() => setEditModal('new')}><Plus />Novo Serviço</button>
+        {canEdit('servicos') && (
+          <button className="btn btn-primary" onClick={() => setEditModal('new')}><Plus />Novo Serviço</button>
+        )}
       </div>
 
       {/* Stats */}

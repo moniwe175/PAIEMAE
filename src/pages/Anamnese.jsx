@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
+import { useAuth } from '../contexts/AuthContext';
 import {
   ClipboardList, Search, Plus, ChevronRight, ChevronLeft, User,
   Heart, AlertTriangle, Leaf, Target, Printer, Save, CheckCircle,
@@ -1184,6 +1185,7 @@ function ViewFicha({ paciente, ficha, onEdit, onClose, onConfirmSave, isSaving }
 
 // ─── MAIN PAGE ─────────────────────────────────────────────────────────────────
 export default function Anamnese() {
+  const { canEdit } = useAuth();
   const [pacientes, setPacientes] = useState([]);
   const [anamneses, setAnamneses] = useState({}); // { clientId: { tipoFicha: fichaData } }
   const [loading, setLoading] = useState(true);
@@ -1442,17 +1444,21 @@ export default function Anamnese() {
                     <button onClick={() => openView(p, tipo)} title={`Visualizar ${tipo}`} style={{ width: 28, height: 28, borderRadius: 8, border: '1px solid #E5E7EB', background: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                       <Eye style={{ width: 12, height: 12, color: '#6B7280' }} />
                     </button>
+                {canEdit('anamnese') && (
                     <button onClick={() => openForm(p, true, tipo)} title={`Editar ${tipo}`} style={{ width: 28, height: 28, borderRadius: 8, border: '1px solid #E5E7EB', background: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                       <Edit3 style={{ width: 12, height: 12, color: '#6B7280' }} />
                     </button>
+                )}
+                {canEdit('anamnese') && (
                     <button onClick={() => handleDelete(p.id, tipo)} title={`Excluir ${tipo}`} style={{ width: 28, height: 28, borderRadius: 8, border: '1px solid #FCA5A5', background: '#FFF5F5', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                       <Trash2 style={{ width: 12, height: 12, color: '#EF4444' }} />
                     </button>
+                )}
                   </div>
                 ))}
                 
                 {/* Botão adicionar outras fichas */}
-                {tiposFaltantes.length > 0 && (
+                {canEdit('anamnese') && tiposFaltantes.length > 0 && (
                   <button
                     onClick={() => setShowTypeModal(p)}
                     style={{

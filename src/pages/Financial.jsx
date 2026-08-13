@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect } from 'react';
+import { useAuth } from '../contexts/AuthContext';
 import {
   DollarSign, Plus, XCircle, FileSpreadsheet, Link2, Wallet,
   Printer, Lock, Unlock, AlertTriangle, Clock, CheckCircle, X,
@@ -56,6 +57,7 @@ function normalizeTx(t) {
 }
 
 export default function Financial() {
+  const { canEdit } = useAuth();
   const {
     transactions, addTransaction,
     expenses, addExpense, removeExpense,
@@ -1261,9 +1263,11 @@ export default function Financial() {
                   <Receipt style={{ width: 14, height: 14, color: '#999', marginRight: 6 }} />
                   <input type="text" placeholder="Buscar..." style={{ border: 'none', outline: 'none', background: 'transparent', fontSize: 13, width: 180, color: 'var(--text-dark)' }} />
                 </div>
-                <button className="btn btn-primary btn-sm" onClick={() => setDespesaModal(true)}>
-                  <Plus style={{ width: 12, height: 12 }} />Nova Despesa
-                </button>
+                {canEdit('financeiro') && (
+                  <button className="btn btn-primary btn-sm" onClick={() => setDespesaModal(true)}>
+                    <Plus style={{ width: 12, height: 12 }} />Nova Despesa
+                  </button>
+                )}
               </div>
             </div>
             <div className="table-wrapper">

@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useAuth } from '../contexts/AuthContext';
 import {
   Zap, Plus, XCircle, Phone, Mail, Award, Calendar,
   Edit3, Trash2, CheckCircle, Scissors, X, ChevronDown, UserCheck, Clock
@@ -333,6 +334,7 @@ function AccessRequestsManager() {
 
 // ─── Main Component ─────────────────────────────────────────
 export default function Equipe() {
+  const { canEdit } = useAuth();
   const {
     profissionais,
     addProfissional,
@@ -378,9 +380,11 @@ export default function Equipe() {
           <h1 className="page-title">Equipe</h1>
           <p className="page-subtitle">{profissionais.length} profissionais cadastrados</p>
         </div>
-        <button className="btn btn-primary" onClick={() => setEditModal('new')}>
-          <Plus />Novo Profissional
-        </button>
+        {canEdit('equipe') && (
+          <button className="btn btn-primary" onClick={() => setEditModal('new')}>
+            <Plus />Novo Profissional
+          </button>
+        )}
       </div>
 
       {/* Gerenciador de Solicitações de Acesso Pendentes */}
@@ -472,9 +476,11 @@ export default function Equipe() {
         <div style={{ textAlign: 'center', padding: 60, color: 'var(--text-muted)' }}>
           <Scissors style={{ width: 40, height: 40, marginBottom: 12, opacity: 0.3 }} />
           <p style={{ fontSize: 14 }}>Nenhum profissional cadastrado</p>
-          <button className="btn btn-primary" style={{ marginTop: 12 }} onClick={() => setEditModal('new')}>
-            <Plus />Cadastrar primeiro profissional
-          </button>
+          {canEdit('equipe') && (
+            <button className="btn btn-primary" style={{ marginTop: 12 }} onClick={() => setEditModal('new')}>
+              <Plus />Cadastrar primeiro profissional
+            </button>
+          )}
         </div>
       )}
     </div>

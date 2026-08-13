@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react';
+import { useAuth } from '../contexts/AuthContext';
 import {
   Coins, Plus, XCircle, CheckCircle, User, DollarSign, Search,
   FileSpreadsheet, TrendingUp, Clock, Filter, AlertTriangle, Percent,
@@ -221,6 +222,7 @@ function ComissaoModal({ onClose, onSave, profissionais, sheetServicosByProf, sp
 // ─── Main Component ───────────────────────────────────────────
 
 export default function Comissoes() {
+  const { canEdit } = useAuth();
   const {
     comissoes, addComissao, removeComissao, updateComissaoStatus,
     splitConfig, supabaseConnected, connectionError, dailySheet,
@@ -349,7 +351,9 @@ export default function Comissoes() {
           <h1 className="page-title">Comissões</h1>
           <p className="page-subtitle">{allComissoes.length} comissões · {pendentesCount} pendentes</p>
         </div>
-        <button className="btn btn-primary" onClick={() => setModal(true)}><Plus />Nova Comissão</button>
+        {canEdit('comissoes') && (
+          <button className="btn btn-primary" onClick={() => setModal(true)}><Plus />Nova Comissão</button>
+        )}
       </div>
 
       {/* Supabase warning */}

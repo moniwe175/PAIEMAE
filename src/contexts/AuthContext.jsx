@@ -64,10 +64,8 @@ export function AuthProvider({ children }) {
   // Helper para checar se o usuário é Administrador Principal
   const checkIsAdmin = () => {
     if (!user) return false;
-    // Se no Supabase a role for 'admin' OU se for a conta do dono/admin principal
-    if (profile?.role === 'admin') return true;
-    if (user.email === 'iurydacosta@centaurotelecom.com.br' || user.email?.includes('iurydacosta') || user.email?.includes('lurycauamjesus')) return true;
-    return false;
+    // Fonte da verdade: coluna role no banco (profiles.role = 'admin')
+    return profile?.role === 'admin';
   };
 
   // Helper para checar se o usuário tem permissão de visualizar uma aba/setor

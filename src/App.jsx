@@ -4,6 +4,7 @@ import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 // Import AuthContext provider and ProtectedRoute
 import { AuthProvider } from './contexts/AuthContext';
 import ProtectedRoute from './components/auth/ProtectedRoute';
+import ModuleGate from './components/auth/ModuleGate';
 import ErrorBoundary from './components/ErrorBoundary';
 
 // Import SyncContext provider
@@ -52,27 +53,29 @@ function MainLayout() {
       <Sidebar />
       <main className="main-content">
         <Routes>
-          <Route path="/" element={<Dashboard />} />
-          <Route path="/agenda" element={<Agenda />} />
-          <Route path="/pacientes" element={<Pacientes />} />
+          <Route path="/" element={<ModuleGate module="dashboard"><Dashboard /></ModuleGate>} />
+          <Route path="/agenda" element={<ModuleGate module="agenda"><Agenda /></ModuleGate>} />
+          <Route path="/pacientes" element={<ModuleGate module="pacientes"><Pacientes /></ModuleGate>} />
           <Route path="/clients" element={<Clients />} />
-          <Route path="/kanban" element={<Kanban />} />
-          <Route path="/financial" element={<Financial />} />
-          <Route path="/comissoes" element={<Comissoes />} />
-          <Route path="/inventory" element={<Inventory />} />
-          <Route path="/services" element={<Services />} />
-          <Route path="/packages" element={<Packages />} />
-          <Route path="/equipe" element={<Equipe />} />
-          <Route path="/marketing" element={<Marketing />} />
-          <Route path="/motor-marketing" element={<MotorMarketing />} />
-          <Route path="/integration" element={<Integration />} />
-          <Route path="/reports" element={<Reports />} />
-          <Route path="/anamnese" element={<Anamnese />} />
-          <Route path="/estrategia" element={<Estrategia />} />
+          <Route path="/kanban" element={<ModuleGate module="tarefas"><Kanban /></ModuleGate>} />
+          <Route path="/financial" element={<ModuleGate module="financeiro"><Financial /></ModuleGate>} />
+          <Route path="/comissoes" element={<ModuleGate module="comissoes"><Comissoes /></ModuleGate>} />
+          <Route path="/inventory" element={<ModuleGate module="estoque"><Inventory /></ModuleGate>} />
+          <Route path="/services" element={<ModuleGate module="servicos"><Services /></ModuleGate>} />
+          <Route path="/packages" element={<ModuleGate module="pacotes"><Packages /></ModuleGate>} />
+          <Route path="/equipe" element={<ModuleGate module="equipe"><Equipe /></ModuleGate>} />
+          <Route path="/marketing" element={<ModuleGate module="marketing"><Marketing /></ModuleGate>} />
+          <Route path="/motor-marketing" element={<ModuleGate module="motor"><MotorMarketing /></ModuleGate>} />
+          <Route path="/integration" element={<ModuleGate module="integracoes"><Integration /></ModuleGate>} />
+          <Route path="/reports" element={<ModuleGate module="relatorios"><Reports /></ModuleGate>} />
+          <Route path="/anamnese" element={<ModuleGate module="anamnese"><Anamnese /></ModuleGate>} />
+          <Route path="/estrategia" element={<ModuleGate module="estrategia"><Estrategia /></ModuleGate>} />
           <Route path="/gerenciar-acessos" element={
-            <Suspense fallback={<div style={{padding:40,textAlign:'center',color:'#8C7573'}}>Carregando...</div>}>
-              <GerenciarAcessos />
-            </Suspense>
+            <ModuleGate adminOnly>
+              <Suspense fallback={<div style={{padding:40,textAlign:'center',color:'#8C7573'}}>Carregando...</div>}>
+                <GerenciarAcessos />
+              </Suspense>
+            </ModuleGate>
           } />
         </Routes>
       </main>

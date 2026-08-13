@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect, useCallback, useRef } from 'react';
+import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import {
   ChevronLeft, ChevronRight, Plus, Star, XCircle, CheckCircle,
@@ -1288,6 +1289,7 @@ function AppointmentCard({ apt, prof, onClick, col, totalCols }) {
 // ═══════════════════════════════════════════════════════════════
 export default function Agenda() {
   const { profissionais } = useProfissionais();
+  const { canEdit } = useAuth();
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [agendamentos, setAgendamentos] = useState([]);
   const [bloqueios, setBloqueios] = useState([]);
@@ -1486,17 +1488,21 @@ export default function Agenda() {
             ))}
           </div>
           {/* Bloquear Horário */}
+          {canEdit('agenda') && (
           <button onClick={() => openBloqueio()} style={{ background: '#F3F4F6', color: '#374151', border: '1px solid #E5E7EB', borderRadius: 10, padding: '8px 14px', fontSize: 13, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5, transition: 'all 0.12s' }}
             onMouseEnter={e => { e.currentTarget.style.background = '#E5E7EB'; }}
             onMouseLeave={e => { e.currentTarget.style.background = '#F3F4F6'; }}>
             <Ban style={{ width: 14, height: 14 }} />Ausência
           </button>
+          )}
           {/* Novo Agendamento */}
+          {canEdit('agenda') && (
           <button onClick={() => openNew()} style={{ background: 'linear-gradient(135deg,#C73B6D,#9B2C50)', color: '#fff', border: 'none', borderRadius: 10, padding: '8px 16px', fontSize: 13, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, boxShadow: '0 3px 10px rgba(199,59,109,0.35)', transition: 'transform 0.12s,box-shadow 0.12s' }}
             onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-1px)'; e.currentTarget.style.boxShadow = '0 6px 18px rgba(199,59,109,0.45)'; }}
             onMouseLeave={e => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = '0 3px 10px rgba(199,59,109,0.35)'; }}>
             <Plus style={{ width: 15, height: 15 }} />Novo Agendamento
           </button>
+          )}
         </div>
       </div>
 
