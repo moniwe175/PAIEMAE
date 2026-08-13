@@ -81,6 +81,14 @@ HAVING COUNT(*) > 1;
 -- SEÇÃO 2: Criar unique constraint parcial
 -- ═══════════════════════════════════════════════════════════════════════════
 
+-- SEÇÃO 1.5: Garantir que a coluna user_id existe
+-- O Web App associa cada linha da planilha ao usuário dono (SHEET_USER_ID).
+-- Se a coluna já existir, nada acontece (IF NOT EXISTS).
+
+ALTER TABLE public.sheet_transactions
+  ADD COLUMN IF NOT EXISTS user_id uuid;
+
+
 -- Drop se já existir (para re-execuções seguras)
 DROP INDEX IF EXISTS public.idx_sheet_tx_unique_comanda_user;
 

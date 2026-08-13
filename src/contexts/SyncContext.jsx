@@ -20,7 +20,8 @@ import {
   updateCashierTotals,
 } from '../services/supabaseService';
 import { defaultCashier, defaultSplitConfig } from '../mocks/financial';
-import { syncSheetToSupabase, fetchSheetMetadataDirect } from '../services/googleSheetsSync';
+// Sincronização da planilha é server-side (Apps Script + Edge Function).
+// O frontend apenas consome sheet_transactions via Supabase (select + realtime).
 
 const SyncContext = createContext(null);
 
@@ -34,15 +35,6 @@ const defaultSyncConfig = {
   googleClientId: '',
   googleApiKey: '',
 };
-
-// Polling intervals for sheet sync:
-// - Visible tab: 20s — fast enough for near-real-time updates without overloading
-//   the Google Sheets gviz endpoint (no strict rate limit, but 20s balances
-//   freshness with network economy).
-// - Hidden tab: 60s — keeps background sync alive so data is ready when the user
-//   returns, without wasting bandwidth or hitting the API unnecessarily.
-const VISIBLE_POLLING_MS = 20_000;
-const HIDDEN_POLLING_MS  = 60_000;
 
 export function SyncProvider({ children }) {
   const [transactions, setTransactions] = useState([]);
@@ -77,8 +69,6 @@ export function SyncProvider({ children }) {
   const countdownTimerRef = useRef(null);
   const connectionCheckRef = useRef(null);
   const realtimeChannelRef = useRef(null);
-  const sheetPollTimerRef = useRef(null);
-  const sheetPollUrlRef = useRef(null);
 
   // ─── Sessão: nada de sync/polling/realtime sem usuário autenticado ──
   // Impede que visitantes anônimos (tela de login) disparem leituras da
@@ -157,16 +147,8 @@ export function SyncProvider({ children }) {
           }
         }
 
-        // Executar leitura inicial da planilha para carregar C1 (fundoInicial) e F1 (fundoFinal) imediatamente
-        // (URL vem somente do banco — sem ID de planilha hardcoded no bundle)
-        const targetUrl = syncConfig?.sheet_url || sheetsRes.data?.[0]?.sheet_url;
-        if (targetUrl) {
-          fetchSheetMetadataDirect(targetUrl).then(meta => {
-            if (meta && (meta.fundoInicial > 0 || meta.fundoFinal > 0)) {
-              setSheetMetadata(meta);
-            }
-          }).catch(() => {});
-        }
+        // Fundos (inicial/final) agora vêm do banco (cashier_state / abertura do caixa).
+        // Nada é lido diretamente da planilha no navegador.
 
         if (logsRes.data?.length > 0) {
           const formattedLogs = logsRes.data.map(l => ({
@@ -196,82 +178,10 @@ export function SyncProvider({ children }) {
     };
   }, [authed]);
 
-  // ─── Global Sheet Polling — roda em background independente da página ──
-  // Inicia o polling automático sempre que uma planilha conectada é detectada no syncConfig.
-  // Usa intervalo mais curto quando visível (20s) e mais longo em background (60s).
-  useEffect(() => {
-    const sheetUrl = syncConfig?.sheet_url;
-    const isConnected = authed && syncStatus === 'connected';
-
-    // Parar polling anterior se a URL mudou ou desconectou
-    if (sheetPollTimerRef.current && (sheetPollUrlRef.current !== sheetUrl || !isConnected)) {
-      clearInterval(sheetPollTimerRef.current);
-      sheetPollTimerRef.current = null;
-      sheetPollUrlRef.current = null;
-    }
-
-    // Iniciar novo polling se conectado e com URL válida
-    if (isConnected && sheetUrl && !sheetPollTimerRef.current) {
-      sheetPollUrlRef.current = sheetUrl;
-
-      let consecutiveErrors = 0; // Track consecutive failures to avoid log spam
-
-      const doSync = async () => {
-        const isHidden = typeof document !== 'undefined' && document.visibilityState !== 'visible';
-
-        try {
-          const result = await syncSheetToSupabase(sheetUrl, { connectionId: syncConfig?.id });
-          if (result.success) {
-            consecutiveErrors = 0; // Reset on success
-            setLastSyncAt(new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }));
-            setSyncedRowCount(result.rowCount || 0);
-
-            if (result.fundoInicial !== undefined) {
-              setSheetMetadata({
-                fundoInicial: Number(result.fundoInicial) || 0,
-                fundoFinal: Number(result.fundoFinal) || 0,
-              });
-            }
-
-            // Atualização imediata do estado local com os dados mais recentes do Supabase
-            const [stRes, summaryRes] = await Promise.all([
-              sbFetchSheetTransactions(),
-              sbFetchSheetSummary(),
-            ]);
-            if (!stRes.error && stRes.data) setSheetTransactions(stRes.data);
-            if (!summaryRes.error && summaryRes.data) setSheetSummary(summaryRes.data);
-          } else {
-            // sync returned { success: false } — count error but don't break the loop
-            consecutiveErrors++;
-            if (consecutiveErrors <= 3) {
-              console.warn(`[SyncContext] Sheet sync retornou falha (${consecutiveErrors}x):`, result.error);
-            }
-          }
-
-          // Re-agendar com o intervalo correto (pode ter mudado de visible→hidden ou vice-versa)
-          if (sheetPollTimerRef.current) clearInterval(sheetPollTimerRef.current);
-          sheetPollTimerRef.current = setInterval(doSync, currentInterval);
-        } catch (e) {
-          // Error handling: log only the first few consecutive errors to avoid console spam,
-          // then log every 10th error. Never break the polling loop.
-          consecutiveErrors++;
-          if (consecutiveErrors <= 3 || consecutiveErrors % 10 === 0) {
-            console.warn(`[SyncContext] Erro no sheet polling (${consecutiveErrors}x consecutivos):`, e?.message);
-          }
-          // Re-agendar mesmo com erro — polling nunca para
-          if (sheetPollTimerRef.current) clearInterval(sheetPollTimerRef.current);
-          sheetPollTimerRef.current = setInterval(doSync, currentInterval);
-        }
-      };
-
-      // Sync imediato ao carregar/conectar
-      doSync();
-    }
-
-    return () => {
-      // Cleanup only when URL or status changes (handled above)
-    };
-  }, [syncConfig?.sheet_url, syncConfig?.id, syncStatus, authed]);
+  // ─── Sheet sync: server-side ───────────────────────────────
+  // A planilha é sincronizada pelo Google Apps Script (trigger onEdit + horário)
+  // e pode ser disparada manualmente via Edge Function "sync-google-sheet".
+  // As atualizações chegam aqui pelo realtime de sheet_transactions (abaixo).
 
   // ─── Supabase Realtime: escuta mudanças na tabela transactions ──
   // Quando o Python sync faz upsert/delete, o frontend atualiza automaticamente

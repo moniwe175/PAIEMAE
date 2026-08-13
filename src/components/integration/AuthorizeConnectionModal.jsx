@@ -19,11 +19,11 @@ export default function AuthorizeConnectionModal({ sheet, onClose, onAuthorized 
   const providerColor = isGoogle ? '#0F9D58' : '#185ABD';
 
   const actions = [
-    { text: `Ler os dados da planilha a cada ${sheet.pollingInterval || 60} segundos`, warn: false },
+    { text: 'Receber atualizações da planilha em tempo real (server-side)', warn: false },
     { text: 'Importar transações para o módulo Financeiro', warn: false },
     { text: 'Atualizar KPIs e gráficos do Dashboard automaticamente', warn: false },
-    { text: 'Evitar duplicação usando ID único por linha', warn: false },
-    { text: 'Planilha deve estar compartilhada como "qualquer pessoa com o link"', warn: true },
+    { text: 'Evitar duplicação usando ID único por linha (comanda)', warn: false },
+    { text: 'A planilha pode ficar PRIVADA — a leitura é feita pelo Apps Script com sua conta Google', warn: true },
   ];
 
   const handleAuthorize = async () => {
@@ -39,7 +39,6 @@ export default function AuthorizeConnectionModal({ sheet, onClose, onAuthorized 
         pollingInterval: sheet.pollingInterval || 60,
         range: sheet.range || 'A1:Z1000',
         sheet_url: sheet.url,
-        googleApiKey: import.meta.env.VITE_GOOGLE_API_KEY || '',
       });
 
       // 2. Sincronizar dados agora se for Google Sheets e tiver URL
@@ -180,7 +179,8 @@ export default function AuthorizeConnectionModal({ sheet, onClose, onAuthorized 
         }}>
           <Shield style={{ width: 14, height: 14, color: 'var(--info)', flexShrink: 0 }} />
           <span style={{ fontSize: 11, color: 'var(--info)', lineHeight: 1.5 }}>
-            A planilha precisa estar compartilhada com "Qualquer pessoa com o link pode visualizar".
+            Conexão segura: a planilha pode permanecer restrita (privada). A sincronização é feita
+            no servidor pelo Google Apps Script, nunca pelo navegador.
           </span>
         </div>
 

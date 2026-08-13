@@ -15,7 +15,7 @@ import {
   fetchSheetConnections, upsertSheetConnection, deleteSheetConnection
 } from '../services/supabaseService';
 import { supabase, getCurrentUser } from '../lib/supabase';
-import { syncSheetToSupabase, startSheetPolling } from '../services/googleSheetsSync';
+import { syncSheetToSupabase } from '../services/googleSheetsSync';
 
 // Default configured spreadsheet used to seed Supabase when empty
 const defaultSheet = {
@@ -286,37 +286,14 @@ export default function Integration() {
     }
   };
 
-  // Inicia polling para sheets conectadas
+  // Sincronização automática agora é server-side (Google Apps Script — trigger onEdit
+  // + gatilho de horário). Sem polling no navegador: os dados chegam via realtime.
   useEffect(() => {
-    const connectedSheets = sheets.filter(s => s.status === 'conectado' && s.url && s.autoSync);
-    connectedSheets.forEach(sheet => {
-      if (!pollingStoppers.current[sheet.id]) {
-        const stop = startSheetPolling(sheet.url, sheet.pollingInterval || 60, (result) => {
-          if (result.success && result.rowCount > 0) {
-            addLog('success', `Auto-sync "${sheet.nome}": ${result.rowCount} registros`);
-            setSheets(prev => prev.map(s => s.id === sheet.id ? {
-              ...s,
-              linhasSincronizadas: result.rowCount,
-              ultimoSync: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
-            } : s));
-          }
-        });
-        pollingStoppers.current[sheet.id] = stop;
-      }
-    });
-    // Para polling de sheets desconectadas
-    Object.keys(pollingStoppers.current).forEach(id => {
-      if (!connectedSheets.find(s => s.id === id)) {
-        pollingStoppers.current[id]();
-        delete pollingStoppers.current[id];
-      }
-    });
-    return () => {
-      Object.values(pollingStoppers.current).forEach(stop => stop());
-      pollingStoppers.current = {};
-    };
+    // Limpa stoppers antigos caso existam de sessões anteriores do componente
+    Object.values(pollingStoppers.current).forEach(stop => typeof stop === 'function' && stop());
+    pollingStoppers.current = {};
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sheets]);
+  }, []);
 
   const tabs = [
     { key: 'conexoes', label: 'Conexões', icon: Link2 },

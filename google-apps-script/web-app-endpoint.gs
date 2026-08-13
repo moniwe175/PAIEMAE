@@ -26,6 +26,8 @@
  *     SUPABASE_SERVICE_KEY → Chave service_role (Settings → API no painel Supabase)
  *                             ⚠ NUNCA compartilhe esta chave publicamente
  *     SHEET_USER_ID        → UUID do usuário (auth.users.id) dono dos registros
+ *     SHEET_ID             → ID da planilha (trecho da URL: /d/<ID>/edit)
+ *                             Sem valor padrão no código — configure sempre.
  *     ALLOWED_TOKEN        → Crie uma string aleatória forte (ex: 32 chars hex)
  *                             Este token será usado na URL de chamada.
  *                             Gere com: Utilities.getUuid() + Utilities.getUuid()
@@ -80,8 +82,16 @@ function doGet(e) {
   }
 
   // ── 2. Parâmetros ──
-  var sheetId = params.sheetId || '1uXB-p9iWev-ID7HVZVUj42FBu2J4PkWMo1cocTW2GXI';
+  // Sem ID hardcoded: vem da URL de chamada ou da propriedade SHEET_ID
+  var sheetId = params.sheetId || PropertiesService.getScriptProperties().getProperty('SHEET_ID') || '';
   var gid = params.gid || '0';
+
+  if (!sheetId) {
+    return jsonResponse({
+      success: false,
+      error: 'SHEET_ID não configurado (propriedade do script ou parâmetro da URL).'
+    }, 500);
+  }
 
   // ── 3. Lock para edições concorrentes ──
   var lock = LockService.getScriptLock();
@@ -167,13 +177,14 @@ function doGet(e) {
  */
 function testManual() {
   var token = PropertiesService.getScriptProperties().getProperty('ALLOWED_TOKEN') || 'TESTE_TOKEN';
+  var sheetId = PropertiesService.getScriptProperties().getProperty('SHEET_ID') || '';
   Logger.log('=== TESTE MANUAL DO WEB APP ===');
   Logger.log('Token usado: %s', token);
 
   var fakeEvent = {
     parameter: {
       token: token,
-      sheetId: '1uXB-p9iWev-ID7HVZVUj42FBu2J4PkWMo1cocTW2GXI',
+      sheetId: sheetId,
       gid: '0'
     }
   };

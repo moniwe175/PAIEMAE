@@ -31,6 +31,7 @@
  *     SUPABASE_SERVICE_KEY → service_role key (Supabase → Settings → API)
  *                             ⚠ NUNCA compartilhe publicamente
  *     SHEET_USER_ID        → UUID do usuário (auth.users.id)
+ *     SHEET_ID             → ID da planilha (trecho da URL: /d/<ID>/edit)
  *     ALLOWED_TOKEN        → String aleatória forte (gere com Utilities.getUuid())
  *     WEB_APP_URL          → URL do Web App após deploy (veja passo 6)
  *
@@ -52,6 +53,14 @@
  *     - Tipo de evento:   Ao editar
  *     - Salve.
  *
+ *  7b. (Recomendado) Adicione o gatilho de horário scheduledSync:
+ *     - "+ Adicionar gatilho"
+ *     - Função:                    scheduledSync
+ *     - Origem do evento:          Fonte de eventos baseada em hora
+ *     - Tipo de evento:            Timer de minutos
+ *     - Intervalo:                 A cada 5 minutos
+ *     - Salve. (Garante sync mesmo se algum onEdit for perdido)
+ *
  *  8. Autorize as permissões na primeira execução.
  *
  *  PRONTO! A cada edição, o trigger chama o Web App que sincroniza
@@ -61,7 +70,12 @@
  */
 
 // ─── Configuração ──────────────────────────────────────────────────────────
-var SPREADSHEET_ID = '1uXB-p9iWev-ID7HVZVUj42FBu2J4PkWMo1cocTW2GXI';
+// Sem ID hardcoded: usa a propriedade SHEET_ID ou a planilha ativa.
+function getSpreadsheetId() {
+  var fromProps = PropertiesService.getScriptProperties().getProperty('SHEET_ID');
+  if (fromProps) return fromProps;
+  try { return SpreadsheetApp.getActiveSpreadsheet().getId(); } catch (e) { return ''; }
+}
 var GID = '0';
 
 // ─── Trigger principal ─────────────────────────────────────────────────────
@@ -76,7 +90,8 @@ function onEdit(e) {
     var sheetId = ss.getId();
 
     // Só processa edits na planilha configurada
-    if (sheetId !== SPREADSHEET_ID) {
+    var configuredId = getSpreadsheetId();
+    if (configuredId && sheetId !== configuredId) {
       Logger.log('[onEdit] Planilha diferente (%s), ignorando.', sheetId);
       return;
     }
@@ -111,7 +126,7 @@ function triggerSync() {
   // Monta URL com parâmetros
   var url = webAppUrl
     + '?token=' + encodeURIComponent(token)
-    + '&sheetId=' + encodeURIComponent(SPREADSHEET_ID)
+    + '&sheetId=' + encodeURIComponent(getSpreadsheetId())
     + '&gid=' + encodeURIComponent(GID);
 
   Logger.log('[triggerSync] Chamando Web App: %s', webAppUrl);
@@ -146,6 +161,17 @@ function triggerSync() {
   }
 }
 
+/**
+ * scheduledSync — Função para gatilho de HORÁRIO (time-driven trigger).
+ * Garante sincronização periódica mesmo sem edição recente.
+ * Instale em: Gatilhos → + Adicionar gatilho → scheduledSync →
+ * Fonte baseada em hora → Timer de minutos → A cada 5 minutos.
+ */
+function scheduledSync() {
+  Logger.log('[scheduledSync] Sincronização periódica disparada.');
+  triggerSync();
+}
+
 // ─── Teste Manual ──────────────────────────────────────────────────────────
 
 /**
@@ -168,7 +194,7 @@ function testWebAppDirect() {
   var fakeEvent = {
     parameter: {
       token: token,
-      sheetId: SPREADSHEET_ID,
+      sheetId: getSpreadsheetId(),
       gid: GID
     }
   };
