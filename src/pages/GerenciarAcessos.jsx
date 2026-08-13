@@ -246,6 +246,7 @@ export default function GerenciarAcessos() {
 
     const updateData = {
       role: isAdm ? 'admin' : 'staff',
+      cargo: isAdm ? 'Administrador' : (member.assignedRole || member.cargo || 'Recepcionista'),
       permissions: isAdm
         ? { admin: true }
         : matchedRoleObj ? matchedRoleObj.permissions : (member.permissions || {})
