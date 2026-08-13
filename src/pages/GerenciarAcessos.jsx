@@ -193,24 +193,38 @@ export default function GerenciarAcessos() {
     });
   };
 
-  const handleSaveRole = () => {
+  const handleSaveRole = async () => {
     if (!roleFormName.trim()) {
       alert('Por favor, digite o nome do cargo.');
       return;
     }
 
+    const updatedRoleName = roleFormName.trim();
+    const updatedPerms = roleFormPerms;
+
     if (editingRole) {
       setRoles(prev => prev.map(r => r.id === editingRole.id ? {
         ...r,
-        name: roleFormName.trim(),
-        permissions: roleFormPerms
+        name: updatedRoleName,
+        permissions: updatedPerms
       } : r));
+
+      // Atualizar no Supabase todos os colaboradores vinculados a este cargo
+      const membersToUpdate = members.filter(m => m.assignedRole === editingRole.name || m.cargo === editingRole.name);
+      for (const m of membersToUpdate) {
+        if (m.role !== 'admin') {
+          await supabase
+            .from('profiles')
+            .update({ cargo: updatedRoleName, permissions: updatedPerms })
+            .eq('id', m.id);
+        }
+      }
     } else {
       const newRole = {
         id: `role_${Date.now()}`,
-        name: roleFormName.trim(),
+        name: updatedRoleName,
         count: 0,
-        permissions: roleFormPerms
+        permissions: updatedPerms
       };
       setRoles(prev => [...prev, newRole]);
     }
