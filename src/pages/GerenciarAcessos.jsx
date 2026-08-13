@@ -131,7 +131,10 @@ export default function GerenciarAcessos() {
         if (rpcError) {
           setError(rpcError.message);
         } else {
-          setMembers(data || []);
+          setMembers((data || []).map(m => ({
+            ...m,
+            assignedRole: m.role === 'admin' ? 'admin' : (m.cargo || 'Recepcionista')
+          })));
         }
       } catch (err) {
         if (!cancelled) setError(err.message);
@@ -285,7 +288,10 @@ export default function GerenciarAcessos() {
     setError(null);
     const { data, error: rpcError } = await supabase.rpc('list_team_members');
     if (rpcError) setError(rpcError.message);
-    else setMembers(data || []);
+    else setMembers((data || []).map(m => ({
+      ...m,
+      assignedRole: m.role === 'admin' ? 'admin' : (m.cargo || 'Recepcionista')
+    })));
     setLoading(false);
   };
 
