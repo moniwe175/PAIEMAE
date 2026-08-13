@@ -6,25 +6,78 @@ const AuthContext = createContext({});
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [session, setSession] = useState(null);
+  const [profile, setProfile] = useState(null);
+  const [permissions, setPermissions] = useState({});
   const [loading, setLoading] = useState(true);
+
+  // Carregar dados de perfil e permissões do Supabase
+  const loadProfileData = async (userId) => {
+    if (!userId) {
+      setProfile(null);
+      setPermissions({});
+      return;
+    }
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('role, permissions, full_name, email')
+        .eq('id', userId)
+        .single();
+
+      if (!error && data) {
+        setProfile(data);
+        setPermissions(data.permissions || {});
+      }
+    } catch (err) {
+      console.error("Erro ao carregar permissões do usuário:", err);
+    }
+  };
 
   useEffect(() => {
     // Obter sessão inicial
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       setUser(session?.user ?? null);
-      setLoading(false);
+      if (session?.user?.id) {
+        loadProfileData(session.user.id).finally(() => setLoading(false));
+      } else {
+        setLoading(false);
+      }
     });
 
     // Escutar mudanças no estado de autenticação
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
       setUser(session?.user ?? null);
+      if (session?.user?.id) {
+        loadProfileData(session.user.id);
+      } else {
+        setProfile(null);
+        setPermissions({});
+      }
       setLoading(false);
     });
 
     return () => subscription.unsubscribe();
   }, []);
+
+  // Helper para checar se o usuário tem permissão de visualizar uma aba/setor
+  const canView = (moduleKey) => {
+    if (!user) return false;
+    if (profile?.role === 'admin') return true; // Admin tem acesso total
+    const modPerm = permissions[moduleKey];
+    if (!modPerm) return false;
+    return typeof modPerm === 'boolean' ? modPerm : !!modPerm.ver;
+  };
+
+  // Helper para checar se o usuário tem permissão de editar num setor
+  const canEdit = (moduleKey) => {
+    if (!user) return false;
+    if (profile?.role === 'admin') return true; // Admin tem permissão total
+    const modPerm = permissions[moduleKey];
+    if (!modPerm) return false;
+    return typeof modPerm === 'boolean' ? modPerm : !!modPerm.edit;
+  };
 
   const signIn = async (email, password) => {
     setLoading(true);
@@ -51,12 +104,26 @@ export function AuthProvider({ children }) {
     const { error } = await supabase.auth.signOut();
     setSession(null);
     setUser(null);
+    setProfile(null);
+    setPermissions({});
     setLoading(false);
     return { error };
   };
 
   return (
-    <AuthContext.Provider value={{ user, session, loading, signIn, signUp, signOut }}>
+    <AuthContext.Provider value={{
+      user,
+      session,
+      profile,
+      permissions,
+      loading,
+      canView,
+      canEdit,
+      reloadProfile: () => loadProfileData(user?.id),
+      signIn,
+      signUp,
+      signOut
+    }}>
       {children}
     </AuthContext.Provider>
   );

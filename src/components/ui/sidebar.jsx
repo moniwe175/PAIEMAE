@@ -26,44 +26,30 @@ import { fetchQueuePendingCount } from '../../services/supabaseService';
 import { supabase } from '../../lib/supabase';
 
 const menuItems = [
-  { name: 'Dashboard', path: '/', icon: LayoutDashboard },
-  { name: 'Agenda', path: '/agenda', icon: Calendar },
-  { name: 'Pacientes', path: '/pacientes', icon: Users },
-  { name: 'Anamnese', path: '/anamnese', icon: ClipboardCheck },
-  { name: 'Equipe', path: '/equipe', icon: UserCheck },
-  { name: 'Serviços', path: '/services', icon: Scissors },
-  { name: 'Estoque', path: '/inventory', icon: Package },
-  { name: 'Pacotes', path: '/packages', icon: ShoppingBag },
-  { name: 'Relatórios', path: '/reports', icon: BarChart3 },
-  { name: 'Estratégia', path: '/estrategia', icon: Target },
-  { name: 'Tarefas', path: '/kanban', icon: ClipboardList },
-  { name: 'Marketing', path: '/marketing', icon: Megaphone },
-  { name: 'Motor', path: '/motor-marketing', icon: Zap, badgeKey: 'pending' },
-  { name: 'Comissões', path: '/comissoes', icon: Coins },
-  { name: 'Financeiro', path: '/financial', icon: Wallet },
-  { name: 'Integrações', path: '/integration', icon: Zap },
+  { key: 'dashboard', name: 'Dashboard', path: '/', icon: LayoutDashboard },
+  { key: 'agenda', name: 'Agenda', path: '/agenda', icon: Calendar },
+  { key: 'pacientes', name: 'Pacientes', path: '/pacientes', icon: Users },
+  { key: 'anamnese', name: 'Anamnese', path: '/anamnese', icon: ClipboardCheck },
+  { key: 'equipe', name: 'Equipe', path: '/equipe', icon: UserCheck },
+  { key: 'servicos', name: 'Serviços', path: '/services', icon: Scissors },
+  { key: 'estoque', name: 'Estoque', path: '/inventory', icon: Package },
+  { key: 'pacotes', name: 'Pacotes', path: '/packages', icon: ShoppingBag },
+  { key: 'relatorios', name: 'Relatórios', path: '/reports', icon: BarChart3 },
+  { key: 'estrategia', name: 'Estratégia', path: '/estrategia', icon: Target },
+  { key: 'tarefas', name: 'Tarefas', path: '/kanban', icon: ClipboardList },
+  { key: 'marketing', name: 'Marketing', path: '/marketing', icon: Megaphone },
+  { key: 'motor', name: 'Motor', path: '/motor-marketing', icon: Zap, badgeKey: 'pending' },
+  { key: 'comissoes', name: 'Comissões', path: '/comissoes', icon: Coins },
+  { key: 'financeiro', name: 'Financeiro', path: '/financial', icon: Wallet },
+  { key: 'integracoes', name: 'Integrações', path: '/integration', icon: Zap },
 ];
 
 const Sidebar = () => {
   const navigate = useNavigate();
-  const { user, signOut } = useAuth();
+  const { user, profile, canView, signOut } = useAuth();
   const [pendingCount, setPendingCount] = useState(0);
-  const [isAdmin, setIsAdmin] = useState(false);
 
-  // Check if current user is admin
-  useEffect(() => {
-    let cancelled = false;
-    if (!user?.id) { setIsAdmin(false); return; }
-    (async () => {
-      const { data } = await supabase
-        .from('profiles')
-        .select('role')
-        .eq('id', user.id)
-        .single();
-      if (!cancelled) setIsAdmin(data?.role === 'admin');
-    })();
-    return () => { cancelled = true; };
-  }, [user?.id]);
+  const isAdmin = profile?.role === 'admin';
 
   // Poll pending messages count every 30s
   useEffect(() => {
@@ -87,6 +73,12 @@ const Sidebar = () => {
     }
   };
 
+  // Filter menu items based on backend permissions
+  const visibleMenuItems = menuItems.filter(item => {
+    if (isAdmin) return true;
+    return canView(item.key);
+  });
+
   return (
     <aside className="sidebar">
       {/* Brand Header */}
@@ -102,7 +94,7 @@ const Sidebar = () => {
 
       {/* Navigation Top Items */}
       <nav className="sidebar-nav">
-        {menuItems.map((item) => (
+        {visibleMenuItems.map((item) => (
           <NavLink
             key={item.path}
             to={item.path}
@@ -125,7 +117,7 @@ const Sidebar = () => {
                 color: '#fff',
                 display: 'flex',
                 alignItems: 'center',
-                justifyContent: 'center',
+                justify: 'center',
                 lineHeight: 1,
                 flexShrink: 0,
               }}>
@@ -135,19 +127,20 @@ const Sidebar = () => {
             <span className="sidebar-tooltip">{item.name}</span>
           </NavLink>
         ))}
-      {/* Admin-only menu item */}
-      {isAdmin && (
-        <NavLink
-          to="/gerenciar-acessos"
-          className={({ isActive }) => `sidebar-item${isActive ? ' active' : ''}`}
-        >
-          <span className="sidebar-item-icon">
-            <Shield className="w-5 h-5" />
-          </span>
-          <span className="sidebar-item-label">Acessos</span>
-          <span className="sidebar-tooltip">Gerenciar Acessos</span>
-        </NavLink>
-      )}
+
+        {/* Admin-only / Permitted Acessos item */}
+        {(isAdmin || canView('acessos')) && (
+          <NavLink
+            to="/gerenciar-acessos"
+            className={({ isActive }) => `sidebar-item${isActive ? ' active' : ''}`}
+          >
+            <span className="sidebar-item-icon">
+              <Shield className="w-5 h-5" />
+            </span>
+            <span className="sidebar-item-label">Acessos</span>
+            <span className="sidebar-tooltip">Gerenciar Acessos</span>
+          </NavLink>
+        )}
       </nav>
 
       {/* Navigation Bottom Items */}
@@ -204,4 +197,3 @@ const Sidebar = () => {
 };
 
 export default Sidebar;
-

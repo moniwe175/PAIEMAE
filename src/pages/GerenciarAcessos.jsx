@@ -1,36 +1,115 @@
 import { useState, useEffect } from 'react';
 import {
   Shield, Loader2, Lock, UserPlus, ExternalLink,
-  DollarSign, Zap, Settings, Save, CheckCircle, RefreshCw, AlertTriangle,
+  Plus, Edit3, Trash2, X, Check, Save, RefreshCw, AlertTriangle, Briefcase, Users
 } from 'lucide-react';
 
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 
-const MODULES = [
-  { key: 'financeiro', label: 'Financeiro', icon: DollarSign, desc: 'Caixa, sangrias, comissões, despesas, faturamento, relatórios' },
-  { key: 'integracoes', label: 'Integrações', icon: Zap, desc: 'Planilhas, WhatsApp, automações de marketing' },
-  { key: 'operacional', label: 'Operacional', icon: Settings, desc: 'Clientes, agenda, anamneses, estoque, pacotes, profissionais, serviços' },
+// Exact modules matching the user's clinic system:
+const MODULE_LIST = [
+  { key: 'dashboard', label: 'Dashboard' },
+  { key: 'agenda', label: 'Agenda' },
+  { key: 'pacientes', label: 'Pacientes' },
+  { key: 'anamnese', label: 'Anamnese' },
+  { key: 'equipe', label: 'Equipe' },
+  { key: 'servicos', label: 'Serviços' },
+  { key: 'estoque', label: 'Estoque' },
+  { key: 'pacotes', label: 'Pacotes' },
+  { key: 'relatorios', label: 'Relatórios' },
+  { key: 'estrategia', label: 'Estratégia' },
+  { key: 'tarefas', label: 'Tarefas' },
+  { key: 'marketing', label: 'Marketing' },
+  { key: 'motor', label: 'Motor' },
+  { key: 'comissoes', label: 'Comissões' },
+  { key: 'financeiro', label: 'Financeiro' },
+  { key: 'integracoes', label: 'Integrações' },
+  { key: 'acessos', label: 'Acessos' },
 ];
 
-const DEFAULT_PERMS = { financeiro: false, integracoes: false, operacional: true };
+const INITIAL_ROLES = [
+  {
+    id: 'role_recepcao',
+    name: 'Recepcionista',
+    count: 2,
+    permissions: {
+      dashboard: { ver: true, edit: false },
+      agenda: { ver: true, edit: true },
+      pacientes: { ver: true, edit: true },
+      anamnese: { ver: true, edit: false },
+      servicos: { ver: true, edit: false }
+    }
+  },
+  {
+    id: 'role_profissional',
+    name: 'Profissional / Atendimento',
+    count: 5,
+    permissions: {
+      dashboard: { ver: true, edit: false },
+      agenda: { ver: true, edit: true },
+      pacientes: { ver: true, edit: true },
+      anamnese: { ver: true, edit: true },
+      estoque: { ver: true, edit: false }
+    }
+  },
+  {
+    id: 'role_financeiro',
+    name: 'Financeiro',
+    count: 1,
+    permissions: {
+      dashboard: { ver: true, edit: true },
+      relatorios: { ver: true, edit: true },
+      comissoes: { ver: true, edit: true },
+      financeiro: { ver: true, edit: true }
+    }
+  },
+  {
+    id: 'role_gerente',
+    name: 'Gerente Operacional',
+    count: 1,
+    permissions: {
+      dashboard: { ver: true, edit: true },
+      agenda: { ver: true, edit: true },
+      pacientes: { ver: true, edit: true },
+      equipe: { ver: true, edit: true },
+      servicos: { ver: true, edit: true },
+      estoque: { ver: true, edit: true },
+      pacotes: { ver: true, edit: true },
+      relatorios: { ver: true, edit: true },
+      tarefas: { ver: true, edit: true },
+      marketing: { ver: true, edit: true }
+    }
+  }
+];
 
-// ─── Main Component ──────────────────────────────────────────
 export default function GerenciarAcessos() {
   const { user } = useAuth();
   const [members, setMembers] = useState([]);
+  const [roles, setRoles] = useState(() => {
+    const saved = localStorage.getItem('paiemae_custom_roles_v2');
+    return saved ? JSON.parse(saved) : INITIAL_ROLES;
+  });
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(null); // id of member being saved
-  const [saved, setSaved] = useState(null);
+  const [saving, setSaving] = useState(null);
+  const [savedMemberId, setSavedMemberId] = useState(null);
   const [error, setError] = useState(null);
-  const [isAdmin, setIsAdmin] = useState(null); // null = loading
+  const [isAdmin, setIsAdmin] = useState(null);
 
-  // Load current user's role + team list
+  // Modal State
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingRole, setEditingRole] = useState(null);
+  const [roleFormName, setRoleFormName] = useState('');
+  const [roleFormPerms, setRoleFormPerms] = useState({});
+
+  useEffect(() => {
+    localStorage.setItem('paiemae_custom_roles_v2', JSON.stringify(roles));
+  }, [roles]);
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        // Check if current user is admin (own profile is always readable via RLS)
         const { data: profile } = await supabase
           .from('profiles')
           .select('role')
@@ -46,8 +125,6 @@ export default function GerenciarAcessos() {
         }
 
         setIsAdmin(true);
-
-        // Fetch all team members via pre-existing RPC
         const { data, error: rpcError } = await supabase.rpc('list_team_members');
         if (cancelled) return;
 
@@ -65,17 +142,113 @@ export default function GerenciarAcessos() {
     return () => { cancelled = true; };
   }, [user]);
 
-  // Save role + permissions for a member
-  const handleSave = async (member) => {
+  // Open Modal for Create or Edit
+  const handleOpenModal = (roleToEdit = null) => {
+    if (roleToEdit) {
+      setEditingRole(roleToEdit);
+      setRoleFormName(roleToEdit.name);
+      setRoleFormPerms(roleToEdit.permissions || {});
+    } else {
+      setEditingRole(null);
+      setRoleFormName('');
+      setRoleFormPerms({});
+    }
+    setIsModalOpen(true);
+  };
+
+  const handleCloseModal = () => {
+    setIsModalOpen(false);
+    setEditingRole(null);
+    setRoleFormName('');
+    setRoleFormPerms({});
+  };
+
+  // Toggle Modal Perms
+  const handleTogglePerm = (modKey, type) => {
+    setRoleFormPerms(prev => {
+      const currentMod = prev[modKey] || { ver: false, edit: false };
+      const nextMod = { ...currentMod, [type]: !currentMod[type] };
+
+      // If disabling "ver", also disable "edit"
+      if (type === 'ver' && !nextMod.ver) {
+        nextMod.edit = false;
+      }
+      // If enabling "edit", auto enable "ver"
+      if (type === 'edit' && nextMod.edit) {
+        nextMod.ver = true;
+      }
+
+      return { ...prev, [modKey]: nextMod };
+    });
+  };
+
+  const handleToggleVerTudo = (modKey) => {
+    setRoleFormPerms(prev => {
+      const currentMod = prev[modKey] || { ver: false, edit: false };
+      const allActive = currentMod.ver && currentMod.edit;
+      return {
+        ...prev,
+        [modKey]: { ver: !allActive, edit: !allActive }
+      };
+    });
+  };
+
+  const handleSaveRole = () => {
+    if (!roleFormName.trim()) {
+      alert('Por favor, digite o nome do cargo.');
+      return;
+    }
+
+    if (editingRole) {
+      setRoles(prev => prev.map(r => r.id === editingRole.id ? {
+        ...r,
+        name: roleFormName.trim(),
+        permissions: roleFormPerms
+      } : r));
+    } else {
+      const newRole = {
+        id: `role_${Date.now()}`,
+        name: roleFormName.trim(),
+        count: 0,
+        permissions: roleFormPerms
+      };
+      setRoles(prev => [...prev, newRole]);
+    }
+    handleCloseModal();
+  };
+
+  const handleDeleteRole = (roleId) => {
+    if (window.confirm('Tem certeza que deseja excluir este cargo?')) {
+      setRoles(prev => prev.filter(r => r.id !== roleId));
+      handleCloseModal();
+    }
+  };
+
+  const handleMemberRoleChange = (memberId, roleName) => {
+    setMembers(prev => prev.map(m => {
+      if (m.id !== memberId) return m;
+      const isAdm = roleName === 'admin';
+      return {
+        ...m,
+        role: isAdm ? 'admin' : roleName,
+        assignedRole: roleName
+      };
+    }));
+  };
+
+  const handleSaveMember = async (member) => {
     setSaving(member.id);
     setError(null);
-    setSaved(null);
+    setSavedMemberId(null);
+
+    const isAdm = member.role === 'admin';
+    const matchedRoleObj = roles.find(r => r.name === member.assignedRole);
 
     const updateData = {
-      role: member.role,
-      permissions: member.role === 'admin'
-        ? { ...DEFAULT_PERMS, financeiro: true, integracoes: true, operacional: true }
-        : member.permissions,
+      role: isAdm ? 'admin' : 'staff',
+      permissions: isAdm
+        ? { admin: true }
+        : matchedRoleObj ? matchedRoleObj.permissions : (member.permissions || {})
     };
 
     const { error: saveError } = await supabase
@@ -86,41 +259,10 @@ export default function GerenciarAcessos() {
     if (saveError) {
       setError(saveError.message);
     } else {
-      setSaved(member.id);
-      setTimeout(() => setSaved(null), 2500);
+      setSavedMemberId(member.id);
+      setTimeout(() => setSavedMemberId(null), 2500);
     }
     setSaving(null);
-  };
-
-  // Toggle admin role with self-demotion confirmation
-  const handleAdminToggle = (memberId, checked) => {
-    if (memberId === user.id && !checked) {
-      if (!window.confirm(
-        'Tem certeza que deseja remover seu próprio acesso de administrador?\n\n' +
-        'Você perderá acesso a esta tela e não poderá reverter sem ajuda de outro administrador.'
-      )) {
-        return;
-      }
-    }
-
-    setMembers(prev => prev.map(m => {
-      if (m.id !== memberId) return m;
-      return {
-        ...m,
-        role: checked ? 'admin' : 'staff',
-        permissions: checked
-          ? { financeiro: true, integracoes: true, operacional: true }
-          : (m.permissions || { ...DEFAULT_PERMS }),
-      };
-    }));
-  };
-
-  // Toggle a module permission
-  const handlePermToggle = (memberId, key, checked) => {
-    setMembers(prev => prev.map(m => {
-      if (m.id !== memberId) return m;
-      return { ...m, permissions: { ...(m.permissions || {}), [key]: checked } };
-    }));
   };
 
   const reload = async () => {
@@ -132,17 +274,15 @@ export default function GerenciarAcessos() {
     setLoading(false);
   };
 
-  // ─── Loading State ─────────────────────────────────────────
   if (loading) {
     return (
       <div className="page-header" style={{ textAlign: 'center', padding: '80px 0' }}>
         <Loader2 style={{ width: 32, height: 32, color: 'var(--color-primary)', animation: 'spin 1s linear infinite', margin: '0 auto 12px' }} />
-        <p style={{ color: 'var(--text-muted)', fontSize: 14 }}>Carregando equipe...</p>
+        <p style={{ color: 'var(--text-muted)', fontSize: 14 }}>Carregando permissões e equipe...</p>
       </div>
     );
   }
 
-  // ─── Access Denied ─────────────────────────────────────────
   if (isAdmin === false) {
     return (
       <div style={{ textAlign: 'center', padding: '80px 24px' }}>
@@ -158,314 +298,447 @@ export default function GerenciarAcessos() {
         </h2>
         <p style={{ color: 'var(--text-muted)', fontSize: 14, maxWidth: 400, margin: '0 auto' }}>
           Apenas administradores podem acessar as configurações de acesso da equipe.
-          Entre em contato com o administrador do sistema se precisar de alterações.
         </p>
       </div>
     );
   }
 
-  // ─── Main Render ───────────────────────────────────────────
   return (
-    <div>
-      {/* Page Header */}
-      <div className="page-header">
-        <div className="page-header-label">
+    <div style={{ paddingBottom: 40 }}>
+      {/* Header */}
+      <div className="page-header" style={{ marginBottom: 24 }}>
+        <div className="page-header-label" style={{ color: 'var(--color-primary)', display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700, fontSize: 12 }}>
           <Shield style={{ width: 14, height: 14 }} />
-          Configurações
+          CONFIGURAÇÕES
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16 }}>
           <div>
-            <h1 className="page-title">Gerenciar Acessos</h1>
-            <p className="page-subtitle">
-              Configure as permissões de cada membro da equipe no sistema
+            <h1 className="page-title" style={{ fontSize: 28, fontWeight: 800, margin: 0, color: 'var(--text-dark)' }}>Gestão de Cargos</h1>
+            <p className="page-subtitle" style={{ margin: '4px 0 0', color: 'var(--text-muted)' }}>
+              Cadastro de funções, cargos e permissões de acesso por setor do sistema
             </p>
           </div>
-          <button className="btn btn-ghost btn-sm" onClick={reload}>
-            <RefreshCw style={{ width: 14, height: 14 }} />
-            Atualizar
-          </button>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <button className="btn btn-ghost btn-sm" onClick={reload} style={{ color: 'var(--text-medium)', borderColor: 'var(--border-color)' }}>
+              <RefreshCw style={{ width: 14, height: 14 }} />
+              Atualizar
+            </button>
+            <button
+              onClick={() => handleOpenModal()}
+              style={{
+                background: 'var(--sidebar-bg)',
+                color: '#fff',
+                border: 'none',
+                padding: '10px 18px',
+                borderRadius: 'var(--radius-sm)',
+                fontWeight: 600,
+                fontSize: 14,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                cursor: 'pointer',
+                boxShadow: 'var(--shadow-sm)',
+                transition: 'opacity 0.2s'
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.opacity = '0.9'}
+              onMouseLeave={(e) => e.currentTarget.style.opacity = '1'}
+            >
+              <Plus style={{ width: 16, height: 16 }} />
+              Novo Cargo
+            </button>
+          </div>
         </div>
       </div>
 
-      {/* Error Alert */}
       {error && (
         <div style={{
-          background: 'var(--danger-bg)', border: '1px solid #F5C2C7',
-          borderRadius: 'var(--radius-md)', padding: '12px 16px',
-          marginBottom: 20, display: 'flex', alignItems: 'center', gap: 10,
+          background: 'var(--danger-bg)', border: '1px solid var(--border-color)',
+          borderRadius: 'var(--radius-sm)', padding: '12px 16px', marginBottom: 20,
+          display: 'flex', alignItems: 'center', gap: 10, color: 'var(--danger)'
         }}>
-          <AlertTriangle style={{ width: 16, height: 16, color: 'var(--danger)', flexShrink: 0 }} />
-          <span style={{ fontSize: 13, color: 'var(--danger)', flex: 1 }}>{error}</span>
-          <button
-            onClick={() => setError(null)}
-            style={{
-              background: 'none', border: 'none', color: 'var(--danger)',
-              cursor: 'pointer', fontSize: 12, fontWeight: 600,
-            }}
-          >
-            Fechar
-          </button>
+          <AlertTriangle style={{ width: 16, height: 16 }} />
+          <span style={{ fontSize: 13, flex: 1 }}>{error}</span>
+          <button onClick={() => setError(null)} style={{ background: 'none', border: 'none', color: 'var(--danger)', cursor: 'pointer' }}>Fechar</button>
         </div>
       )}
 
-      {/* Team List */}
-      <div className="card" style={{ marginBottom: 24 }}>
-        <div className="card-header">
-          <div className="card-title">
-            Equipe Cadastrada
-            <span style={{
-              background: 'var(--color-accent-soft)', color: 'var(--color-accent)',
-              borderRadius: 99, padding: '2px 10px', fontSize: 12, fontWeight: 600,
-            }}>
-              {members.length} {members.length === 1 ? 'usuário' : 'usuários'}
-            </span>
-          </div>
-        </div>
-
-        {members.length === 0 ? (
-          <div style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--text-muted)' }}>
-            <p style={{ fontSize: 14, margin: 0 }}>
-              Nenhum membro encontrado na equipe.
-            </p>
-          </div>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            {members.map(member => (
-              <MemberRow
-                key={member.id}
-                member={member}
-                isCurrentUser={member.id === user.id}
-                saving={saving === member.id}
-                saved={saved === member.id}
-                onAdminToggle={(checked) => handleAdminToggle(member.id, checked)}
-                onPermToggle={(key, checked) => handlePermToggle(member.id, key, checked)}
-                onSave={() => handleSave(member)}
-              />
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* Invite Section */}
-      <div className="card" style={{
-        borderColor: 'var(--color-accent)',
-        background: 'var(--info-bg)',
-      }}>
-        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14 }}>
-          <div style={{
-            width: 40, height: 40, borderRadius: 10,
-            background: 'var(--color-primary)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            flexShrink: 0,
-          }}>
-            <UserPlus style={{ width: 20, height: 20, color: '#fff' }} />
-          </div>
-          <div>
-            <h3 style={{
-              fontSize: 15, fontWeight: 700, color: 'var(--text-dark)',
-              margin: '0 0 6px',
-            }}>
-              Convidar novo acesso
-            </h3>
-            <p style={{
-              fontSize: 13, color: 'var(--text-medium)', margin: '0 0 12px',
-              lineHeight: 1.6,
-            }}>
-              Para criar um novo login, acesse o painel do Supabase e envie um convite.
-              O perfil será criado automaticamente como <strong>staff</strong> com permissões
-              básicas, e você poderá configurar os acessos aqui depois.
-            </p>
-            <div style={{
-              background: 'var(--bg-card)', borderRadius: 'var(--radius-sm)',
-              padding: '12px 16px', border: '1px solid var(--border-color)',
-              fontSize: 13, color: 'var(--text-medium)', lineHeight: 1.8,
-            }}>
-              <strong>Passo a passo:</strong>
-              <ol style={{ margin: '6px 0 0', paddingLeft: 20 }}>
-                <li>
-                  Acesse o{' '}
-                  <a
-                    href="https://supabase.com/dashboard"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    style={{ color: 'var(--color-primary)', fontWeight: 600 }}
-                  >
-                    painel do Supabase <ExternalLink style={{ width: 11, height: 11, display: 'inline', verticalAlign: 'middle' }} />
-                  </a>
-                </li>
-                <li>Vá em <strong>Authentication → Users → Add user → Send invitation</strong></li>
-                <li>Insira o email da pessoa e envie o convite</li>
-                <li>Volte aqui e clique em <strong>Atualizar</strong> para configurar as permissões</li>
-              </ol>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ─── Member Row ──────────────────────────────────────────────
-function MemberRow({ member, isCurrentUser, saving, saved, onAdminToggle, onPermToggle, onSave }) {
-  const isStaff = member.role !== 'admin';
-  const perms = member.permissions || {};
-
-  return (
-    <div style={{
-      padding: '18px 20px',
-      borderRadius: 'var(--radius-md)',
-      border: `1px solid ${isCurrentUser ? 'var(--color-primary)' : 'var(--border-color)'}`,
-      background: isCurrentUser ? 'var(--color-accent-soft)' : 'var(--bg-card)',
-      transition: 'all 0.15s ease',
-    }}>
-      {/* Header: name + admin toggle */}
-      <div style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        marginBottom: 14, flexWrap: 'wrap', gap: 10,
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
-          <div style={{
-            width: 36, height: 36, borderRadius: 10,
-            background: member.role === 'admin' ? 'var(--color-primary)' : 'var(--color-accent-soft)',
-            color: member.role === 'admin' ? '#fff' : 'var(--color-primary)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontWeight: 700, fontSize: 14, flexShrink: 0,
-          }}>
-            {(member.full_name || member.email || '?').charAt(0).toUpperCase()}
-          </div>
-          <div style={{ minWidth: 0 }}>
-            <div style={{
-              fontWeight: 600, fontSize: 14, color: 'var(--text-dark)',
-              display: 'flex', alignItems: 'center', gap: 6,
-            }}>
-              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                {member.full_name || member.email || 'Sem nome'}
-              </span>
-              {isCurrentUser && (
-                <span style={{
-                  fontSize: 10, fontWeight: 700,
-                  background: 'var(--color-primary)', color: '#fff',
-                  padding: '2px 8px', borderRadius: 99,
-                  textTransform: 'uppercase', letterSpacing: '0.04em',
-                  flexShrink: 0,
-                }}>
-                  Você
-                </span>
-              )}
-            </div>
-            <div style={{
-              fontSize: 12, color: 'var(--text-muted)',
-              display: 'flex', alignItems: 'center', gap: 6,
-            }}>
-              {member.email}
-              {member.created_at && (
-                <>
-                  <span>•</span>
-                  <span>Desde {new Date(member.created_at).toLocaleDateString('pt-BR')}</span>
-                </>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* Admin toggle */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{
-            fontSize: 12, fontWeight: 600,
-            color: member.role === 'admin' ? 'var(--color-primary)' : 'var(--text-muted)',
-          }}>
-            {member.role === 'admin' ? 'Administrador' : 'Staff'}
-          </span>
-          <button
-            type="button"
-            role="switch"
-            aria-checked={member.role === 'admin'}
-            onClick={() => onAdminToggle(member.role !== 'admin')}
-            style={{
-              width: 42, height: 24,
-              borderRadius: 99,
-              border: 'none',
-              cursor: 'pointer',
-              position: 'relative',
-              padding: 0,
-              background: member.role === 'admin' ? 'var(--color-primary)' : 'var(--border-color)',
-              transition: 'background 0.2s',
-              flexShrink: 0,
-            }}
-          >
-            <span style={{
-              display: 'block',
-              width: 18, height: 18,
-              borderRadius: '50%',
-              background: '#fff',
-              transition: 'transform 0.2s',
-              transform: member.role === 'admin' ? 'translateX(21px)' : 'translateX(3px)',
-              boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
-            }} />
-          </button>
-        </div>
-      </div>
-
-      {/* Module Permissions (disabled for admin) */}
+      {/* Roles Cards Grid */}
       <div style={{
         display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-        gap: 10,
-        opacity: isStaff ? 1 : 0.35,
-        pointerEvents: isStaff ? 'auto' : 'none',
-        filter: isStaff ? 'none' : 'grayscale(0.5)',
-        transition: 'opacity 0.2s',
+        gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
+        gap: 16,
+        marginBottom: 36
       }}>
-        {MODULES.map(({ key, label, icon: Icon, desc }) => (
-          <label key={key} style={{
-            display: 'flex', alignItems: 'flex-start', gap: 10,
-            padding: '10px 14px', borderRadius: 'var(--radius-sm)',
-            background: 'var(--bg-main)', cursor: 'pointer',
-            border: `1px solid ${perms[key] ? 'var(--color-primary)' : 'transparent'}`,
-            transition: 'all 0.15s',
-          }}>
-            <input
-              type="checkbox"
-              checked={!!perms[key]}
-              onChange={(e) => onPermToggle(key, e.target.checked)}
-              style={{ marginTop: 2, accentColor: 'var(--color-primary)', cursor: 'pointer' }}
-            />
+        {roles.map(role => (
+          <div
+            key={role.id}
+            onClick={() => handleOpenModal(role)}
+            style={{
+              background: 'var(--bg-card)',
+              border: '1px solid var(--border-color)',
+              borderRadius: 'var(--radius-md)',
+              padding: 20,
+              display: 'flex',
+              flexDirection: 'column',
+              justify: 'space-between',
+              cursor: 'pointer',
+              transition: 'all 0.2s ease',
+              boxShadow: 'var(--shadow-sm)',
+              position: 'relative'
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.borderColor = 'var(--color-primary)';
+              e.currentTarget.style.background = 'var(--bg-card-hover)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.borderColor = 'var(--border-color)';
+              e.currentTarget.style.background = 'var(--bg-card)';
+            }}
+          >
             <div>
               <div style={{
-                display: 'flex', alignItems: 'center', gap: 6,
-                fontSize: 13, fontWeight: 600, color: 'var(--text-dark)',
+                width: 44,
+                height: 44,
+                borderRadius: 'var(--radius-sm)',
+                background: 'var(--color-accent-soft)',
+                color: 'var(--sidebar-bg)',
+                display: 'flex',
+                alignItems: 'center',
+                justify: 'center',
+                marginBottom: 16
               }}>
-                <Icon style={{ width: 14, height: 14, color: 'var(--color-primary)' }} />
-                {label}
+                <Briefcase style={{ width: 22, height: 22 }} />
               </div>
-              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2, lineHeight: 1.4 }}>
-                {desc}
-              </div>
+              <h3 style={{ fontSize: 16, fontWeight: 700, color: 'var(--text-dark)', margin: '0 0 12px' }}>
+                {role.name}
+              </h3>
             </div>
-          </label>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--text-muted)', fontSize: 13 }}>
+              <Users style={{ width: 14, height: 14 }} />
+              <span>{role.count} {role.count === 1 ? 'colaborador' : 'colaboradores'}</span>
+            </div>
+          </div>
         ))}
       </div>
 
-      {/* Save Button */}
-      <div style={{ marginTop: 14, display: 'flex', justifyContent: 'flex-end' }}>
-        <button
-          className="btn btn-sm"
-          onClick={onSave}
-          disabled={saving}
-          style={saved
-            ? { background: 'var(--success)', color: '#fff', border: 'none' }
-            : { background: 'var(--color-primary)', color: '#fff', border: 'none' }
-          }
-        >
-          {saving ? (
-            <><Loader2 style={{ width: 14, height: 14, animation: 'spin 1s linear infinite' }} /> Salvando...</>
-          ) : saved ? (
-            <><CheckCircle style={{ width: 14, height: 14 }} /> Salvo</>
-          ) : (
-            <><Save style={{ width: 14, height: 14 }} /> Salvar</>
-          )}
-        </button>
+      {/* Team Member Roles Assignment Section */}
+      <div className="card" style={{ background: 'var(--bg-card)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-color)', padding: 24, marginBottom: 24, boxShadow: 'var(--shadow-sm)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
+          <div>
+            <h2 style={{ fontSize: 18, fontWeight: 700, color: 'var(--text-dark)', margin: 0 }}>Gerenciar Acessos da Equipe</h2>
+            <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '4px 0 0' }}>Associe cada membro ao seu cargo para liberar ou restringir telas</p>
+          </div>
+          <span style={{ background: 'var(--color-accent-soft)', color: 'var(--text-dark)', borderRadius: 99, padding: '4px 12px', fontSize: 12, fontWeight: 600 }}>
+            {members.length} {members.length === 1 ? 'usuário' : 'usuários'}
+          </span>
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {members.map(member => {
+            const isCurrentUser = member.id === user.id;
+            return (
+              <div key={member.id} style={{
+                display: 'flex',
+                alignItems: 'center',
+                justify: 'space-between',
+                padding: '14px 18px',
+                borderRadius: 'var(--radius-sm)',
+                border: '1px solid var(--border-color)',
+                background: isCurrentUser ? 'var(--color-accent-soft)' : 'var(--bg-card)',
+                flexWrap: 'wrap',
+                gap: 12
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 240 }}>
+                  <div style={{
+                    width: 38, height: 38, borderRadius: 'var(--radius-sm)',
+                    background: member.role === 'admin' ? 'var(--sidebar-bg)' : 'var(--border-color)',
+                    color: member.role === 'admin' ? '#fff' : 'var(--text-dark)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontWeight: 700, fontSize: 15
+                  }}>
+                    {(member.full_name || member.email || '?').charAt(0).toUpperCase()}
+                  </div>
+                  <div>
+                    <div style={{ fontWeight: 600, fontSize: 14, color: 'var(--text-dark)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                      {member.full_name || member.email}
+                      {isCurrentUser && (
+                        <span style={{ fontSize: 10, background: 'var(--sidebar-bg)', color: '#fff', padding: '2px 6px', borderRadius: 4, fontWeight: 700 }}>você</span>
+                      )}
+                    </div>
+                    <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{member.email}</div>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                  {/* Select Cargo */}
+                  <select
+                    value={member.role === 'admin' ? 'admin' : (member.assignedRole || roles[0]?.name)}
+                    onChange={(e) => handleMemberRoleChange(member.id, e.target.value)}
+                    style={{
+                      padding: '8px 12px',
+                      borderRadius: 'var(--radius-sm)',
+                      border: '1px solid var(--border-color)',
+                      fontSize: 13,
+                      color: 'var(--text-dark)',
+                      background: 'var(--bg-card)',
+                      outline: 'none'
+                    }}
+                  >
+                    <option value="admin">Administrador (Acesso Total)</option>
+                    <optgroup label="Cargos Cadastrados">
+                      {roles.map(r => (
+                        <option key={r.id} value={r.name}>{r.name}</option>
+                      ))}
+                    </optgroup>
+                  </select>
+
+                  <button
+                    onClick={() => handleSaveMember(member)}
+                    disabled={saving === member.id}
+                    style={{
+                      background: savedMemberId === member.id ? 'var(--success)' : 'var(--sidebar-bg)',
+                      color: '#fff',
+                      border: 'none',
+                      padding: '8px 16px',
+                      borderRadius: 'var(--radius-sm)',
+                      fontSize: 13,
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6
+                    }}
+                  >
+                    {saving === member.id ? (
+                      <Loader2 style={{ width: 14, height: 14, animation: 'spin 1s linear infinite' }} />
+                    ) : savedMemberId === member.id ? (
+                      <Check style={{ width: 14, height: 14 }} />
+                    ) : (
+                      <Save style={{ width: 14, height: 14 }} />
+                    )}
+                    {savedMemberId === member.id ? 'Salvo' : 'Salvar'}
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
       </div>
+
+      {/* Invite Box */}
+      <div style={{ background: 'var(--bg-card)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-color)', padding: 20 }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+          <UserPlus style={{ width: 20, height: 20, color: 'var(--sidebar-bg)', marginTop: 2 }} />
+          <div>
+            <h4 style={{ margin: '0 0 4px', fontSize: 14, fontWeight: 700, color: 'var(--text-dark)' }}>Convidar Novo Acesso</h4>
+            <p style={{ margin: 0, fontSize: 13, color: 'var(--text-muted)' }}>
+              Para criar novos acessos, adicione os usuários no painel do Supabase e atribua o cargo correspondente nesta página.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* ─── MODAL EDITAR / NOVO CARGO ─── */}
+      {isModalOpen && (
+        <div style={{
+          position: 'fixed',
+          top: 0, left: 0, right: 0, bottom: 0,
+          background: 'rgba(67, 47, 45, 0.4)',
+          backdropFilter: 'blur(4px)',
+          display: 'flex',
+          alignItems: 'center',
+          justify: 'center',
+          zIndex: 9999,
+          padding: 20
+        }}>
+          <div style={{
+            background: '#fff',
+            borderRadius: 'var(--radius-lg)',
+            width: '100%',
+            maxWidth: 760,
+            maxHeight: '90vh',
+            display: 'flex',
+            flexDirection: 'column',
+            boxShadow: 'var(--shadow-lg)',
+            overflow: 'hidden',
+            border: '1px solid var(--border-color)'
+          }}>
+            {/* Modal Header */}
+            <div style={{
+              padding: '20px 24px',
+              borderBottom: '1px solid var(--border-color)',
+              display: 'flex',
+              alignItems: 'center',
+              justify: 'space-between',
+              background: 'var(--bg-main)'
+            }}>
+              <h2 style={{ fontSize: 18, fontWeight: 700, color: 'var(--text-dark)', margin: 0 }}>
+                {editingRole ? 'Editar Cargo' : 'Novo Cargo'}
+              </h2>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                {editingRole && (
+                  <button
+                    onClick={() => handleDeleteRole(editingRole.id)}
+                    style={{ background: 'none', border: 'none', color: 'var(--danger)', cursor: 'pointer', padding: 4 }}
+                    title="Excluir cargo"
+                  >
+                    <Trash2 style={{ width: 18, height: 18 }} />
+                  </button>
+                )}
+                <button
+                  onClick={handleCloseModal}
+                  style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: 4 }}
+                >
+                  <X style={{ width: 20, height: 20 }} />
+                </button>
+              </div>
+            </div>
+
+            {/* Modal Body */}
+            <div style={{ padding: 24, overflowY: 'auto', flex: 1 }}>
+              {/* Nome do Cargo Input */}
+              <div style={{ marginBottom: 24 }}>
+                <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: 'var(--text-dark)', marginBottom: 6 }}>
+                  Nome do Cargo *
+                </label>
+                <input
+                  type="text"
+                  value={roleFormName}
+                  onChange={(e) => setRoleFormName(e.target.value)}
+                  placeholder="Ex: Recepcionista, Atendente, Gerente..."
+                  style={{
+                    width: '100%',
+                    padding: '10px 14px',
+                    borderRadius: 'var(--radius-sm)',
+                    border: '1px solid var(--border-color)',
+                    fontSize: 14,
+                    outline: 'none',
+                    color: 'var(--text-dark)',
+                    background: '#fff',
+                    boxSizing: 'border-box'
+                  }}
+                />
+              </div>
+
+              {/* Title Permissões */}
+              <h4 style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-dark)', margin: '0 0 16px' }}>
+                Permissões de Acesso
+              </h4>
+
+              {/* Modules Grid (2 Columns) */}
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
+                gap: 12
+              }}>
+                {MODULE_LIST.map(mod => {
+                  const perm = roleFormPerms[mod.key] || { ver: false, edit: false };
+                  const isVerTudo = perm.ver && perm.edit;
+
+                  return (
+                    <div key={mod.key} style={{
+                      border: '1px solid var(--border-color)',
+                      borderRadius: 'var(--radius-sm)',
+                      padding: '12px 16px',
+                      background: 'var(--bg-main)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justify: 'space-between'
+                    }}>
+                      <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-dark)' }}>
+                        {mod.label}
+                      </span>
+
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                        {/* Ver Checkbox */}
+                        <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 12, fontWeight: 500, color: perm.ver ? 'var(--sidebar-bg)' : 'var(--text-muted)' }}>
+                          <input
+                            type="checkbox"
+                            checked={perm.ver}
+                            onChange={() => handleTogglePerm(mod.key, 'ver')}
+                            style={{ accentColor: 'var(--sidebar-bg)', cursor: 'pointer' }}
+                          />
+                          Ver
+                        </label>
+
+                        {/* Edit Checkbox */}
+                        <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 12, fontWeight: 500, color: perm.edit ? 'var(--sidebar-bg)' : 'var(--text-muted)' }}>
+                          <input
+                            type="checkbox"
+                            checked={perm.edit}
+                            onChange={() => handleTogglePerm(mod.key, 'edit')}
+                            style={{ accentColor: 'var(--sidebar-bg)', cursor: 'pointer' }}
+                          />
+                          Edit
+                        </label>
+
+                        {/* Ver Tudo Special Action */}
+                        <button
+                          type="button"
+                          onClick={() => handleToggleVerTudo(mod.key)}
+                          style={{
+                            background: 'none',
+                            border: 'none',
+                            fontSize: 11,
+                            fontWeight: 700,
+                            color: isVerTudo ? 'var(--danger)' : 'var(--text-light)',
+                            cursor: 'pointer',
+                            padding: 0
+                          }}
+                        >
+                          {isVerTudo ? 'Ver Tudo' : ''}
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div style={{
+              padding: '16px 24px',
+              borderTop: '1px solid var(--border-color)',
+              display: 'flex',
+              justify: 'flex-end',
+              gap: 12,
+              background: '#fff'
+            }}>
+              <button
+                onClick={handleCloseModal}
+                style={{
+                  background: 'var(--bg-main)',
+                  color: 'var(--text-dark)',
+                  border: '1px solid var(--border-color)',
+                  padding: '10px 18px',
+                  borderRadius: 'var(--radius-sm)',
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: 'pointer'
+                }}
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleSaveRole}
+                style={{
+                  background: 'var(--sidebar-bg)',
+                  color: '#fff',
+                  border: 'none',
+                  padding: '10px 20px',
+                  borderRadius: 'var(--radius-sm)',
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  boxShadow: 'var(--shadow-sm)'
+                }}
+              >
+                Salvar Cargo
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
