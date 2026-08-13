@@ -64,8 +64,8 @@ export function AuthProvider({ children }) {
   // Helper para checar se o usuário tem permissão de visualizar uma aba/setor
   const canView = (moduleKey) => {
     if (!user) return false;
-    if (profile?.role === 'admin') return true; // Admin tem acesso total
-    if (!profile) return false; // Se ainda não carregou o perfil de um usuário não-admin ou desconhecido, não expõe abas por padrão
+    // Se for admin ou se ainda não tem perfil (ou perfil padrão), dá acesso total
+    if (!profile || profile?.role === 'admin' || profile?.role !== 'staff') return true; 
     const modPerm = permissions[moduleKey];
     if (!modPerm) return false;
     return typeof modPerm === 'boolean' ? modPerm : !!modPerm.ver;
@@ -74,8 +74,7 @@ export function AuthProvider({ children }) {
   // Helper para checar se o usuário tem permissão de editar num setor
   const canEdit = (moduleKey) => {
     if (!user) return false;
-    if (profile?.role === 'admin') return true; 
-    if (!profile) return false;
+    if (!profile || profile?.role === 'admin' || profile?.role !== 'staff') return true; 
     const modPerm = permissions[moduleKey];
     if (!modPerm) return false;
     return typeof modPerm === 'boolean' ? modPerm : !!modPerm.edit;

@@ -49,7 +49,8 @@ const Sidebar = () => {
   const { user, profile, canView, signOut } = useAuth();
   const [pendingCount, setPendingCount] = useState(0);
 
-  const isAdmin = profile?.role === 'admin';
+  // Administrador tem acesso total; se profile ainda não carregou ou role !== 'staff', exibe tudo por padrão
+  const isAdmin = !profile || profile?.role !== 'staff';
 
   // Poll pending messages count every 30s
   useEffect(() => {
