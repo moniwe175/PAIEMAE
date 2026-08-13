@@ -92,6 +92,7 @@ INSERT INTO public.roles (id, name, permissions) VALUES
 ON CONFLICT (name) DO NOTHING;
 
 -- 4. Funcao RPC para listar equipe com perfis e cargos vinculados
+DROP FUNCTION IF EXISTS public.list_team_members();
 CREATE OR REPLACE FUNCTION public.list_team_members()
 RETURNS TABLE (
   id uuid,
