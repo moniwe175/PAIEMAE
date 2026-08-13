@@ -6,6 +6,7 @@ import {
 
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
+import { INITIAL_ROLES } from '../lib/defaultRoles';
 
 // Exact modules matching the user's clinic system:
 const MODULE_LIST = [
@@ -26,61 +27,6 @@ const MODULE_LIST = [
   { key: 'financeiro', label: 'Financeiro' },
   { key: 'integracoes', label: 'Integrações' },
   { key: 'acessos', label: 'Acessos' },
-];
-
-const INITIAL_ROLES = [
-  {
-    id: 'role_recepcao',
-    name: 'Recepcionista',
-    count: 2,
-    permissions: {
-      dashboard: { ver: true, edit: false },
-      agenda: { ver: true, edit: true },
-      pacientes: { ver: true, edit: true },
-      anamnese: { ver: true, edit: false },
-      servicos: { ver: true, edit: false }
-    }
-  },
-  {
-    id: 'role_profissional',
-    name: 'Profissional / Atendimento',
-    count: 5,
-    permissions: {
-      dashboard: { ver: true, edit: false },
-      agenda: { ver: true, edit: true },
-      pacientes: { ver: true, edit: true },
-      anamnese: { ver: true, edit: true },
-      estoque: { ver: true, edit: false }
-    }
-  },
-  {
-    id: 'role_financeiro',
-    name: 'Financeiro',
-    count: 1,
-    permissions: {
-      dashboard: { ver: true, edit: true },
-      relatorios: { ver: true, edit: true },
-      comissoes: { ver: true, edit: true },
-      financeiro: { ver: true, edit: true }
-    }
-  },
-  {
-    id: 'role_gerente',
-    name: 'Gerente Operacional',
-    count: 1,
-    permissions: {
-      dashboard: { ver: true, edit: true },
-      agenda: { ver: true, edit: true },
-      pacientes: { ver: true, edit: true },
-      equipe: { ver: true, edit: true },
-      servicos: { ver: true, edit: true },
-      estoque: { ver: true, edit: true },
-      pacotes: { ver: true, edit: true },
-      relatorios: { ver: true, edit: true },
-      tarefas: { ver: true, edit: true },
-      marketing: { ver: true, edit: true }
-    }
-  }
 ];
 
 export default function GerenciarAcessos() {

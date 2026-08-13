@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
+import { INITIAL_ROLES } from '../lib/defaultRoles';
 
 const AuthContext = createContext({});
 
@@ -26,7 +27,25 @@ export function AuthProvider({ children }) {
 
       if (!error && data) {
         setProfile(data);
-        setPermissions(data.permissions || {});
+        let perms = data.permissions || {};
+
+        // Não-admin: as permissões efetivas vêm do CARGO vinculado ao usuário.
+        // Fonte da verdade: tabela public.roles; fallbacks: profiles.permissions
+        // e, por último, os cargos padrão (enquanto a tabela roles não existir).
+        if (data.role !== 'admin' && data.cargo) {
+          const { data: roleRow } = await supabase
+            .from('roles')
+            .select('permissions')
+            .eq('name', data.cargo)
+            .maybeSingle();
+          if (roleRow && roleRow.permissions && Object.keys(roleRow.permissions).length > 0) {
+            perms = roleRow.permissions;
+          } else if (!perms || Object.keys(perms).length === 0) {
+            const def = INITIAL_ROLES.find(r => r.name === data.cargo);
+            if (def) perms = def.permissions;
+          }
+        }
+        setPermissions(perms);
       }
     } catch (err) {
       console.error("Erro ao carregar permissões do usuário:", err);
