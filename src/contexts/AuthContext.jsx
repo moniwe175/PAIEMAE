@@ -64,20 +64,33 @@ export function AuthProvider({ children }) {
   // Helper para checar se o usuário tem permissão de visualizar uma aba/setor
   const canView = (moduleKey) => {
     if (!user) return false;
-    // Se for admin ou se ainda não tem perfil (ou perfil padrão), dá acesso total
-    if (!profile || profile?.role === 'admin' || profile?.role !== 'staff') return true; 
-    const modPerm = permissions[moduleKey];
-    if (!modPerm) return false;
-    return typeof modPerm === 'boolean' ? modPerm : !!modPerm.ver;
+    // Administrador tem acesso irrestrito a tudo
+    if (profile?.role === 'admin') return true;
+    
+    // Se o perfil for staff/colaborador com cargo atribuído
+    if (profile?.role === 'staff' || profile?.permissions) {
+      if (moduleKey === 'acessos') return false; // Apenas admin gerencia acessos
+      const modPerm = permissions[moduleKey];
+      if (!modPerm) return false;
+      return typeof modPerm === 'boolean' ? modPerm : !!modPerm.ver;
+    }
+
+    // Se ainda não carregou o perfil, mantém por segurança até carregar
+    return false;
   };
 
   // Helper para checar se o usuário tem permissão de editar num setor
   const canEdit = (moduleKey) => {
     if (!user) return false;
-    if (!profile || profile?.role === 'admin' || profile?.role !== 'staff') return true; 
-    const modPerm = permissions[moduleKey];
-    if (!modPerm) return false;
-    return typeof modPerm === 'boolean' ? modPerm : !!modPerm.edit;
+    if (profile?.role === 'admin') return true; 
+    
+    if (profile?.role === 'staff' || profile?.permissions) {
+      const modPerm = permissions[moduleKey];
+      if (!modPerm) return false;
+      return typeof modPerm === 'boolean' ? modPerm : !!modPerm.edit;
+    }
+
+    return false;
   };
 
   const signIn = async (email, password) => {
