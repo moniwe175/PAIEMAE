@@ -36,14 +36,16 @@ class MarketingEngine:
         total_inserted = 0
 
         for tool_fn in ALL_TOOLS:
+            tool_id = int(tool_fn.__name__.split("_")[1])
             try:
                 entries: list[QueueEntry] = tool_fn(self.db)
-                if entries:
-                    inserted = self._insert_batch(entries)
-                    total_inserted += inserted
-                    logger.info("[%s] %d entrada(s) inserida(s) na fila.", tool_fn.__name__, inserted)
-            except Exception:
+                inserted = self._insert_batch(entries) if entries else 0
+                total_inserted += inserted
+                logger.info("[%s] %d entrada(s) inserida(s) na fila.", tool_fn.__name__, inserted)
+                self._log_cycle(tool_id, tool_fn.__name__, len(entries), inserted, None)
+            except Exception as exc:
                 logger.exception("Erro na ferramenta '%s'. Seguindo.", tool_fn.__name__)
+                self._log_cycle(tool_id, tool_fn.__name__, 0, 0, str(exc))
 
         logger.info("Ciclo concluído. Total inserido: %d.", total_inserted)
 
@@ -77,3 +79,21 @@ class MarketingEngine:
 
         resp = self.db.table("marketing_queue").insert(rows).execute()
         return len(resp.data or [])
+
+    # ------------------------------------------------------------------
+    # Auditoria por ciclo — alimenta marketing_log (Bug C)
+    # ------------------------------------------------------------------
+
+    def _log_cycle(self, tool_id: int, tool_name: str, generated: int, inserted: int, error: str | None):
+        """Registra o resultado de cada ferramenta a cada ciclo.
+        Falha silencioso se a tabela ainda não existir (ver marketing_engine_fixes.sql)."""
+        try:
+            self.db.table("marketing_log").insert({
+                "tool_id":           tool_id,
+                "tool_name":         tool_name,
+                "entries_generated": generated,
+                "entries_inserted":  inserted,
+                "error":             error,
+            }).execute()
+        except Exception:
+            pass

@@ -96,11 +96,13 @@ function mapToSupabase(item, isBlock = false) {
     return {
       client_name: item.paciente,
       client_phone: item.telefone || '',
+      client_id: item.client_id || null,
       procedure: item.servico,
       professional: item.profissional,
       appointment_date: item.data,
       appointment_time: time,
       status: item.status,
+      exames_pendentes: !!item.exames_pendentes,
       notes: JSON.stringify({
         valor: item.valor,
         duracao: item.duracao,
@@ -145,6 +147,8 @@ function mapFromSupabase(item) {
       profissional: item.professional,
       servico: item.procedure,
       status: item.status || 'aguardando_confirmacao',
+      client_id: item.client_id || null,
+      exames_pendentes: !!item.exames_pendentes,
       valor: extra.valor || 0,
       observacoes: extra.observacoes || '',
       fixo: extra.fixo || false
@@ -713,6 +717,7 @@ function AgendamentoModal({ onClose, date, profissional: prefillProf, hora: pref
       const { data } = await fetchClients();
       if (data) {
         setPacientes(data.map(item => ({
+          id: item.id,
           nome: item.name,
           telefone: item.phone,
           email: item.email
@@ -754,7 +759,7 @@ function AgendamentoModal({ onClose, date, profissional: prefillProf, hora: pref
     data: fmtDate(date), hora: prefillHora || '09:00',
     horaFim: calcEndTime(prefillHora || '09:00', 60), duracao: 60,
     paciente: '', telefone: '', profissional: prefillProf || '', servico: '',
-    status: 'aguardando_confirmacao', valor: '', observacoes: '',
+    status: 'aguardando_confirmacao', valor: '', observacoes: '', exames_pendentes: false,
   });
   const [repetir, setRepetir] = useState(false);
   const [recFreq, setRecFreq] = useState('semanal');
@@ -854,7 +859,10 @@ function AgendamentoModal({ onClose, date, profissional: prefillProf, hora: pref
     }
 
     const isFixo = repetir && previewRecDates.length > 0;
-    const base = { ...form, horaFim: calcEndTime(form.hora, Number(form.duracao) || 60), duracao: Number(form.duracao) || 60, valor: Number(form.valor) || 0, fixo: isFixo || false };
+    // Vincula o agendamento ao cadastro do cliente (client_id) — exigido pelo motor de marketing
+    const nomeNorm = (form.paciente || '').trim().toLowerCase();
+    const clientMatch = pacientes.find(p => (p.nome || '').trim().toLowerCase() === nomeNorm);
+    const base = { ...form, horaFim: calcEndTime(form.hora, Number(form.duracao) || 60), duracao: Number(form.duracao) || 60, valor: Number(form.valor) || 0, fixo: isFixo || false, client_id: form.client_id || clientMatch?.id || null };
     if (isFixo && !isEdit) {
       const all = [{ ...base, id: genId() }];
       previewRecDates.forEach(d => all.push({ ...base, id: genId(), data: d }));
@@ -885,7 +893,7 @@ function AgendamentoModal({ onClose, date, profissional: prefillProf, hora: pref
           };
           const { data } = await insertClient(clientData);
           if (data) {
-            const mapped = { nome: data.name, telefone: data.phone, email: data.email, instagram: data.instagram };
+            const mapped = { id: data.id, nome: data.name, telefone: data.phone, email: data.email, instagram: data.instagram };
             setPacientes(prev => [...prev, mapped]);
             set('paciente', mapped.nome);
             set('telefone', mapped.telefone || '');
@@ -1091,6 +1099,12 @@ function AgendamentoModal({ onClose, date, profissional: prefillProf, hora: pref
                 )}
               </div>
             )}
+          </div>
+
+          {/* Exames pendentes — Ferramenta 10 do motor de marketing */}
+          <div style={{ marginBottom: 14, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <input type="checkbox" id="exames_pendentes" checked={!!form.exames_pendentes} onChange={e => set('exames_pendentes', e.target.checked)} style={{ width: 15, height: 15, accentColor: '#C73B6D', cursor: 'pointer' }} />
+            <label htmlFor="exames_pendentes" style={{ fontSize: 12.5, fontWeight: 600, color: '#374151', cursor: 'pointer' }}>Cliente tem exames pendentes para trazer (enviar lembrete)</label>
           </div>
 
           {/* Observações */}

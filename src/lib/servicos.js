@@ -87,6 +87,11 @@ async function upsertToSupabase(svc) {
     comissao: Number(svc.comissao) || 0,
     ativo: svc.ativo ?? true,
     descricao: encodeDescricao(svc.descricao, svc.fichasObrigatorias || (svc.fichaObrigatoria ? [svc.fichaObrigatoria] : [])),
+    // Flags do motor de marketing (ferramentas 8, 9, 15 e 16)
+    dias_para_retorno: svc.dias_para_retorno ? Number(svc.dias_para_retorno) : null,
+    exige_preparo: !!svc.exige_preparo,
+    exige_pos_procedimento: !!svc.exige_pos_procedimento,
+    sessoes_pacote: svc.sessoes_pacote ? Number(svc.sessoes_pacote) : null,
   };
   
   const { error } = await supabase.from('servicos').upsert([dbPayload], { onConflict: 'id' });

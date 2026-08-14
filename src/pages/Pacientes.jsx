@@ -101,6 +101,10 @@ function PacienteModal({ onClose, onSave, initialData }) {
             <label className="form-label">Nascimento</label>
             <input className="form-input" type="date" value={form.nascimento} onChange={e=>set('nascimento',e.target.value)} />
           </div>
+          <div className="form-group" style={{ gridColumn: 'span 2', display: 'flex', alignItems: 'center', gap: 8 }}>
+            <input type="checkbox" id="whatsapp_opt_out" checked={!!form.whatsapp_opt_out} onChange={e => set('whatsapp_opt_out', e.target.checked)} style={{ width: 15, height: 15, cursor: 'pointer' }} />
+            <label htmlFor="whatsapp_opt_out" style={{ fontSize: 12.5, cursor: 'pointer' }}>Não enviar mensagens de WhatsApp (opt-out LGPD)</label>
+          </div>
         </div>
         <div style={{display:'flex',gap:8,justifyContent:'flex-end',marginTop:8}}>
           <button className="btn btn-ghost" onClick={onClose}>Cancelar</button>
@@ -181,6 +185,7 @@ export default function Pacientes() {
             totalSessoes: totalSessoes,
             totalGasto: totalGasto,
             status: item.status || 'ativo',
+            whatsapp_opt_out: !!item.whatsapp_opt_out,
             avatar: item.avatar || (item.name ? item.name.charAt(0).toUpperCase() : 'U'),
             historico: historicoPaciente,
             createdAt: item.created_at || new Date().toISOString()
@@ -370,6 +375,7 @@ export default function Pacientes() {
       instagram: formData.instagram || '',
       birthdate: formData.nascimento || null,
       avatar: formData.nome.charAt(0).toUpperCase(),
+      whatsapp_opt_out: !!formData.whatsapp_opt_out,
     };
 
     const { data, error } = await updateClient(editModal.id, clientData);
@@ -475,6 +481,7 @@ export default function Pacientes() {
               instagram: editModal.instagram,
               nascimento: editModal.nascimento ? editModal.nascimento.split('/').reverse().join('-') : '',
               cidade: editModal.cidade,
+              whatsapp_opt_out: !!editModal.whatsapp_opt_out,
               obs: ''
             }} 
           />

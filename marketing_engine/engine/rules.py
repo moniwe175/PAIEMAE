@@ -23,10 +23,34 @@ import logging
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from typing import Callable, Literal
+from zoneinfo import ZoneInfo
 
 from supabase import Client
 
+from config.settings import settings
+
 logger = logging.getLogger("rules")
+
+# ─── Fuso horário e vocabulário de status ────────────────────────────────
+# Os horários dos agendamentos (appointment_date/appointment_time) são
+# gravados pelo site como horário LOCAL da clínica. Janelas de data/hora
+# usam now_clinic(); now_utc() só compara colunas timestamptz
+# (created_at/updated_at).
+CLINIC_TZ = ZoneInfo("America/Sao_Paulo")
+
+
+def now_clinic() -> datetime:
+    """Agora no fuso da clínica (comparável com appointment_time)."""
+    return datetime.now(CLINIC_TZ)
+
+
+# Status que o SITE realmente grava (aceita também legados em inglês):
+STATUS_ATIVOS = ["aguardando_confirmacao", "agendado", "confirmado",
+                 "em_atendimento", "scheduled", "confirmed"]
+STATUS_CONCLUIDO = ["finalizado", "completed"]
+STATUS_NOSHOW = ["cliente_faltou", "falta", "no_show"]
+STATUS_CANCELADO = ["cancelado", "cancelled"]
+STATUS_CLIENTE_ATIVO = ["ativo", "active"]
 
 # ---------------------------------------------------------------------------
 # Tipos
@@ -147,12 +171,12 @@ def tool_01_lembrete_24h(db: Client) -> list[QueueEntry]:
     if not tmpl:
         return []
 
-    tomorrow = (date.today() + timedelta(days=1)).isoformat()
+    tomorrow = (now_clinic().date() + timedelta(days=1)).isoformat()
     resp = (
         db.table("appointments")
         .select("id, client_id, client_name, client_phone, appointment_date, appointment_time, procedure, professional")
         .eq("appointment_date", tomorrow)
-        .in_("status", ["scheduled", "confirmed", "aguardando_confirmacao", "confirmado"])
+        .in_("status", STATUS_ATIVOS)
         .execute()
     )
 
@@ -189,15 +213,16 @@ def tool_02_lembrete_2h(db: Client) -> list[QueueEntry]:
     if not tmpl:
         return []
 
-    target_start = now_utc() + timedelta(hours=1, minutes=55)
-    target_end   = now_utc() + timedelta(hours=2, minutes=5)
-    today = date.today().isoformat()
+    now = now_clinic()
+    target_start = now + timedelta(hours=1, minutes=55)
+    target_end   = now + timedelta(hours=2, minutes=5)
+    today = now.date().isoformat()
 
     resp = (
         db.table("appointments")
         .select("id, client_id, client_name, client_phone, appointment_time, procedure, professional")
         .eq("appointment_date", today)
-        .in_("status", ["scheduled", "confirmed", "aguardando_confirmacao", "confirmado"])
+        .in_("status", STATUS_ATIVOS)
         .execute()
     )
 
@@ -207,7 +232,7 @@ def tool_02_lembrete_2h(db: Client) -> list[QueueEntry]:
             continue
 
         appt_dt = datetime.fromisoformat(f"{today}T{appt['appointment_time']}").replace(
-            tzinfo=timezone.utc
+            tzinfo=CLINIC_TZ
         )
         if not (target_start <= appt_dt <= target_end):
             continue
@@ -243,16 +268,16 @@ def tool_03_alerta_atraso_15min(db: Client) -> list[QueueEntry]:
     if not tmpl:
         return []
 
-    now      = now_utc()
+    now      = now_clinic()
     win_start = now - timedelta(minutes=20)
     win_end   = now - timedelta(minutes=10)
-    today    = date.today().isoformat()
+    today    = now.date().isoformat()
 
     resp = (
         db.table("appointments")
         .select("id, client_id, client_name, client_phone, appointment_time, professional")
         .eq("appointment_date", today)
-        .in_("status", ["scheduled", "confirmed", "aguardando_confirmacao", "confirmado"])
+        .in_("status", STATUS_ATIVOS)
         .execute()
     )
 
@@ -262,7 +287,7 @@ def tool_03_alerta_atraso_15min(db: Client) -> list[QueueEntry]:
             continue
 
         appt_dt = datetime.fromisoformat(f"{today}T{appt['appointment_time']}").replace(
-            tzinfo=timezone.utc
+            tzinfo=CLINIC_TZ
         )
         if not (win_start <= appt_dt <= win_end):
             continue
@@ -294,12 +319,12 @@ def tool_04_no_show_24h(db: Client) -> list[QueueEntry]:
     if not tmpl:
         return []
 
-    yesterday = (date.today() - timedelta(days=1)).isoformat()
+    yesterday = (now_clinic().date() - timedelta(days=1)).isoformat()
     resp = (
         db.table("appointments")
         .select("id, client_id, client_name, client_phone, appointment_time")
         .eq("appointment_date", yesterday)
-        .eq("status", "no_show")
+        .in_("status", STATUS_NOSHOW)
         .execute()
     )
 
@@ -334,11 +359,11 @@ def tool_05_aniversario(db: Client) -> list[QueueEntry]:
     if not tmpl:
         return []
 
-    today = date.today()
+    today = now_clinic().date()
     resp = (
         db.table("clients")
         .select("id, name, phone, birthdate")
-        .eq("status", "active")
+        .in_("status", STATUS_CLIENTE_ATIVO)
         .not_.is_("birthdate", "null")
         .eq("whatsapp_opt_out", False)
         .execute()
@@ -387,7 +412,7 @@ def tool_06_boas_vindas(db: Client) -> list[QueueEntry]:
     resp = (
         db.table("appointments")
         .select("id, client_id, client_name, client_phone")
-        .eq("status", "completed")
+        .in_("status", STATUS_CONCLUIDO)
         .gte("updated_at", cutoff)
         .execute()
     )
@@ -402,7 +427,7 @@ def tool_06_boas_vindas(db: Client) -> list[QueueEntry]:
             db.table("appointments")
             .select("id", count="exact")
             .eq("client_id", appt["client_id"])
-            .eq("status", "completed")
+            .in_("status", STATUS_CONCLUIDO)
             .execute()
         )
         if count_resp.count != 1:
@@ -442,7 +467,7 @@ def tool_07_confirmacao_agendamento(db: Client) -> list[QueueEntry]:
         db.table("appointments")
         .select("id, client_id, client_name, client_phone, appointment_date, appointment_time, procedure, professional")
         .gte("created_at", cutoff)
-        .in_("status", ["scheduled", "confirmed", "aguardando_confirmacao"])
+        .in_("status", STATUS_ATIVOS)
         .execute()
     )
 
@@ -483,7 +508,7 @@ def tool_08_pre_procedimento(db: Client) -> list[QueueEntry]:
     if not tmpl:
         return []
 
-    tomorrow = (date.today() + timedelta(days=1)).isoformat()
+    tomorrow = (now_clinic().date() + timedelta(days=1)).isoformat()
 
     servicos_resp = (
         db.table("servicos")
@@ -500,7 +525,7 @@ def tool_08_pre_procedimento(db: Client) -> list[QueueEntry]:
         db.table("appointments")
         .select("id, client_id, client_name, client_phone, appointment_time, procedure, professional")
         .eq("appointment_date", tomorrow)
-        .in_("status", ["scheduled", "confirmed", "aguardando_confirmacao", "confirmado"])
+        .in_("status", STATUS_ATIVOS)
         .execute()
     )
 
@@ -540,7 +565,7 @@ def tool_09_pos_procedimento(db: Client) -> list[QueueEntry]:
     if not tmpl:
         return []
 
-    yesterday = (date.today() - timedelta(days=1)).isoformat()
+    yesterday = (now_clinic().date() - timedelta(days=1)).isoformat()
 
     servicos_resp = (
         db.table("servicos")
@@ -557,7 +582,7 @@ def tool_09_pos_procedimento(db: Client) -> list[QueueEntry]:
         db.table("appointments")
         .select("id, client_id, client_name, client_phone, procedure")
         .eq("appointment_date", yesterday)
-        .eq("status", "completed")
+        .in_("status", STATUS_CONCLUIDO)
         .execute()
     )
 
@@ -597,13 +622,13 @@ def tool_10_lembrete_exames(db: Client) -> list[QueueEntry]:
     if not tmpl:
         return []
 
-    tomorrow = (date.today() + timedelta(days=1)).isoformat()
+    tomorrow = (now_clinic().date() + timedelta(days=1)).isoformat()
     resp = (
         db.table("appointments")
         .select("id, client_id, client_name, client_phone")
         .eq("appointment_date", tomorrow)
         .eq("exames_pendentes", True)
-        .in_("status", ["scheduled", "confirmed", "aguardando_confirmacao", "confirmado"])
+        .in_("status", STATUS_ATIVOS)
         .execute()
     )
 
@@ -629,7 +654,7 @@ def tool_10_lembrete_exames(db: Client) -> list[QueueEntry]:
     return entries
 
 
-def tool_11_nps(db: Client, dias_apos_consulta: int = 3) -> list[QueueEntry]:
+def tool_11_nps(db: Client, dias_apos_consulta: int = settings.NPS_DIAS_APOS_CONSULTA) -> list[QueueEntry]:
     """
     Pesquisa de satisfação X dias após consulta concluída.
     Configurável via settings.NPS_DIAS_APOS_CONSULTA.
@@ -638,12 +663,12 @@ def tool_11_nps(db: Client, dias_apos_consulta: int = 3) -> list[QueueEntry]:
     if not tmpl:
         return []
 
-    target_date = (date.today() - timedelta(days=dias_apos_consulta)).isoformat()
+    target_date = (now_clinic().date() - timedelta(days=dias_apos_consulta)).isoformat()
     resp = (
         db.table("appointments")
         .select("id, client_id, client_name, client_phone")
         .eq("appointment_date", target_date)
-        .eq("status", "completed")
+        .in_("status", STATUS_CONCLUIDO)
         .execute()
     )
 
@@ -682,14 +707,18 @@ def tool_12_recuperacao_orcamento(db: Client, dias: int = 7) -> list[QueueEntry]
     if not tmpl:
         return []
 
-    cutoff = (date.today() - timedelta(days=dias)).isoformat()
-    resp = (
-        db.table("orcamentos")
-        .select("id, client_id, servico_id, created_at")
-        .eq("status", "pendente")
-        .lte("created_at", cutoff)
-        .execute()
-    )
+    cutoff = (now_clinic().date() - timedelta(days=dias)).isoformat()
+    try:
+        resp = (
+            db.table("orcamentos")
+            .select("id, client_id, servico_id, created_at")
+            .eq("status", "pendente")
+            .lte("created_at", cutoff)
+            .execute()
+        )
+    except Exception as exc:
+        logger.warning("tool_12: tabela 'orcamentos' indisponível (%s). Ferramenta pausada até a feature de orçamentos existir.", exc)
+        return []
 
     entries = []
     for orc in resp.data or []:
@@ -745,13 +774,13 @@ def tool_13_inativo_30d(db: Client) -> list[QueueEntry]:
     if not tmpl:
         return []
 
-    cutoff_fim = (date.today() - timedelta(days=30)).isoformat()
-    cutoff_ini = (date.today() - timedelta(days=31)).isoformat()
+    cutoff_fim = (now_clinic().date() - timedelta(days=30)).isoformat()
+    cutoff_ini = (now_clinic().date() - timedelta(days=31)).isoformat()
 
     resp = (
         db.table("clients")
         .select("id, name, phone, last_visit")
-        .eq("status", "active")
+        .in_("status", STATUS_CLIENTE_ATIVO)
         .lte("last_visit", cutoff_fim)
         .gte("last_visit", cutoff_ini)
         .not_.is_("phone", "null")
@@ -784,13 +813,13 @@ def tool_14_inativo_90d(db: Client) -> list[QueueEntry]:
     if not tmpl:
         return []
 
-    cutoff_fim = (date.today() - timedelta(days=90)).isoformat()
-    cutoff_ini = (date.today() - timedelta(days=91)).isoformat()
+    cutoff_fim = (now_clinic().date() - timedelta(days=90)).isoformat()
+    cutoff_ini = (now_clinic().date() - timedelta(days=91)).isoformat()
 
     resp = (
         db.table("clients")
         .select("id, name, phone, last_visit")
-        .eq("status", "active")
+        .in_("status", STATUS_CLIENTE_ATIVO)
         .lte("last_visit", cutoff_fim)
         .gte("last_visit", cutoff_ini)
         .not_.is_("phone", "null")
@@ -845,7 +874,7 @@ def tool_15_pacote_proximo_fim(db: Client) -> list[QueueEntry]:
             db.table("appointments")
             .select("client_id, client_name, client_phone")
             .eq("procedure", servico["nome"])
-            .eq("status", "completed")
+            .in_("status", STATUS_CONCLUIDO)
             .execute()
         )
 
@@ -911,13 +940,13 @@ def tool_16_retorno_inteligente(db: Client) -> list[QueueEntry]:
     entries = []
     for servico in servicos_resp.data or []:
         dias = servico["dias_para_retorno"]
-        target_date = (date.today() - timedelta(days=dias)).isoformat()
+        target_date = (now_clinic().date() - timedelta(days=dias)).isoformat()
 
         appts_resp = (
             db.table("appointments")
             .select("id, client_id, client_name, client_phone, procedure")
             .eq("appointment_date", target_date)
-            .eq("status", "completed")
+            .in_("status", STATUS_CONCLUIDO)
             .ilike("procedure", servico["nome"])
             .execute()
         )
@@ -952,19 +981,19 @@ def tool_16_retorno_inteligente(db: Client) -> list[QueueEntry]:
     return entries
 
 
-def tool_17_recuperacao_cancelamento(db: Client, dias: int = 3) -> list[QueueEntry]:
+def tool_17_recuperacao_cancelamento(db: Client, dias: int = settings.CANCELAMENTO_DIAS) -> list[QueueEntry]:
     """Pacientes que cancelaram e não reagendaram em X dias."""
     tmpl = get_template(db, 17)
     if not tmpl:
         return []
 
-    cutoff_fim = (date.today() - timedelta(days=dias)).isoformat()
-    cutoff_ini = (date.today() - timedelta(days=dias + 1)).isoformat()
+    cutoff_fim = (now_clinic().date() - timedelta(days=dias)).isoformat()
+    cutoff_ini = (now_clinic().date() - timedelta(days=dias + 1)).isoformat()
 
     resp = (
         db.table("appointments")
         .select("id, client_id, client_name, client_phone")
-        .eq("status", "cancelled")
+        .in_("status", STATUS_CANCELADO)
         .lte("appointment_date", cutoff_fim)
         .gte("appointment_date", cutoff_ini)
         .execute()
@@ -981,7 +1010,7 @@ def tool_17_recuperacao_cancelamento(db: Client, dias: int = 3) -> list[QueueEnt
             .select("id", count="exact")
             .eq("client_id", appt["client_id"])
             .gte("created_at", cutoff_ini)
-            .in_("status", ["scheduled", "confirmed", "aguardando_confirmacao"])
+            .in_("status", STATUS_ATIVOS)
             .execute()
         )
         if reagendou.count and reagendou.count > 0:
@@ -1004,7 +1033,7 @@ def tool_17_recuperacao_cancelamento(db: Client, dias: int = 3) -> list[QueueEnt
     return entries
 
 
-def tool_18_upgrade_crosssell(db: Client, dias_apos: int = 14) -> list[QueueEntry]:
+def tool_18_upgrade_crosssell(db: Client, dias_apos: int = settings.CROSSSELL_DIAS_APOS) -> list[QueueEntry]:
     """
     Sugestão de procedimento complementar X dias após serviço base.
     Configurável via settings.CROSSSELL_DIAS_APOS.
@@ -1013,12 +1042,12 @@ def tool_18_upgrade_crosssell(db: Client, dias_apos: int = 14) -> list[QueueEntr
     if not tmpl:
         return []
 
-    target_date = (date.today() - timedelta(days=dias_apos)).isoformat()
+    target_date = (now_clinic().date() - timedelta(days=dias_apos)).isoformat()
     resp = (
         db.table("appointments")
         .select("id, client_id, client_name, client_phone, procedure")
         .eq("appointment_date", target_date)
-        .eq("status", "completed")
+        .in_("status", STATUS_CONCLUIDO)
         .execute()
     )
 
@@ -1058,7 +1087,7 @@ def tool_19_data_comemorativa(db: Client) -> list[QueueEntry]:
     if not tmpl:
         return []
 
-    today = date.today()
+    today = now_clinic().date()
 
     # Adicione ou remova datas conforme o calendário da clínica
     datas_comemorativas: dict[tuple, str] = {
@@ -1076,7 +1105,7 @@ def tool_19_data_comemorativa(db: Client) -> list[QueueEntry]:
     resp = (
         db.table("clients")
         .select("id, name, phone")
-        .eq("status", "active")
+        .in_("status", STATUS_CLIENTE_ATIVO)
         .not_.is_("phone", "null")
         .not_.is_("last_visit", "null")
         .eq("whatsapp_opt_out", False)

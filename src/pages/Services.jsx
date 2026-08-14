@@ -17,6 +17,10 @@ function ServicoModal({ onClose, onSave, servico }) {
     preco: servico?.preco || '',
     comissao: servico?.comissao || '',
     descricao: servico?.descricao || '',
+    dias_para_retorno: servico?.dias_para_retorno || '',
+    sessoes_pacote: servico?.sessoes_pacote || '',
+    exige_preparo: !!servico?.exige_preparo,
+    exige_pos_procedimento: !!servico?.exige_pos_procedimento,
     fichasObrigatorias: servico?.fichasObrigatorias || (servico?.fichaObrigatoria ? [servico.fichaObrigatoria] : []),
   });
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
@@ -57,6 +61,24 @@ function ServicoModal({ onClose, onSave, servico }) {
           <div className="form-group">
             <label className="form-label">Comissão (%)</label>
             <input className="form-input" type="number" placeholder="30" value={form.comissao} onChange={e => set('comissao', e.target.value)} />
+          </div>
+          <div className="form-group">
+            <label className="form-label">Retorno ideal (dias)</label>
+            <input className="form-input" type="number" placeholder="Ex: 30 (vazio = sem retorno)" value={form.dias_para_retorno} onChange={e => set('dias_para_retorno', e.target.value)} />
+          </div>
+          <div className="form-group">
+            <label className="form-label">Sessões do pacote</label>
+            <input className="form-input" type="number" placeholder="Ex: 10 (vazio = avulso)" value={form.sessoes_pacote} onChange={e => set('sessoes_pacote', e.target.value)} />
+          </div>
+          <div className="form-group" style={{ gridColumn: 'span 2', display: 'flex', gap: 18, alignItems: 'center', flexWrap: 'wrap' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, cursor: 'pointer' }}>
+              <input type="checkbox" checked={!!form.exige_preparo} onChange={e => set('exige_preparo', e.target.checked)} />
+              Enviar orientações pré-procedimento (24h antes)
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, cursor: 'pointer' }}>
+              <input type="checkbox" checked={!!form.exige_pos_procedimento} onChange={e => set('exige_pos_procedimento', e.target.checked)} />
+              Enviar dicas pós-procedimento (24h depois)
+            </label>
           </div>
           <div className="form-group" style={{ gridColumn: 'span 2' }}>
             <label className="form-label">Fichas de Anamnese Obrigatórias</label>

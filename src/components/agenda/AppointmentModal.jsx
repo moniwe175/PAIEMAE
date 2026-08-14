@@ -290,7 +290,7 @@ export default function AppointmentModal({ open, onClose, onSave, onDelete, appo
                   <SelectItem value="em_atendimento">Em Atendimento</SelectItem>
                   <SelectItem value="finalizado">Finalizado</SelectItem>
                   <SelectItem value="cancelado">Cancelado</SelectItem>
-                  <SelectItem value="falta">Falta</SelectItem>
+                  <SelectItem value="cliente_faltou">Falta</SelectItem>
                 </SelectContent>
               </Select>
             </div>
