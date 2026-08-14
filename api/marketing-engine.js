@@ -19,7 +19,7 @@ const SUPABASE_URL = process.env.SUPABASE_URL || 'https://ecwizjyflxcickbfzhcp.s
 // Chave service_role (a mesma já embutida no INICIAR_SISTEMA_MARKETING.bat).
 const SERVICE_KEY =
   process.env.SUPABASE_SERVICE_KEY ||
-  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVjd2l6anlmbHhjaWNrYmZ6aGNwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NzQwMDAwNSwiZXhwIjoyMDkyOTc2MDg1fQ.DzUFVGW4kxQrKQABHw6s02JJxWDYrGxH0hzLFOQ0YZE';
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVjd2l6anlmbHhjaWNrYmZ6aGNwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NzQwMDA4NSwiZXhwIjoyMDkyOTc2MDg1fQ.DzUFVGW4kxQrKQABHw6s02JJxWDYrGxH0hzLFOQ0YZE';
 
 const TZ = 'America/Sao_Paulo';
 const DAY_MS = 86400000;

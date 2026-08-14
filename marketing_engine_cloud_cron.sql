@@ -27,7 +27,7 @@ SELECT cron.schedule(
   '0,30 * * * *',
   $$SELECT net.http_post(
       url := 'https://paiemae.vercel.app/api/marketing-engine?half=1',
-      headers := '{"Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVjd2l6anlmbHhjaWNrYmZ6aGNwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NzQwMDAwNSwiZXhwIjoyMDkyOTc2MDg1fQ.DzUFVGW4kxQrKQABHw6s02JJxWDYrGxH0hzLFOQ0YZE", "Content-Type": "application/json"}'::jsonb,
+      headers := '{"Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVjd2l6anlmbHhjaWNrYmZ6aGNwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NzQwMDA4NSwiZXhwIjoyMDkyOTc2MDg1fQ.DzUFVGW4kxQrKQABHw6s02JJxWDYrGxH0hzLFOQ0YZE", "Content-Type": "application/json"}'::jsonb,
       body := '{}'::jsonb
   )$$
 );
@@ -38,7 +38,7 @@ SELECT cron.schedule(
   '15,45 * * * *',
   $$SELECT net.http_post(
       url := 'https://paiemae.vercel.app/api/marketing-engine?half=2',
-      headers := '{"Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVjd2l6anlmbHhjaWNrYmZ6aGNwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NzQwMDAwNSwiZXhwIjoyMDkyOTc2MDg1fQ.DzUFVGW4kxQrKQABHw6s02JJxWDYrGxH0hzLFOQ0YZE", "Content-Type": "application/json"}'::jsonb,
+      headers := '{"Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVjd2l6anlmbHhjaWNrYmZ6aGNwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NzQwMDA4NSwiZXhwIjoyMDkyOTc2MDg1fQ.DzUFVGW4kxQrKQABHw6s02JJxWDYrGxH0hzLFOQ0YZE", "Content-Type": "application/json"}'::jsonb,
       body := '{}'::jsonb
   )$$
 );
@@ -48,7 +48,7 @@ SELECT cron.schedule(
 -- -----------------------------------------------------------------------------
 SELECT net.http_post(
   url := 'https://paiemae.vercel.app/api/marketing-engine?half=1',
-  headers := '{"Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVjd2l6anlmbHhjaWNrYmZ6aGNwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NzQwMDAwNSwiZXhwIjoyMDkyOTc2MDg1fQ.DzUFVGW4kxQrKQABHw6s02JJxWDYrGxH0hzLFOQ0YZE", "Content-Type": "application/json"}'::jsonb,
+  headers := '{"Authorization": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVjd2l6anlmbHhjaWNrYmZ6aGNwIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NzQwMDA4NSwiZXhwIjoyMDkyOTc2MDg1fQ.DzUFVGW4kxQrKQABHw6s02JJxWDYrGxH0hzLFOQ0YZE", "Content-Type": "application/json"}'::jsonb,
   body := '{}'::jsonb
 );
 
