@@ -81,20 +81,15 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 
-:: 4. VERIFICAR PYTHON
-set "PY_OK=0"
-where python >nul 2>nul && set "PY_OK=1"
-where py >nul 2>nul && set "PY_OK=1"
-where python3 >nul 2>nul && set "PY_OK=1"
-
-if "%PY_OK%"=="0" (
+:: 4. VERIFICAR NODE.JS
+where node >nul 2>nul
+if %errorlevel% neq 0 (
     color 0C
     echo ========================================================
-    echo ERRO CRITICO: Python NAO esta instalado neste computador!
+    echo ERRO CRITICO: Node.js NAO esta instalado neste computador!
     echo ========================================================
-    echo 1. Baixe em: https://www.python.org/downloads
-    echo 2. IMPORTANTE: marque "[X] Add Python to PATH"
-    echo 3. Instale, feche esta janela e abra novamente.
+    echo 1. Baixe em: https://nodejs.org  ^(versao LTS^)
+    echo 2. Instale, feche este programa e abra novamente.
     echo ========================================================
     echo.
     pause
@@ -102,29 +97,23 @@ if "%PY_OK%"=="0" (
 )
 
 echo [OK] Node.js detectado com sucesso!
-echo [OK] Python detectado com sucesso!
 echo.
-echo Iniciando os dois servicos em janelas separadas...
-echo Na primeira vez pode demorar mais, pois vai instalar
-echo as dependencias automaticamente.
+echo Iniciando o Worker WhatsApp...
+echo (O motor de marketing agora roda NA NUVEM — nao precisa de Python.)
 echo.
 
-:: 5. INICIAR WORKER WHATSAPP
+:: 5. INICIAR WORKER WHATSAPP (unica janela necessaria neste PC)
 start "Worker WhatsApp - Clinica Evelyn" cmd /k "cd /d "%BASE_DIR%worker_whatsapp" && call iniciar_worker.bat"
 
-:: 6. INICIAR ENGINE PYTHON
-start "Engine Marketing - Clinica Evelyn" cmd /k "cd /d "%BASE_DIR%marketing_engine" && call iniciar_engine.bat"
-
 echo.
 echo ================================================
-echo   Os dois servicos foram iniciados!
+echo   Worker WhatsApp iniciado!
 echo ================================================
 echo.
-echo Duas janelas foram abertas:
-echo   - VERDE: Worker WhatsApp (Node.js)
-echo   - AZUL:  Engine Marketing (Python - 19 ferramentas)
+echo As 19 ferramentas do motor rodam na nuvem (Supabase/Vercel).
+echo Este PC so precisa manter a janela VERDE aberta para enviar.
 echo.
 echo Pode fechar ESTA janela principal.
-echo NAO feche as duas janelas abertas (Verde e Azul)!
+echo NAO feche a janela VERDE do Worker WhatsApp!
 echo.
 pause

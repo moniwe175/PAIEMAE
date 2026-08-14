@@ -1250,6 +1250,9 @@ export async function approveMessage(id) {
       status: 'approved',
       approved_by: 'gestora',
       approved_at: new Date().toISOString(),
+      // Aprovar renova o relógio: a Regra de Vencimento (1h) conta a partir
+      // da aprovação, não da geração — útil quando o worker estava desligado.
+      scheduled_at: new Date().toISOString(),
     })
     .eq('id', id)
     .select()
