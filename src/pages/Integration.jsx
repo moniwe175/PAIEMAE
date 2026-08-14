@@ -96,6 +96,7 @@ export default function Integration() {
   const [waStatus, setWaStatus] = useState(null);
   const [qrCountdown, setQrCountdown] = useState(60);
   const [fetchWaStatusFn, setFetchWaStatusFn] = useState(null);
+  const [hbTick, setHbTick] = useState(Date.now()); // reavalia "velhice" do heartbeat
 
   const loadSheets = async () => {
     setLoading(true);
@@ -199,6 +200,23 @@ export default function Integration() {
   }, [waStatus?.status]);
 
   console.log('[DEBUG] waStatus atual:', waStatus);
+
+  // Relógio do heartbeat: re-renderiza a cada 15s pra detectar status velho
+  useEffect(() => {
+    const t = setInterval(() => setHbTick(Date.now()), 15000);
+    return () => clearInterval(t);
+  }, []);
+
+  // Se o worker não atualiza updated_at há 2 min, a janela verde fechou:
+  // trata como desconectado (badge vermelho) mesmo com status antigo 'connected'.
+  const WA_HEARTBEAT_STALE_MS = 2 * 60 * 1000;
+  const waHeartbeatStale =
+    !!waStatus?.updated_at &&
+    hbTick - new Date(waStatus.updated_at).getTime() > WA_HEARTBEAT_STALE_MS;
+  const waEffective =
+    waHeartbeatStale && ['connected', 'connecting', 'qr_ready'].includes(waStatus?.status)
+      ? 'disconnected'
+      : waStatus?.status;
 
   const isSheetConnected = syncStatus === 'connected' || syncStatus === 'connecting';
 
@@ -842,18 +860,19 @@ export default function Integration() {
               <div style={{
                 width: 48, height: 48, borderRadius: 12,
                 background: 
-                  waStatus?.status === 'connected' ? '#2ECC7118' :
-                  waStatus?.status === 'connecting' ? '#F39C1218' :
-                  waStatus?.status === 'qr_ready' ? '#F39C1218' :
+                  waEffective === 'connected' ? '#2ECC7118' :
+                  waEffective === 'connecting' ? '#F39C1218' :
+                  waEffective === 'qr_ready' ? '#F39C1218' :
+                  waEffective === 'disconnected' ? 'var(--danger-bg)' :
                   '#e0e0e0',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                 flexShrink: 0,
               }}>
-                {waStatus?.status === 'connected' && <CheckCircle style={{ width: 22, height: 22, color: 'var(--success)' }} />}
-                {waStatus?.status === 'connecting' && <Loader2 style={{ width: 22, height: 22, color: '#F39C12', animation: 'spin 1s linear infinite' }} />}
-                {waStatus?.status === 'qr_ready' && <Clock style={{ width: 22, height: 22, color: '#F39C12' }} />}
-                {(!waStatus || waStatus?.status === 'disconnected') && <WifiOff style={{ width: 22, height: 22, color: '#7f8c8d' }} />}
-                {waStatus?.status === 'error' && <AlertTriangle style={{ width: 22, height: 22, color: '#FF9AA2' }} />}
+                {waEffective === 'connected' && <CheckCircle style={{ width: 22, height: 22, color: 'var(--success)' }} />}
+                {waEffective === 'connecting' && <Loader2 style={{ width: 22, height: 22, color: '#F39C12', animation: 'spin 1s linear infinite' }} />}
+                {waEffective === 'qr_ready' && <Clock style={{ width: 22, height: 22, color: '#F39C12' }} />}
+                {(!waEffective || waEffective === 'disconnected') && <WifiOff style={{ width: 22, height: 22, color: 'var(--danger)' }} />}
+                {waEffective === 'error' && <AlertTriangle style={{ width: 22, height: 22, color: '#FF9AA2' }} />}
               </div>
 
               {/* Text block */}
@@ -866,30 +885,30 @@ export default function Integration() {
                     className="badge"
                     style={{
                       background: 
-                        waStatus?.status === 'connected' ? 'var(--success-bg)' :
-                        waStatus?.status === 'connecting' ? '#F39C121d' :
-                        waStatus?.status === 'qr_ready' ? '#F39C121d' :
-                        waStatus?.status === 'error' ? 'var(--danger-bg)' :
+                        waEffective === 'connected' ? 'var(--success-bg)' :
+                        waEffective === 'connecting' ? '#F39C121d' :
+                        waEffective === 'qr_ready' ? '#F39C121d' :
+                        waEffective === 'error' ? 'var(--danger-bg)' :
                         'var(--danger-bg)',
                       color: 
-                        waStatus?.status === 'connected' ? 'var(--success)' :
-                        waStatus?.status === 'connecting' ? '#F39C12' :
-                        waStatus?.status === 'qr_ready' ? '#F39C12' :
-                        waStatus?.status === 'error' ? 'var(--danger)' :
+                        waEffective === 'connected' ? 'var(--success)' :
+                        waEffective === 'connecting' ? '#F39C12' :
+                        waEffective === 'qr_ready' ? '#F39C12' :
+                        waEffective === 'error' ? 'var(--danger)' :
                         'var(--danger)',
                       fontSize: 10,
                     }}
                   >
-                    {waStatus?.status === 'connected' && 'Conectado ✅'}
-                    {waStatus?.status === 'connecting' && 'Conectando...'}
-                    {waStatus?.status === 'qr_ready' && 'Aguardando escaneamento'}
-                    {(!waStatus || waStatus?.status === 'disconnected') && 'Desconectado'}
-                    {waStatus?.status === 'error' && 'Erro'}
+                    {waEffective === 'connected' && 'Conectado ✅'}
+                    {waEffective === 'connecting' && 'Conectando...'}
+                    {waEffective === 'qr_ready' && 'Aguardando escaneamento'}
+                    {(!waEffective || waEffective === 'disconnected') && 'Desconectado'}
+                    {waEffective === 'error' && 'Erro'}
                   </span>
                 </div>
 
                 {/* Conditional Rendering based on Status */}
-                {(!waStatus || waStatus.status === 'disconnected') && (
+                {(!waEffective || waEffective === 'disconnected') && (
                   <div>
                     <p style={{ fontSize: 13, color: 'var(--text-medium)', lineHeight: 1.6, margin: '0 0 10px' }}>
                       WhatsApp desconectado
@@ -902,10 +921,15 @@ export default function Integration() {
                     <p style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.5, margin: 0 }}>
                       Após iniciar o worker, o QR Code aparecerá aqui automaticamente.
                     </p>
+                    {waStatus?.updated_at && (
+                      <p style={{ fontSize: 12, color: 'var(--danger)', lineHeight: 1.5, margin: '10px 0 0' }}>
+                        Último sinal do worker: {new Date(waStatus.updated_at).toLocaleString('pt-BR')}. Se a janela verde estiver aberta na clínica, aguarde alguns segundos.
+                      </p>
+                    )}
                   </div>
                 )}
 
-                {waStatus?.status === 'connecting' && (
+                {waEffective === 'connecting' && (
                   <div>
                     <p style={{ fontSize: 13, color: 'var(--text-medium)', lineHeight: 1.6, margin: '0' }}>
                       Iniciando a conexão com o WhatsApp...
@@ -913,7 +937,7 @@ export default function Integration() {
                   </div>
                 )}
 
-                {waStatus?.status === 'qr_ready' && (
+                {waEffective === 'qr_ready' && (
                   <div>
                     <p style={{ fontSize: 16, color: 'var(--text-dark)', fontWeight: 700, margin: '0 0 8px' }}>
                       📱 Escaneie o QR Code agora
@@ -955,7 +979,7 @@ export default function Integration() {
                   </div>
                 )}
 
-                {waStatus?.status === 'connected' && (
+                {waEffective === 'connected' && (
                   <div>
                     <p style={{ fontSize: 13, color: 'var(--text-dark)', fontWeight: 700, margin: '0 0 10px' }}>
                       Número ativo: {waStatus.phone_number}
@@ -966,7 +990,7 @@ export default function Integration() {
                   </div>
                 )}
 
-                {waStatus?.status === 'error' && (
+                {waEffective === 'error' && (
                   <div>
                     {waStatus.error_message && (
                       <div style={{

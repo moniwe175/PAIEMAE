@@ -22,9 +22,11 @@ const logger = pino({ level: 'silent' });
 
 let sock = null;
 let isConnected = false;
+let lastStatus = null; // último status publicado (usado pelo heartbeat)
 
 async function setWAStatus(status, extra = {}) {
   try {
+    lastStatus = status;
     const payload = {
       id: 1,
       status,
@@ -203,6 +205,19 @@ async function start() {
   await connectToWhatsApp();
 
   setInterval(processQueue, POLL_INTERVAL_MS);
+
+  // Heartbeat: sinal de vida a cada 30s. Se a janela verde fechar, o
+  // updated_at fica velho e o site passa a mostrar "Desconectado" (vermelho).
+  setInterval(() => { setWAStatus(lastStatus || (isConnected ? 'connected' : 'connecting')); }, 30000);
 }
+
+// Ctrl+C publica disconnected antes de sair.
+// Fechar no X da janela não dispara sinal — o heartbeat cobre esse caso.
+function gracefulShutdown(sig) {
+  console.log(`[Worker WhatsApp] ${sig} recebido — publicando status disconnected...`);
+  setWAStatus('disconnected').finally(() => process.exit(0));
+}
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 
 start();
