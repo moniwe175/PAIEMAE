@@ -92,7 +92,7 @@ INSERT INTO public.roles (id, name, permissions) VALUES
 ON CONFLICT (name) DO NOTHING;
 
 -- 4. Funcao RPC para listar equipe com perfis e cargos vinculados
-DROP FUNCTION IF EXISTS public.list_team_members();
+--    (com trava de admin — mesma protecao do fix_rpc_admin_gate.sql)
 CREATE OR REPLACE FUNCTION public.list_team_members()
 RETURNS TABLE (
   id uuid,
@@ -103,9 +103,16 @@ RETURNS TABLE (
   permissions jsonb,
   created_at timestamptz
 ) 
-LANGUAGE sql
+LANGUAGE plpgsql
 SECURITY DEFINER
+SET search_path = public
 AS $$
+BEGIN
+  IF NOT public.is_admin() THEN
+    RAISE EXCEPTION 'Acesso negado: somente administradores podem listar a equipe';
+  END IF;
+
+  RETURN QUERY
   SELECT 
     p.id,
     u.email::text,
@@ -117,4 +124,5 @@ AS $$
   FROM public.profiles p
   JOIN auth.users u ON u.id = p.id
   ORDER BY p.created_at DESC;
+END;
 $$;
