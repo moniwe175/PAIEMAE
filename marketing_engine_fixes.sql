@@ -106,6 +106,15 @@ CREATE TABLE IF NOT EXISTS public.marketing_log (
   created_at        timestamptz  NOT NULL DEFAULT now()
 );
 
+-- Se a tabela já existia com outro formato, garante as colunas que o motor usa
+ALTER TABLE public.marketing_log
+  ADD COLUMN IF NOT EXISTS tool_id integer,
+  ADD COLUMN IF NOT EXISTS tool_name text,
+  ADD COLUMN IF NOT EXISTS entries_generated integer NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS entries_inserted integer NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS error text,
+  ADD COLUMN IF NOT EXISTS created_at timestamptz NOT NULL DEFAULT now();
+
 CREATE INDEX IF NOT EXISTS idx_marketing_log_tool
   ON public.marketing_log (tool_id, created_at);
 
