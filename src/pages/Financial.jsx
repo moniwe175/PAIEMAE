@@ -95,8 +95,10 @@ export default function Financial() {
   const [syncing, setSyncing] = useState(false);
 
 
-  // ─── Supabase Realtime + Polling automático: atualiza sem precisar de F5 ───
+  // ─── Auto-sync silencioso a cada 10s (igual ao botão manual, mas automático) ───
   useEffect(() => {
+    let isMounted = true;
+
     async function fetchFinancialData() {
       try {
         const [stRes, summaryRes, expRes] = await Promise.all([
@@ -104,6 +106,7 @@ export default function Financial() {
           sbFetchSheetSummary(),
           sbFetchExpenses(),
         ]);
+        if (!isMounted) return;
         if (!stRes.error && stRes.data) setSheetTransactions(stRes.data);
         if (!summaryRes.error && summaryRes.data) setSheetSummary(summaryRes.data);
         if (!expRes.error && expRes.data) setExpenses(expRes.data);
@@ -112,13 +115,32 @@ export default function Financial() {
       }
     }
 
-    // Buscar dados iniciais imediatamente
+    async function autoSync() {
+      if (!isMounted) return;
+      try {
+        // Chama a mesma Edge Function que o botão manual usa
+        const result = await syncSheetToSupabase(syncConfig?.sheet_url, {
+          connectionId: syncConfig?.id,
+          id: syncConfig?.id,
+        });
+        if (result.success && isMounted) {
+          await fetchFinancialData();
+        }
+      } catch (e) {
+        // silencioso em auto-sync
+      }
+    }
+
+    // Busca imediata ao abrir a página
     fetchFinancialData();
 
-    // ── Polling de 3 segundos: garante atualização mesmo sem Realtime ──
+    // Polling leve de 3s: mantém UI atualizada com o que já está no banco
     const pollInterval = setInterval(fetchFinancialData, 3000);
 
-    // ── Realtime: reage imediatamente quando o Apps Script faz upsert ──
+    // Auto-sync completo a cada 10s: força releitura da planilha (como o botão manual)
+    const syncInterval = setInterval(autoSync, 10000);
+
+    // Realtime: reage imediatamente quando o Apps Script faz upsert
     const channel = supabase
       .channel('financial-realtime')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'sheet_transactions' }, fetchFinancialData)
@@ -127,10 +149,12 @@ export default function Financial() {
       .subscribe();
 
     return () => {
+      isMounted = false;
       clearInterval(pollInterval);
+      clearInterval(syncInterval);
       supabase.removeChannel(channel);
     };
-  }, []);
+  }, [syncConfig]);
 
   const handleManualSync = async () => {
     setSyncing(true);
