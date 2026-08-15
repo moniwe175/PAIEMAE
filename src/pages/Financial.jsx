@@ -329,10 +329,8 @@ export default function Financial() {
   const totalSangriasHoje = totalSaidasDinheiro;
 
   const saldoAtual = fundoInicial + entradasDinheiroFisico - totalSaidasDinheiro;
-  // Se caixa aberto: calcula ao vivo. Se fechado: usa closing_balance salvo (já consolidado)
-  const fundoFinalDinheiro = isCaixaAberto
-    ? saldoAtual
-    : (safeNum(todayCashier?.closing_balance) || saldoAtual);
+  // Fundo final é SEMPRE o cálculo dinâmico em tempo real: Fundo Inicial + Entradas Dinheiro - Saídas Dinheiro
+  const fundoFinalDinheiro = saldoAtual;
 
   // Totais informativos (não afetam saldo físico)
   const pixTotalHoje = receitasSheet.reduce((a, t) => a + safeNum(t.pix), 0);
