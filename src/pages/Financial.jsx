@@ -231,21 +231,35 @@ export default function Financial() {
   // Dados reais vindos de sheet_transactions
   const safeSheetTx = Array.isArray(sheetTransactions) ? sheetTransactions : [];
 
-  // ─ Helper para normalizar o tipo de linha ─
+  // ─ Helper para normalizar o tipo de linha e descrição ─
   const getRowType = (t) => String(t.row_type || t.tipo || '').toLowerCase().trim();
+  const getRowDesc = (t) => String(t.client || t.cliente || t.descricao || t.procedure || t.procedimento || '').toLowerCase().trim();
 
-  // ─ Separação das transações da planilha por row_type (case-insensitive) ─
+  // ─ Separação das transações da planilha por row_type e categorias conhecidas (case-insensitive) ─
   const receitasSheet = safeSheetTx.filter(t => {
     const rt = getRowType(t);
+    const desc = getRowDesc(t);
+    if (rt.includes('sangria') || desc.includes('sangria')) return false;
+    if (rt.includes('despesa') || rt.includes('saida') || rt.includes('saída') || rt.includes('gasto') || rt.includes('passagem') || rt.includes('produto') || rt.includes('tributo') || rt.includes('outra')) return false;
+    if (desc.includes('passagem') || desc.includes('produto') || desc.includes('tributo') || desc.includes('outras saída') || desc.includes('outras saida')) return false;
     return rt.includes('receita') || rt === '' || !rt;
   });
+
   const despesasSheet = safeSheetTx.filter(t => {
     const rt = getRowType(t);
-    return rt.includes('despesa') || rt.includes('saida') || rt.includes('saída') || rt.includes('gasto');
+    const desc = getRowDesc(t);
+    if (rt.includes('sangria') || desc.includes('sangria')) return false;
+    return (
+      rt.includes('despesa') || rt.includes('saida') || rt.includes('saída') || rt.includes('gasto') ||
+      rt.includes('passagem') || rt.includes('produto') || rt.includes('tributo') || rt.includes('outras') ||
+      desc.includes('passagem') || desc.includes('produto') || desc.includes('tributo') || desc.includes('outras saída') || desc.includes('outras saida')
+    );
   });
+
   const sangriasSheet = safeSheetTx.filter(t => {
     const rt = getRowType(t);
-    return rt.includes('sangria');
+    const desc = getRowDesc(t);
+    return rt.includes('sangria') || desc.includes('sangria');
   });
 
   // ─ KPI Cards: calculados do sheetSummary (sheet_transactions) ─

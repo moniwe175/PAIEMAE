@@ -521,7 +521,13 @@ export function SyncProvider({ children }) {
       // Despesas em Dinheiro Físico + Sangrias
       const despesasDinheiro = (sheetTransactions || []).filter(t => {
         const rt = String(t.row_type || t.tipo || '').toLowerCase().trim();
-        return rt.includes('despesa') || rt.includes('saida') || rt.includes('saída') || rt.includes('gasto');
+        const desc = String(t.client || t.cliente || t.descricao || t.procedure || t.procedimento || '').toLowerCase().trim();
+        if (rt.includes('sangria') || desc.includes('sangria')) return false;
+        return (
+          rt.includes('despesa') || rt.includes('saida') || rt.includes('saída') || rt.includes('gasto') ||
+          rt.includes('passagem') || rt.includes('produto') || rt.includes('tributo') || rt.includes('outras') ||
+          desc.includes('passagem') || desc.includes('produto') || desc.includes('tributo') || desc.includes('outras saída') || desc.includes('outras saida')
+        );
       }).reduce((a, e) => {
         if (Number(e.dinheiro || 0) > 0) return a + Number(e.dinheiro);
         const pg = String(e.payment_method || e.pagamento || e.metodo || e.forma_pagamento || '').toLowerCase();
@@ -637,8 +643,27 @@ export function SyncProvider({ children }) {
       }
     });
     const fondoInicial = Number(customData.fundo_inicial ?? todayCashier?.opening_balance ?? cashier.saldo ?? 0);
+    const despesasDinheiroDaData = (txsDoDia || []).filter(t => {
+      const rt = String(t.row_type || t.tipo || '').toLowerCase().trim();
+      const desc = String(t.client || t.cliente || t.descricao || t.procedure || t.procedimento || '').toLowerCase().trim();
+      if (rt.includes('sangria') || desc.includes('sangria')) return false;
+      return (
+        rt.includes('despesa') || rt.includes('saida') || rt.includes('saída') || rt.includes('gasto') ||
+        rt.includes('passagem') || rt.includes('produto') || rt.includes('tributo') || rt.includes('outras') ||
+        desc.includes('passagem') || desc.includes('produto') || desc.includes('tributo') || desc.includes('outras saída') || desc.includes('outras saida')
+      );
+    }).reduce((a, e) => {
+      if (Number(e.dinheiro || 0) > 0) return a + Number(e.dinheiro);
+      const pg = String(e.payment_method || e.pagamento || e.metodo || e.forma_pagamento || '').toLowerCase();
+      if (!Number(e.pix || 0) && !Number(e.credito || 0) && !Number(e.debito || 0)) {
+        if (pg.includes('dinheiro') || pg.includes('especie') || pg.includes('espécie') || pg.includes('cash') || pg === '' || pg === 'planilha') {
+          return a + Number(e.gross || e.valor || e.total || 0);
+        }
+      }
+      return a;
+    }, 0);
     const totalSangriasBd = cashierSangrias.reduce((a, s) => a + Number(s.valor || 0), 0);
-    const fundoFinalCalculado = fondoInicial + totalDinheiro - totalSangriasBd;
+    const fundoFinalCalculado = fondoInicial + totalDinheiro - (totalSangriasBd + despesasDinheiroDaData);
     const fundoFinalReal = Number(customData.fundo_final_real ?? fundoFinalCalculado);
     const report = {
       data: dataRef,
