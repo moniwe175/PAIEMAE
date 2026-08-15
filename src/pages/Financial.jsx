@@ -311,7 +311,7 @@ export default function Financial() {
   // Se as transações foram apagadas, o cálculo reflete isso imediatamente
   const entradasDinheiroFisico = entradasCalculadas;
 
-  // Saídas exclusivamente em Dinheiro Físico (Despesas pagas em dinheiro + Sangria)
+  // Saídas exclusivamente em Dinheiro Físico (Todas as despesas e sangrias da clínica saem do caixa físico)
   const despesasDinheiroCalculadas = [...despesasSheet, ...safeExpenses].reduce((a, e) => {
     if (safeNum(e.dinheiro) > 0) return a + safeNum(e.dinheiro);
     const pg = (e.payment_method || e.pagamento || e.metodo || e.forma_pagamento || '').toLowerCase();
@@ -324,8 +324,9 @@ export default function Financial() {
   }, 0);
   const sangriasCalculadas = (cashierSangrias || []).reduce((a, s) => a + safeNum(s.valor), 0) + (sangriasSheet || []).reduce((a, s) => a + safeNum(s.valor || s.gross || s.total), 0);
   const saidasFisicasCalculadas = despesasDinheiroCalculadas + sangriasCalculadas;
-  // ⚠️ Sempre ao vivo — não trava no valor do banco quando transações são deletadas
-  const totalSaidasDinheiro = saidasFisicasCalculadas;
+
+  // ⚠️ Todas as despesas e sangrias abatidas no caixa físico ao vivo
+  const totalSaidasDinheiro = Math.max(totalDespesasHoje, saidasFisicasCalculadas);
   const totalSangriasHoje = totalSaidasDinheiro;
 
   const saldoAtual = fundoInicial + entradasDinheiroFisico - totalSaidasDinheiro;
