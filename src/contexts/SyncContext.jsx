@@ -231,12 +231,14 @@ export function SyncProvider({ children }) {
         { event: '*', schema: 'public', table: 'sheet_transactions' },
         async () => {
           try {
-            const [stRes, summaryRes] = await Promise.all([
+            const [stRes, summaryRes, cashierRes] = await Promise.all([
               sbFetchSheetTransactions(),
               sbFetchSheetSummary(),
+              fetchTodayCashier(),
             ]);
             if (!stRes.error && stRes.data) setSheetTransactions(stRes.data);
             if (!summaryRes.error && summaryRes.data) setSheetSummary(summaryRes.data);
+            if (cashierRes.data) setTodayCashier(cashierRes.data);
           } catch (e) {
             console.warn('[SyncContext] Realtime sheet_transactions rehydrate error:', e);
           }
@@ -247,6 +249,54 @@ export function SyncProvider({ children }) {
     return () => {
       supabase.removeChannel(channel);
     };
+  }, [authed]);
+
+  // ─── Supabase Realtime: escuta mudanças na tabela cashier_state ──
+  useEffect(() => {
+    if (!isSupabaseConfigured() || !authed) return;
+
+    const channel = supabase
+      .channel('cashier-state-realtime')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'cashier_state' },
+        async () => {
+          try {
+            const { data } = await fetchTodayCashier();
+            if (data) setTodayCashier(data);
+          } catch (e) {
+            console.warn('[SyncContext] Realtime cashier_state rehydrate error:', e);
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [authed]);
+
+  // ─── Polling automático em segundo plano (a cada 3s) ───
+  // Garante atualização instantânea na UI sem precisar pressionar F5
+  useEffect(() => {
+    if (!isSupabaseConfigured() || !authed) return;
+
+    const interval = setInterval(async () => {
+      try {
+        const [stRes, summaryRes, cashierRes] = await Promise.all([
+          sbFetchSheetTransactions(),
+          sbFetchSheetSummary(),
+          fetchTodayCashier(),
+        ]);
+        if (!stRes.error && stRes.data) setSheetTransactions(stRes.data);
+        if (!summaryRes.error && summaryRes.data) setSheetSummary(summaryRes.data);
+        if (cashierRes.data) setTodayCashier(cashierRes.data);
+      } catch (e) {
+        // Silencioso em polling secundário
+      }
+    }, 3000);
+
+    return () => clearInterval(interval);
   }, [authed]);
 
   // ─── Supabase Realtime: escuta sync_logs para mostrar status do Python ──

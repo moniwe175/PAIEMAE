@@ -19,6 +19,9 @@ ALTER PUBLICATION supabase_realtime ADD TABLE sheet_transactions;
 -- Habilitar Realtime na tabela sheet_connections (status das conexões de planilha)
 ALTER PUBLICATION supabase_realtime ADD TABLE sheet_connections;
 
+-- Habilitar Realtime na tabela cashier_state (estado e saldos do caixa)
+ALTER PUBLICATION supabase_realtime ADD TABLE cashier_state;
+
 -- Verificar quais tabelas estão com Realtime habilitado
 SELECT schemaname, tablename
 FROM pg_publication_tables
