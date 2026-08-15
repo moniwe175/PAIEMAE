@@ -95,7 +95,7 @@ export default function Financial() {
   const [syncing, setSyncing] = useState(false);
 
 
-  // ─── Supabase Realtime: escuta mudanças em sheet_transactions, sheet_connections e expenses ───
+  // ─── Supabase Realtime + Polling automático: atualiza sem precisar de F5 ───
   useEffect(() => {
     async function fetchFinancialData() {
       try {
@@ -108,40 +108,28 @@ export default function Financial() {
         if (!summaryRes.error && summaryRes.data) setSheetSummary(summaryRes.data);
         if (!expRes.error && expRes.data) setExpenses(expRes.data);
       } catch (err) {
-        console.warn('[Financial] Realtime re-fetch error:', err);
+        console.warn('[Financial] re-fetch error:', err);
       }
     }
 
-    // Buscar dados iniciais
+    // Buscar dados iniciais imediatamente
     fetchFinancialData();
 
-    // Escutar mudanças em tempo real
+    // ── Polling de 3 segundos: garante atualização mesmo sem Realtime ──
+    const pollInterval = setInterval(fetchFinancialData, 3000);
+
+    // ── Realtime: reage imediatamente quando o Apps Script faz upsert ──
     const channel = supabase
       .channel('financial-realtime')
-      .on('postgres_changes', {
-        event: '*',
-        schema: 'public',
-        table: 'sheet_transactions'
-      }, () => {
-        fetchFinancialData();
-      })
-      .on('postgres_changes', {
-        event: '*',
-        schema: 'public',
-        table: 'sheet_connections'
-      }, () => {
-        fetchFinancialData();
-      })
-      .on('postgres_changes', {
-        event: '*',
-        schema: 'public',
-        table: 'expenses'
-      }, () => {
-        fetchFinancialData();
-      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'sheet_transactions' }, fetchFinancialData)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'sheet_connections' }, fetchFinancialData)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'expenses' }, fetchFinancialData)
       .subscribe();
 
-    return () => supabase.removeChannel(channel);
+    return () => {
+      clearInterval(pollInterval);
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   const handleManualSync = async () => {
