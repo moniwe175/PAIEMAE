@@ -307,7 +307,9 @@ export default function Financial() {
     }
     return a;
   }, 0);
-  const entradasDinheiroFisico = Math.max(safeNum(todayCashier?.dinheiro_entradas), entradasCalculadas);
+  // ⚠️ Sempre usa o cálculo ao vivo — nunca trava no valor salvo no banco
+  // Se as transações foram apagadas, o cálculo reflete isso imediatamente
+  const entradasDinheiroFisico = entradasCalculadas;
 
   // Saídas exclusivamente em Dinheiro Físico (Despesas pagas em dinheiro + Sangria)
   const despesasDinheiroCalculadas = [...despesasSheet, ...safeExpenses].reduce((a, e) => {
@@ -322,13 +324,15 @@ export default function Financial() {
   }, 0);
   const sangriasCalculadas = (cashierSangrias || []).reduce((a, s) => a + safeNum(s.valor), 0) + (sangriasSheet || []).reduce((a, s) => a + safeNum(s.valor || s.gross || s.total), 0);
   const saidasFisicasCalculadas = despesasDinheiroCalculadas + sangriasCalculadas;
-  const totalSaidasDinheiro = Math.max(safeNum(todayCashier?.dinheiro_saidas), saidasFisicasCalculadas);
+  // ⚠️ Sempre ao vivo — não trava no valor do banco quando transações são deletadas
+  const totalSaidasDinheiro = saidasFisicasCalculadas;
   const totalSangriasHoje = totalSaidasDinheiro;
 
   const saldoAtual = fundoInicial + entradasDinheiroFisico - totalSaidasDinheiro;
+  // Se caixa aberto: calcula ao vivo. Se fechado: usa closing_balance salvo (já consolidado)
   const fundoFinalDinheiro = isCaixaAberto
     ? saldoAtual
-    : (safeNum(todayCashier?.closing_balance) ?? saldoAtual);
+    : (safeNum(todayCashier?.closing_balance) || saldoAtual);
 
   // Totais informativos (não afetam saldo físico)
   const pixTotalHoje = receitasSheet.reduce((a, t) => a + safeNum(t.pix), 0);
