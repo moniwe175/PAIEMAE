@@ -89,7 +89,6 @@ export function SyncProvider({ children }) {
       setConnectionError('Supabase não configurado. Verifique as variáveis de ambiente.');
       return;
     }
-    if (!authed) return; // visitante anônimo: não carrega nada
 
     async function verifyConnection() {
       const { connected, error } = await checkSupabaseConnection();
@@ -176,7 +175,7 @@ export function SyncProvider({ children }) {
     return () => {
       if (connectionCheckRef.current) clearInterval(connectionCheckRef.current);
     };
-  }, [authed]);
+  }, []);
 
   // ─── Sheet sync: server-side ───────────────────────────────
   // A planilha é sincronizada pelo Google Apps Script (trigger onEdit + horário)
@@ -186,7 +185,7 @@ export function SyncProvider({ children }) {
   // ─── Supabase Realtime: escuta mudanças na tabela transactions ──
   // Quando o Python sync faz upsert/delete, o frontend atualiza automaticamente
   useEffect(() => {
-    if (!isSupabaseConfigured() || !authed) return;
+    if (!isSupabaseConfigured()) return;
 
     const channel = supabase
       .channel('transactions-realtime')
@@ -218,11 +217,11 @@ export function SyncProvider({ children }) {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [authed]);
+  }, []);
 
   // ─── Supabase Realtime: escuta mudanças na tabela sheet_transactions ──
   useEffect(() => {
-    if (!isSupabaseConfigured() || !authed) return;
+    if (!isSupabaseConfigured()) return;
 
     const channel = supabase
       .channel('sheet-transactions-realtime')
@@ -249,11 +248,11 @@ export function SyncProvider({ children }) {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [authed]);
+  }, []);
 
   // ─── Supabase Realtime: escuta mudanças na tabela cashier_state ──
   useEffect(() => {
-    if (!isSupabaseConfigured() || !authed) return;
+    if (!isSupabaseConfigured()) return;
 
     const channel = supabase
       .channel('cashier-state-realtime')
@@ -274,12 +273,12 @@ export function SyncProvider({ children }) {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [authed]);
+  }, []);
 
   // ─── Polling automático em segundo plano (a cada 3s) ───
   // Garante atualização instantânea na UI sem precisar pressionar F5
   useEffect(() => {
-    if (!isSupabaseConfigured() || !authed) return;
+    if (!isSupabaseConfigured()) return;
 
     const interval = setInterval(async () => {
       try {
@@ -297,11 +296,11 @@ export function SyncProvider({ children }) {
     }, 3000);
 
     return () => clearInterval(interval);
-  }, [authed]);
+  }, []);
 
   // ─── Supabase Realtime: escuta sync_logs para mostrar status do Python ──
   useEffect(() => {
-    if (!isSupabaseConfigured() || !authed) return;
+    if (!isSupabaseConfigured()) return;
 
     const channel = supabase
       .channel('sync-logs-realtime')
@@ -326,7 +325,7 @@ export function SyncProvider({ children }) {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [authed]);
+  }, []);
 
   // State is persisted to Supabase via the mutation helpers below.
 
