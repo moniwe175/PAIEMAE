@@ -391,7 +391,7 @@ export function SyncProvider({ children }) {
     return day >= 2 && day <= 6;
   }, []);
 
-  /** Abre caixa de hoje automaticamente herdando o saldo do último fechamento ou da planilha */
+  /** Abre caixa de hoje automaticamente herdando o saldo do último fechamento */
   const abrirCaixaHoje = useCallback(async (customBalance = null) => {
     if (!isDiaAtendimento()) {
       // Empresa fechada (domingo/segunda): nunca abrir caixa nesses dias
@@ -401,13 +401,9 @@ export function SyncProvider({ children }) {
     if (!requireConnection('abrir caixa')) return null;
     try {
       let openingBal = customBalance;
-      if (openingBal === null || openingBal === undefined || Number(openingBal) === 0) {
-        if (sheetMetadata?.fundoInicial > 0) {
-          openingBal = sheetMetadata.fundoInicial;
-        } else {
-          const { balance } = await fetchLastClosingBalance();
-          openingBal = Number(balance) || 0;
-        }
+      if (openingBal === null || openingBal === undefined) {
+        const { balance } = await fetchLastClosingBalance();
+        openingBal = Number(balance) || 0;
       }
       openingBal = Number(openingBal) || 0;
 
@@ -425,19 +421,17 @@ export function SyncProvider({ children }) {
         dataAbertura: new Date().toLocaleDateString('pt-BR'),
         sangrias: [],
       }));
-      addLog('info', `Caixa aberto — Fundo Inicial: R$ ${openingBal.toFixed(2)}`);
+      addLog('info', `Caixa aberto — Fundo Inicial herdado: R$ ${openingBal.toFixed(2)}`);
       return data;
     } catch (e) {
       console.warn('[SyncContext] abrirCaixaHoje error:', e);
       return null;
     }
-  }, [requireConnection, addLog, sheetMetadata, isDiaAtendimento]);
+  }, [requireConnection, addLog, isDiaAtendimento]);
 
   /** Carrega caixa de hoje + sangrias + histórico do Supabase */
   const loadCaixaHoje = useCallback(async () => {
     try {
-      // Auto-close agora roda server-side via Edge Function + pg_cron (23:59 diário)
-
       // 1. Buscar caixa aberto de hoje
       const { data: caixaHoje } = await fetchTodayCashier();
 
@@ -466,11 +460,9 @@ export function SyncProvider({ children }) {
         } else {
           // Nenhum caixa existe para hoje
           if (!isDiaAtendimento()) {
-            // Empresa fechada (domingo/segunda): não abrir caixa automaticamente
             console.log('[SyncContext] Empresa fechada hoje — sem abertura automática de caixa');
             setCashier(prev => ({ ...prev, status: 'dia_fechado' }));
           } else {
-            // Abrir automaticamente com saldo do último fechamento
             console.log('[SyncContext] Nenhum caixa para hoje, abrindo automaticamente...');
             const result = await abrirCaixaHoje();
             if (!result) {
@@ -496,9 +488,8 @@ export function SyncProvider({ children }) {
   /** Garante que o caixa está aberto antes de uma operação (auto-open silencioso) */
   const ensureCaixaAberto = useCallback(async () => {
     if (todayCashier && todayCashier.status === 'aberto') return todayCashier;
-    // Verificar no banco antes de abrir
     const { data: found } = await fetchTodayCashier();
-    if (found) {
+    if (found && found.status === 'aberto') {
       setTodayCashier(found);
       setCashier(prev => ({ ...prev, status: 'aberto', saldo: Number(found.opening_balance || 0) }));
       return found;
@@ -511,16 +502,46 @@ export function SyncProvider({ children }) {
     if (!requireConnection('fechar caixa')) return { success: false, error: 'Supabase desconectado' };
     if (!todayCashier?.id) return { success: false, error: 'Nenhum caixa aberto hoje' };
     try {
+      // Entradas em Dinheiro Físico
+      const entradasCalculadas = (sheetTransactions || []).filter(t => {
+        const rt = String(t.row_type || t.tipo || '').toLowerCase().trim();
+        return rt.includes('receita') || rt === '' || !rt;
+      }).reduce((a, t) => {
+        if (Number(t.dinheiro || 0) > 0) return a + Number(t.dinheiro);
+        const pg = String(t.payment_method || t.pagamento || t.metodo || t.forma_pagamento || '').toLowerCase();
+        if (!Number(t.pix || 0) && !Number(t.credito || 0) && !Number(t.debito || 0)) {
+          if (pg.includes('dinheiro') || pg.includes('especie') || pg.includes('espécie') || pg.includes('cash')) {
+            return a + Number(t.gross || t.valor || t.total || 0);
+          }
+        }
+        return a;
+      }, 0);
+      const totalDinheiroEntradas = Math.max(Number(todayCashier.dinheiro_entradas || 0), Number(todayCashier.total_cash_in || 0), entradasCalculadas);
+
+      // Despesas em Dinheiro Físico + Sangrias
+      const despesasDinheiro = (sheetTransactions || []).filter(t => {
+        const rt = String(t.row_type || t.tipo || '').toLowerCase().trim();
+        return rt.includes('despesa') || rt.includes('saida') || rt.includes('saída') || rt.includes('gasto');
+      }).reduce((a, e) => {
+        if (Number(e.dinheiro || 0) > 0) return a + Number(e.dinheiro);
+        const pg = String(e.payment_method || e.pagamento || e.metodo || e.forma_pagamento || '').toLowerCase();
+        if (!Number(e.pix || 0) && !Number(e.credito || 0) && !Number(e.debito || 0)) {
+          if (pg.includes('dinheiro') || pg.includes('especie') || pg.includes('espécie') || pg.includes('cash') || pg === '' || pg === 'planilha') {
+            return a + Number(e.gross || e.valor || e.total || 0);
+          }
+        }
+        return a;
+      }, 0);
       const totalSangrias = cashierSangrias.reduce((a, s) => a + Number(s.valor || 0), 0);
-      const closingBal = Number(todayCashier.opening_balance || 0)
-        + Number(todayCashier.total_cash_in || 0)
-        - totalSangrias;
+      const totalSaidasDinheiro = Math.max(Number(todayCashier.dinheiro_saidas || 0), Number(todayCashier.total_cash_out || 0), totalSangrias + despesasDinheiro);
+
+      const closingBal = Number(todayCashier.opening_balance || 0) + totalDinheiroEntradas - totalSaidasDinheiro;
 
       const { data, error } = await closeCashierById(todayCashier.id, {
         closingBalance: closingBal,
         autoClosed: false,
-        totalCashIn: todayCashier.total_cash_in || 0,
-        totalCashOut: totalSangrias,
+        totalCashIn: totalDinheiroEntradas,
+        totalCashOut: totalSaidasDinheiro,
       });
       if (error) return { success: false, error };
 
@@ -537,7 +558,7 @@ export function SyncProvider({ children }) {
       addLog('error', `Erro ao fechar caixa: ${e.message}`);
       return { success: false, error: e.message };
     }
-  }, [todayCashier, cashierSangrias, requireConnection, addLog]);
+  }, [todayCashier, cashierSangrias, sheetTransactions, requireConnection, addLog]);
 
   /** Compatibilidade legado: abre caixa (usa novo sistema internamente) */
   const abrirCaixa = useCallback(async (saldoInicial = null) => {

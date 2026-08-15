@@ -157,6 +157,32 @@ BEGIN
 END;
 $$;
 
+-- ── 1c. Helper: extrai o valor real em dinheiro físico ────────
+CREATE OR REPLACE FUNCTION public.cashier_amount_of(
+  p_dinheiro numeric,
+  p_gross numeric,
+  p_valor numeric,
+  p_total numeric,
+  p_payment_method text,
+  p_pagamento text,
+  p_pix numeric,
+  p_credito numeric,
+  p_debito numeric
+)
+RETURNS numeric
+LANGUAGE sql
+IMMUTABLE
+AS $$
+  SELECT CASE
+    WHEN COALESCE(p_dinheiro, 0) > 0 THEN p_dinheiro
+    WHEN COALESCE(p_pix, 0) = 0 AND COALESCE(p_credito, 0) = 0 AND COALESCE(p_debito, 0) = 0
+         AND lower(COALESCE(NULLIF(trim(p_payment_method), ''), NULLIF(trim(p_pagamento), ''), ''))
+             LIKE ANY (ARRAY['%dinheiro%', '%especie%', '%espécie%', '%cash%'])
+    THEN COALESCE(p_gross, p_valor, p_total, 0)
+    ELSE 0
+  END;
+$$;
+
 -- ── 4. Função da trigger ────────────────────────────────────
 -- Estratégia unificada: toda versão de linha tem uma
 -- "contribuição" (dinheiro se ativa, 0 se soft-deletada).
@@ -178,13 +204,21 @@ DECLARE
 BEGIN
   IF TG_OP IN ('UPDATE', 'DELETE') THEN
     IF OLD.deleted_at IS NULL THEN
-      v_old_amount := COALESCE(OLD.dinheiro, 0);
+      v_old_amount := public.cashier_amount_of(
+        OLD.dinheiro, OLD.gross, OLD.valor, OLD.total,
+        OLD.payment_method, OLD.pagamento,
+        OLD.pix, OLD.credito, OLD.debito
+      );
     END IF;
   END IF;
 
   IF TG_OP IN ('INSERT', 'UPDATE') THEN
     IF NEW.deleted_at IS NULL THEN
-      v_new_amount := COALESCE(NEW.dinheiro, 0);
+      v_new_amount := public.cashier_amount_of(
+        NEW.dinheiro, NEW.gross, NEW.valor, NEW.total,
+        NEW.payment_method, NEW.pagamento,
+        NEW.pix, NEW.credito, NEW.debito
+      );
     END IF;
   END IF;
 

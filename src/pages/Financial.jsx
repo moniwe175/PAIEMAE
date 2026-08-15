@@ -268,29 +268,41 @@ export default function Financial() {
   // ─ Lógica do Caixa Físico (Novo Sistema Real) ─
   const isCaixaAberto = todayCashier?.status === 'aberto';
   const isDiaFechado = !isDiaAtendimento(); // domingo/segunda: empresa não funciona
-  const fundoInicial = safeNum(todayCashier?.opening_balance) || safeNum(sheetMetadata?.fundoInicial) || safeNum(cashier?.saldo);
-
-  // Saídas físicas (dinheiro_saidas): fonte = DB via triggers.
-  // Fallback calculado das sangrias locais quando ainda não há caixa carregado.
-  const saidasCalculadas = (cashierSangrias || []).reduce((a, s) => a + safeNum(s.valor), 0);
-  const totalSangriasHoje = todayCashier ? safeNum(todayCashier.dinheiro_saidas) : saidasCalculadas;
+  const fundoInicial = safeNum(todayCashier?.opening_balance) || safeNum(sheetMetadata?.fundoInicial) || safeNum(cashier?.saldo) || 0;
 
   // Entradas exclusivamente em Dinheiro Físico (Espécie)
   const entradasCalculadas = receitasSheet.reduce((a, t) => {
     if (safeNum(t.dinheiro) > 0) return a + safeNum(t.dinheiro);
-    const pg = (t.payment_method || t.pagamento || '').toLowerCase();
-    if (!safeNum(t.pix) && !safeNum(t.credito) && !safeNum(t.debito) && (pg.includes('dinheiro') || pg.includes('especie') || pg.includes('cash'))) {
-      return a + safeNum(t.gross || t.total);
+    const pg = (t.payment_method || t.pagamento || t.metodo || t.forma_pagamento || '').toLowerCase();
+    if (!safeNum(t.pix) && !safeNum(t.credito) && !safeNum(t.debito)) {
+      if (pg.includes('dinheiro') || pg.includes('especie') || pg.includes('espécie') || pg.includes('cash')) {
+        return a + safeNum(t.gross || t.valor || t.total);
+      }
     }
     return a;
   }, 0);
-  // Fonte = DB (dinheiro_entradas mantido pelas triggers); fallback local
-  const entradasDinheiroFisico = todayCashier ? safeNum(todayCashier.dinheiro_entradas) : entradasCalculadas;
+  const entradasDinheiroFisico = Math.max(safeNum(todayCashier?.dinheiro_entradas), entradasCalculadas);
 
-  const saldoAtual = fundoInicial + entradasDinheiroFisico - totalSangriasHoje;
+  // Saídas exclusivamente em Dinheiro Físico (Despesas pagas em dinheiro + Sangria)
+  const despesasDinheiroCalculadas = [...despesasSheet, ...safeExpenses].reduce((a, e) => {
+    if (safeNum(e.dinheiro) > 0) return a + safeNum(e.dinheiro);
+    const pg = (e.payment_method || e.pagamento || e.metodo || e.forma_pagamento || '').toLowerCase();
+    if (!safeNum(e.pix) && !safeNum(e.credito) && !safeNum(e.debito)) {
+      if (pg.includes('dinheiro') || pg.includes('especie') || pg.includes('espécie') || pg.includes('cash') || pg === '' || pg === 'planilha') {
+        return a + safeNum(e.gross || e.valor || e.total);
+      }
+    }
+    return a;
+  }, 0);
+  const sangriasCalculadas = (cashierSangrias || []).reduce((a, s) => a + safeNum(s.valor), 0) + (sangriasSheet || []).reduce((a, s) => a + safeNum(s.valor || s.gross || s.total), 0);
+  const saidasFisicasCalculadas = despesasDinheiroCalculadas + sangriasCalculadas;
+  const totalSaidasDinheiro = Math.max(safeNum(todayCashier?.dinheiro_saidas), saidasFisicasCalculadas);
+  const totalSangriasHoje = totalSaidasDinheiro;
+
+  const saldoAtual = fundoInicial + entradasDinheiroFisico - totalSaidasDinheiro;
   const fundoFinalDinheiro = isCaixaAberto
     ? saldoAtual
-    : (safeNum(todayCashier?.closing_balance) || safeNum(sheetMetadata?.fundoFinal) || saldoAtual);
+    : (safeNum(todayCashier?.closing_balance) ?? saldoAtual);
 
   // Totais informativos (não afetam saldo físico)
   const pixTotalHoje = receitasSheet.reduce((a, t) => a + safeNum(t.pix), 0);
