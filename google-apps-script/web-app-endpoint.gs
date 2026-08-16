@@ -213,3 +213,49 @@ function criarObjetoTx(comanda, dateRef, client, procedure, professional, gross,
     tipo: rowType
   };
 }
+
+/**
+ * 5. ROTINA DE VIRADA DE DIA E LIMPEZA AUTOMÁTICA DA PLANILHA
+ * Executada automaticamente no final da noite (ex: 23:50) via Gatilho por Tempo (Time-driven trigger).
+ *  1. Garante a sincronização final dos dados do dia com o Supabase.
+ *  2. Pega o Fundo Final do dia (F1) e transfere como Fundo Inicial no C1.
+ *  3. Limpa todas as linhas de lançamentos de clientes, serviços e despesas (linhas 4 em diante).
+ *  4. Atualiza o cabeçalho A1 com a nova data.
+ */
+function virarDiaELimparPlanilha() {
+  try {
+    var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    var sheet = ss.getSheets()[0];
+
+    Logger.log('[virarDiaELimparPlanilha] 1. Garantindo sincronização final do dia...');
+    sincronizarComSupabase();
+
+    // Pausa rápida para estabilizar a fórmula da célula F1 (Fundo Final)
+    Utilities.sleep(2000);
+
+    // Pega o saldo final atual da célula F1
+    var fundoFinal = sheet.getRange('F1').getValue();
+    Logger.log('[virarDiaELimparPlanilha] 2. Fundo Final capturado: %s', fundoFinal);
+
+    // Limpa os dados de lançamentos (da linha 4 até a 100, colunas A até I)
+    // Usamos clearContent() para manter as cores, formatação e estilos
+    var maxLinhas = sheet.getLastRow();
+    if (maxLinhas >= 4) {
+      sheet.getRange(4, 1, Math.max(maxLinhas - 3, 97), 9).clearContent();
+    }
+    Logger.log('[virarDiaELimparPlanilha] 3. Lançamentos antigos limpos com sucesso.');
+
+    // Atualiza o Fundo Inicial (C1) com o Fundo Final herdado
+    if (fundoFinal !== null && fundoFinal !== '' && !isNaN(parseNum(fundoFinal))) {
+      sheet.getRange('C1').setValue(fundoFinal);
+    }
+
+    // Atualiza a data do cabeçalho A1 para a nova data
+    var hojeFormatado = Utilities.formatDate(new Date(), "GMT-03:00", "dd/MM/yyyy");
+    sheet.getRange('A1').setValue("CAIXA - DIA " + hojeFormatado + " :");
+
+    Logger.log('[virarDiaELimparPlanilha] 4. Virada de dia e limpeza concluídas com sucesso!');
+  } catch (err) {
+    Logger.log('[virarDiaELimparPlanilha] Erro durante a virada do dia: %s', err.message);
+  }
+}
