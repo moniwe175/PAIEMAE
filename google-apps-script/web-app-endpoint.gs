@@ -3,6 +3,26 @@
  *  SISTEMA DE SINCRONIZAÇÃO INSTANTÂNEA — CLÍNICA EVELYN
  * ===========================================================================
  *  Planilha: https://docs.google.com/spreadsheets/d/1uXB-p9iWev-ID7HVZVUj42FBu2J4PkWMo1cocTW2GXI/edit
+ *
+ *  ─── CORREÇÕES APLICADAS ──────────────────────────────────────────────────
+ *  [CORREÇÃO 1] onEdit → dispararSyncEdicao
+ *    O gatilho simples onEdit() NÃO tem permissão para usar UrlFetchApp.fetch()
+ *    (requisição HTTP para o Supabase). A função foi renomeada para
+ *    dispararSyncEdicao() e DEVE ser registrada como um Gatilho Instalável
+ *    "Ao editar" (⏰ Acionadores → + Adicionar acionador → dispararSyncEdicao
+ *    → Com base na planilha → Ao editar). Isso garante sincronização
+ *    INSTANTÂNEA em menos de 1 segundo após qualquer digitação.
+ *
+ *  [CORREÇÃO 2] parseNum() corrigida
+ *    O Google Sheets pode entregar o valor de uma célula numérica já como
+ *    number nativo (ex: 1234.56). O replace anterior removia o ponto decimal
+ *    e transformava 1234.56 em 123456. Agora a função detecta o tipo e
+ *    retorna o número diretamente sem processar texto.
+ *
+ *  [CORREÇÃO 3] clearContent() com range dinâmico
+ *    O Math.max(..., 97) forçava a limpeza de 97 linhas mesmo quando a
+ *    planilha tinha menos linhas, podendo gerar erro de alcance. Agora usa
+ *    (maxLinhas - 3) que é sempre exato ao número real de linhas existentes.
  */
 
 // ─── CONFIGURAÇÕES PADRÃO ──────────────────────────────────────────────────
@@ -10,20 +30,31 @@ var SPREADSHEET_ID = '1uXB-p9iWev-ID7HVZVUj42FBu2J4PkWMo1cocTW2GXI';
 var SUPABASE_URL = 'https://ecwizjyflxcickbfzhcp.supabase.co';
 
 /**
- * 1. GATILHO AUTOMÁTICO DE EDIÇÃO (onEdit)
- * Executado toda vez que alguma célula da planilha for alterada.
+ * 1. GATILHO DE EDIÇÃO — DEVE SER INSTALÁVEL (não o simples onEdit)
+ *
+ * ⚠️  AÇÃO NECESSÁRIA UMA ÚNICA VEZ:
+ *    Acesse ⏰ Acionadores → + Adicionar acionador:
+ *      Função a executar : dispararSyncEdicao
+ *      Fonte do evento   : Com base na planilha (não "Com base no tempo")
+ *      Tipo de evento    : Ao editar
+ *    Salve e autorize. Isso fará a sincronização rodar em < 1 segundo
+ *    após cada digitação, sem precisar de F5.
+ *
+ * IMPORTANTE: NÃO renomeie esta função de volta para onEdit.
+ * O gatilho simples onEdit não consegue acessar o Supabase por restrição
+ * de segurança do Google (sem permissão para UrlFetchApp.fetch).
  */
-function onEdit(e) {
+function dispararSyncEdicao(e) {
   try {
     var ss = e && e.source ? e.source : SpreadsheetApp.getActiveSpreadsheet();
     var sheetId = ss.getId();
 
     if (sheetId !== SPREADSHEET_ID) return;
 
-    Logger.log('[onEdit] Edição detectada! Disparando sincronização...');
+    Logger.log('[dispararSyncEdicao] Edição detectada! Disparando sincronização...');
     sincronizarComSupabase();
   } catch (err) {
-    Logger.log('[onEdit] Erro: %s', err.message);
+    Logger.log('[dispararSyncEdicao] Erro: %s', err.message);
   }
 }
 
@@ -187,9 +218,18 @@ function enviarParaSupabase(transactions, serviceKey, userId) {
 }
 
 // ─── HELPERS ───────────────────────────────────────────────────────────────
+
+/**
+ * [CORREÇÃO 2] parseNum — trata número nativo do Sheets sem remover ponto decimal.
+ * Antes: String(1234.56).replace(/[R$\s.]/g, '') → "123456" (errado!)
+ * Agora: typeof v === 'number' → retorna direto sem processar texto.
+ */
 function parseNum(v) {
-  if (!v) return 0;
-  var s = String(v).replace(/[R$\s.]/g, '').replace(',', '.');
+  if (v === null || v === undefined || v === '') return 0;
+  // Se o Sheets já entregou um número puro, usa direto — sem remover ponto!
+  if (typeof v === 'number') return isNaN(v) ? 0 : v;
+  // Apenas para strings no formato brasileiro: "R$ 1.234,56" → 1234.56
+  var s = String(v).replace(/[R$\s]/g, '').replace(/\.(?=\d{3}[,])/g, '').replace(',', '.');
   var n = parseFloat(s);
   return isNaN(n) ? 0 : n;
 }
@@ -230,18 +270,18 @@ function virarDiaELimparPlanilha() {
     Logger.log('[virarDiaELimparPlanilha] 1. Garantindo sincronização final do dia...');
     sincronizarComSupabase();
 
-    // Pausa rápida para estabilizar a fórmula da célula F1 (Fundo Final)
-    Utilities.sleep(2000);
+    // Força o recálculo de todas as fórmulas (incluindo F1) antes de ler o valor
+    SpreadsheetApp.flush();
 
     // Pega o saldo final atual da célula F1
     var fundoFinal = sheet.getRange('F1').getValue();
     Logger.log('[virarDiaELimparPlanilha] 2. Fundo Final capturado: %s', fundoFinal);
 
-    // Limpa os dados de lançamentos (da linha 4 até a 100, colunas A até I)
-    // Usamos clearContent() para manter as cores, formatação e estilos
+    // [CORREÇÃO 3] Usa número dinâmico de linhas — sem forçar mínimo fixo de 97
+    // Evita erro de alcance quando a planilha tem menos de 100 linhas
     var maxLinhas = sheet.getLastRow();
     if (maxLinhas >= 4) {
-      sheet.getRange(4, 1, Math.max(maxLinhas - 3, 97), 9).clearContent();
+      sheet.getRange(4, 1, maxLinhas - 3, 9).clearContent();
     }
     Logger.log('[virarDiaELimparPlanilha] 3. Lançamentos antigos limpos com sucesso.');
 
