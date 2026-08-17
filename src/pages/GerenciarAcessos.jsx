@@ -46,6 +46,14 @@ export default function GerenciarAcessos() {
   const [roleFormName, setRoleFormName] = useState('');
   const [roleFormPerms, setRoleFormPerms] = useState({});
 
+  // Formulario: criar novo acesso sem sair da pagina
+  const [inviteNome, setInviteNome] = useState('');
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteSenha, setInviteSenha] = useState('');
+  const [inviteCargo, setInviteCargo] = useState('Recepcionista');
+  const [inviteSaving, setInviteSaving] = useState(false);
+  const [inviteMsg, setInviteMsg] = useState(null);
+
   // Carrega cargos da tabela roles (com fallback para seed local se a tabela ainda não existir)
   const loadRoles = async () => {
     const { data, error: rolesError } = await supabase
@@ -267,6 +275,45 @@ export default function GerenciarAcessos() {
       setTimeout(() => setSavedMemberId(null), 2500);
     }
     setSaving(null);
+  };
+
+  const handleCreateUser = async () => {
+    setError(null);
+    setInviteMsg(null);
+    if (!inviteEmail.trim()) {
+      alert('Informe o e-mail da pessoa.');
+      return;
+    }
+    if (inviteSenha.length < 6) {
+      alert('A senha precisa de pelo menos 6 caracteres.');
+      return;
+    }
+    setInviteSaving(true);
+    try {
+      const { data, error: fnErr } = await supabase.functions.invoke('admin-create-user', {
+        body: {
+          email: inviteEmail.trim(),
+          password: inviteSenha,
+          nome: inviteNome.trim(),
+          cargo: inviteCargo,
+        },
+      });
+      if (fnErr) throw fnErr;
+      const res = data || {};
+      if (res.success === false) throw new Error(res.error || 'Falha ao criar o acesso.');
+      setInviteMsg(
+        (res.warning || `Acesso criado para ${res.email}. A pessoa já pode entrar com a senha definida.`) +
+        ' O novo usuário já aparece na lista acima.'
+      );
+      setInviteNome('');
+      setInviteEmail('');
+      setInviteSenha('');
+      await reload();
+    } catch (e) {
+      setError(e?.message || 'Erro ao criar o acesso.');
+    } finally {
+      setInviteSaving(false);
+    }
   };
 
   const reload = async () => {
@@ -536,17 +583,94 @@ export default function GerenciarAcessos() {
         </div>
       </div>
 
-      {/* Invite Box */}
+      {/* Criar Novo Acesso — direto da página, sem Supabase */}
       <div style={{ background: 'var(--bg-card)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-color)', padding: 20 }}>
-        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, marginBottom: 16 }}>
           <UserPlus style={{ width: 20, height: 20, color: 'var(--sidebar-bg)', marginTop: 2 }} />
           <div>
-            <h4 style={{ margin: '0 0 4px', fontSize: 14, fontWeight: 700, color: 'var(--text-dark)' }}>Convidar Novo Acesso</h4>
+            <h4 style={{ margin: '0 0 4px', fontSize: 14, fontWeight: 700, color: 'var(--text-dark)' }}>Criar Novo Acesso</h4>
             <p style={{ margin: 0, fontSize: 13, color: 'var(--text-muted)' }}>
-              Para criar novos acessos, adicione os usuários no painel do Supabase e atribua o cargo correspondente nesta página.
+              Crie o login da pessoa direto por aqui, sem abrir o Supabase. Ela já entra com o cargo escolhido e aparece na lista acima.
             </p>
           </div>
         </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 12 }}>
+          <input
+            type="text"
+            value={inviteNome}
+            onChange={(e) => setInviteNome(e.target.value)}
+            placeholder="Nome da pessoa"
+            style={{
+              padding: '10px 14px', borderRadius: 'var(--radius-sm)',
+              border: '1px solid var(--border-color)', fontSize: 13,
+              color: 'var(--text-dark)', background: '#fff', outline: 'none'
+            }}
+          />
+          <input
+            type="email"
+            value={inviteEmail}
+            onChange={(e) => setInviteEmail(e.target.value)}
+            placeholder="E-mail de acesso"
+            style={{
+              padding: '10px 14px', borderRadius: 'var(--radius-sm)',
+              border: '1px solid var(--border-color)', fontSize: 13,
+              color: 'var(--text-dark)', background: '#fff', outline: 'none'
+            }}
+          />
+          <input
+            type="text"
+            value={inviteSenha}
+            onChange={(e) => setInviteSenha(e.target.value)}
+            placeholder="Senha temporária (mín. 6)"
+            style={{
+              padding: '10px 14px', borderRadius: 'var(--radius-sm)',
+              border: '1px solid var(--border-color)', fontSize: 13,
+              color: 'var(--text-dark)', background: '#fff', outline: 'none'
+            }}
+          />
+          <select
+            value={inviteCargo}
+            onChange={(e) => setInviteCargo(e.target.value)}
+            style={{
+              padding: '10px 14px', borderRadius: 'var(--radius-sm)',
+              border: '1px solid var(--border-color)', fontSize: 13,
+              color: 'var(--text-dark)', background: '#fff', outline: 'none'
+            }}
+          >
+            {roles.map(r => (
+              <option key={r.id} value={r.name}>{r.name}</option>
+            ))}
+          </select>
+          <button
+            onClick={handleCreateUser}
+            disabled={inviteSaving}
+            style={{
+              background: 'var(--sidebar-bg)', color: '#fff', border: 'none',
+              padding: '10px 18px', borderRadius: 'var(--radius-sm)',
+              fontWeight: 600, fontSize: 13, cursor: 'pointer',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+              opacity: inviteSaving ? 0.7 : 1
+            }}
+          >
+            {inviteSaving ? (
+              <Loader2 style={{ width: 14, height: 14, animation: 'spin 1s linear infinite' }} />
+            ) : (
+              <UserPlus style={{ width: 14, height: 14 }} />
+            )}
+            {inviteSaving ? 'Criando...' : 'Criar Acesso'}
+          </button>
+        </div>
+
+        {inviteMsg && (
+          <div style={{
+            marginTop: 12, padding: '10px 14px', borderRadius: 'var(--radius-sm)',
+            background: 'var(--success-bg, #F0FDF4)', border: '1px solid var(--success, #16A34A)',
+            color: 'var(--success, #16A34A)', fontSize: 13
+          }}>
+            {inviteMsg}
+          </div>
+        )}
       </div>
 
       {/* ─── MODAL EDITAR / NOVO CARGO ─── */}
