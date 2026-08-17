@@ -19,10 +19,21 @@
  *    e transformava 1234.56 em 123456. Agora a função detecta o tipo e
  *    retorna o número diretamente sem processar texto.
  *
- *  [CORREÇÃO 3] clearContent() com range dinâmico
- *    O Math.max(..., 97) forçava a limpeza de 97 linhas mesmo quando a
- *    planilha tinha menos linhas, podendo gerar erro de alcance. Agora usa
- *    (maxLinhas - 3) que é sempre exato ao número real de linhas existentes.
+ *  [CORREÇÃO 3] Limpeza da virada preserva o layout fixo
+ *    A virada limpa SOMENTE a tabela de atendimentos (A4:I67) e depois
+ *    restaura as fórmulas da linha 68 e os rótulos de despesas (70–75)
+ *    via restaurarFormulasETabela(), preservando totais e formatação.
+ *
+ *  [CORREÇÃO 4] Chaves de sincronização com prefixo de data
+ *    As chaves de comanda/despesa agora começam com a data (date_ref).
+ *    Sem isso, como a planilha é limpa toda noite e as comandas recomeçam
+ *    do 1, o dia seguinte sobrescrevia os registros do dia anterior no
+ *    Supabase (merge-duplicates no índice único comanda+user_id) e o
+ *    histórico mensal nunca acumulava.
+ *
+ *  [CORREÇÃO 5] Virada SEM pular domingo/segunda
+ *    Política atual: caixa 100% automático, todos os dias. O cabeçalho A1
+ *    sempre avança para o dia seguinte (antes pulava para terça).
  */
 
 // ─── CONFIGURAÇÕES PADRÃO ──────────────────────────────────────────────────
@@ -147,7 +158,7 @@ function parseSheetData(rows) {
       var rowType = isSangria ? 'sangria' : 'despesa';
       var catName = isPassagem ? 'Passagem' : isProdutos ? 'Produtos' : isTributos ? 'Tributos' : isOutrasSaidas ? 'Outras Saídas' : 'Sangria';
       var descName = catName.toUpperCase();
-      var key = 'despesa_' + catName.toLowerCase().replace(/[^a-z0-9]/g, '_');
+      var key = dateRef + '_despesa_' + catName.toLowerCase().replace(/[^a-z0-9]/g, '_');
 
       list.push(criarObjetoTx(key, dateRef, descName, catName, '—', valor, 'Planilha', 0, 0, 0, 0, rowType));
       continue;
@@ -169,7 +180,7 @@ function parseSheetData(rows) {
     if (gross <= 0 || !clienteVal || String(clienteVal).trim() === '--') continue;
 
     var payMethod = pix > 0 ? 'Pix' : credito > 0 ? 'Crédito' : debito > 0 ? 'Débito' : 'Dinheiro';
-    var comandaStr = comandaVal ? String(comandaVal).trim() : ('rec_' + r);
+    var comandaStr = dateRef + '_' + (comandaVal ? String(comandaVal).trim() : ('rec_' + r));
 
     list.push(criarObjetoTx(comandaStr, dateRef, String(clienteVal).trim(), String(procVal).trim() || '—', String(profVal).trim() || '—', gross, payMethod, pix, credito, debito, dinheiro, 'receita'));
   }
@@ -256,11 +267,14 @@ function criarObjetoTx(comanda, dateRef, client, procedure, professional, gross,
 
 /**
  * 5. ROTINA DE VIRADA DE DIA E LIMPEZA AUTOMÁTICA DA PLANILHA
- * Executada automaticamente no final da noite (ex: 23:50) via Gatilho por Tempo (Time-driven trigger).
+ * Executada automaticamente no final da noite (ex: 23:50) via Gatilho por Tempo
+ * (Time-driven trigger) ou pelo Web App (?action=virarDia).
  *  1. Garante a sincronização final dos dados do dia com o Supabase.
  *  2. Pega o Fundo Final do dia (F1) e transfere como Fundo Inicial no C1.
- *  3. Limpa todas as linhas de lançamentos de clientes, serviços e despesas (linhas 4 em diante).
- *  4. Atualiza o cabeçalho A1 com a nova data.
+ *  3. Limpa SOMENTE a tabela de atendimentos (linhas 4 a 67) — nunca apaga
+ *     da linha 68 em diante (fórmulas, totais e despesas fixas).
+ *  4. Restaura fórmulas da linha 68 e rótulos de despesas (70–75).
+ *  5. Atualiza o cabeçalho A1 com a data do dia seguinte (sem pular dias).
  */
 function virarDiaELimparPlanilha() {
   try {
@@ -277,25 +291,92 @@ function virarDiaELimparPlanilha() {
     var fundoFinal = sheet.getRange('F1').getValue();
     Logger.log('[virarDiaELimparPlanilha] 2. Fundo Final capturado: %s', fundoFinal);
 
-    // [CORREÇÃO 3] Usa número dinâmico de linhas — sem forçar mínimo fixo de 97
-    // Evita erro de alcance quando a planilha tem menos de 100 linhas
-    var maxLinhas = sheet.getLastRow();
-    if (maxLinhas >= 4) {
-      sheet.getRange(4, 1, maxLinhas - 3, 9).clearContent();
-    }
-    Logger.log('[virarDiaELimparPlanilha] 3. Lançamentos antigos limpos com sucesso.');
+    // 1. Limpa ESTRITAMENTE a tabela de lançamentos de atendimentos (linhas 4 a 67)
+    // NUNCA apaga da linha 68 em diante para preservar fórmulas, totais e formatação das despesas
+    sheet.getRange('A4:I67').clearContent();
 
-    // Atualiza o Fundo Inicial (C1) com o Fundo Final herdado
+    // 2. Garante que as fórmulas de soma da linha 68 e os rótulos de despesas estejam 100% ativos
+    restaurarFormulasETabela(sheet);
+
+    // 3. Atualiza o Fundo Inicial (C1) com o Fundo Final herdado
     if (fundoFinal !== null && fundoFinal !== '' && !isNaN(parseNum(fundoFinal))) {
       sheet.getRange('C1').setValue(fundoFinal);
     }
 
-    // Atualiza a data do cabeçalho A1 para a nova data
-    var hojeFormatado = Utilities.formatDate(new Date(), "GMT-03:00", "dd/MM/yyyy");
-    sheet.getRange('A1').setValue("CAIXA - DIA " + hojeFormatado + " :");
+    // 4. Atualiza a data do cabeçalho A1 para o dia seguinte
+    // Política atual: caixa opera TODOS os dias — sem pular domingo/segunda
+    var targetDate = new Date();
+    if (targetDate.getHours() >= 22) {
+      targetDate.setDate(targetDate.getDate() + 1);
+    }
 
-    Logger.log('[virarDiaELimparPlanilha] 4. Virada de dia e limpeza concluídas com sucesso!');
+    var dataFormatada = Utilities.formatDate(targetDate, "GMT-03:00", "dd/MM/yyyy");
+    sheet.getRange('A1').setValue("CAIXA - DIA " + dataFormatada + " :");
+
+    Logger.log('[virarDiaELimparPlanilha] Virada de dia concluída preservando a linha 68 em diante!');
+    return true;
   } catch (err) {
     Logger.log('[virarDiaELimparPlanilha] Erro durante a virada do dia: %s', err.message);
+    return false;
   }
+}
+
+/**
+ * Restaura as fórmulas de soma da linha 68 (Totais de B4:B67 a F4:F67)
+ * e garante que os rótulos de despesas fixas (linhas 70 a 75) estejam sempre visíveis.
+ */
+function restaurarFormulasETabela(targetSheet) {
+  try {
+    var ss = targetSheet ? null : SpreadsheetApp.openById(SPREADSHEET_ID);
+    var sheet = targetSheet || ss.getSheets()[0];
+
+    // Restaura as fórmulas de soma na linha 68 (Totais dos Atendimentos)
+    sheet.getRange('B68').setFormula('=SUM(B4:B67)');
+    sheet.getRange('C68').setFormula('=SUM(C4:C67)');
+    sheet.getRange('D68').setFormula('=SUM(D4:D67)');
+    sheet.getRange('E68').setFormula('=SUM(E4:E67)');
+    sheet.getRange('F68').setFormula('=SUM(F4:F67)');
+
+    // Restaura os rótulos de despesas e sangria de acordo com o layout oficial (linhas 70 a 75)
+    sheet.getRange('A70').setValue('PASSAGEM');
+    sheet.getRange('A71').setValue('PRODUTOS');
+    sheet.getRange('A72').setValue('TRIBUTOS');
+    sheet.getRange('A73').setValue('OUTRAS SAÍDAS');
+    sheet.getRange('A74').setValue('SANGRIA');
+    sheet.getRange('A75').setValue('TOTAL DE DESPESAS');
+
+    Logger.log('[restaurarFormulasETabela] Fórmulas de soma da linha 68 e rótulos restaurados!');
+    return true;
+  } catch (e) {
+    Logger.log('[restaurarFormulasETabela] Erro: %s', e.message);
+    return false;
+  }
+}
+
+/**
+ * 6. ENDPOINTS HTTP PARA EXECUÇÃO REMOTA (WEB APP)
+ */
+function doGet(e) {
+  var action = (e && e.parameter && e.parameter.action) ? e.parameter.action : '';
+  if (action === 'virarDia' || action === 'clear') {
+    var ok = virarDiaELimparPlanilha();
+    return ContentService.createTextOutput(JSON.stringify({ success: ok, message: 'Virada de dia executada.' }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+  if (action === 'restaurar' || action === 'fixDespesas' || action === 'fixFormulas') {
+    var okRest = restaurarFormulasETabela();
+    return ContentService.createTextOutput(JSON.stringify({ success: okRest, message: 'Fórmulas da linha 68 e despesas restauradas.' }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+  if (action === 'sync') {
+    sincronizarComSupabase();
+    return ContentService.createTextOutput(JSON.stringify({ success: true, message: 'Sincronização executada.' }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+  return ContentService.createTextOutput(JSON.stringify({ status: 'active', timestamp: new Date().toISOString() }))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+function doPost(e) {
+  return doGet(e);
 }

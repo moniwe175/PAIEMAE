@@ -74,7 +74,7 @@ export default function Financial() {
     // ─── Novo sistema de caixa real ───
     sheetMetadata, setSheetMetadata,
     todayCashier, cashierSangrias, cashierHistory, autoClosed,
-    loadCaixaHoje, abrirCaixaHoje, isDiaAtendimento,
+    loadCaixaHoje, abrirCaixaHoje,
   } = useSync();
 
   const [activeTab, setActiveTab] = useState('transacoes');
@@ -293,7 +293,6 @@ export default function Financial() {
   
   // ─ Lógica do Caixa Físico (Novo Sistema Real) ─
   const isCaixaAberto = todayCashier?.status === 'aberto';
-  const isDiaFechado = !isDiaAtendimento(); // domingo/segunda: empresa não funciona
   const fundoInicial = safeNum(todayCashier?.opening_balance) || safeNum(sheetMetadata?.fundoInicial) || safeNum(cashier?.saldo) || 0;
 
   // Entradas exclusivamente em Dinheiro Físico (Espécie)
@@ -924,25 +923,6 @@ export default function Financial() {
             </div>
           )}
 
-          {/* Aviso de dia sem atendimento (domingo/segunda) */}
-          {isDiaFechado && (
-            <div style={{
-              background: 'linear-gradient(135deg, #F9FAFB, #F3F4F6)',
-              border: '1px solid #E5E7EB', borderLeft: '4px solid #6B7280',
-              borderRadius: 12, padding: '14px 18px', marginBottom: 20,
-              display: 'flex', alignItems: 'center', gap: 12,
-            }}>
-              <Lock style={{ width: 18, height: 18, color: '#4B5563', flexShrink: 0 }} />
-              <div>
-                <div style={{ fontWeight: 700, fontSize: 13, color: '#1F2937' }}>Fechado — empresa não funciona hoje</div>
-                <p style={{ fontSize: 12, color: '#4B5563', margin: 0 }}>
-                  Aos domingos e segundas-feiras não há atendimento nem caixa.
-                  O caixa de sábado é herdado diretamente como Fundo Inicial de terça-feira.
-                </p>
-              </div>
-            </div>
-          )}
-
           <div className="grid-2 section-gap">
             {/* Card Principal do Caixa */}
             <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
@@ -968,8 +948,6 @@ export default function Financial() {
                 <div style={{ fontSize: 13, fontWeight: 600, color: 'rgba(255,255,255,0.85)' }}>
                   {isCaixaAberto
                     ? `Aberto às ${todayCashier?.opened_at ? new Date(todayCashier.opened_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '--:--'}`
-                    : isDiaFechado
-                    ? 'Empresa fechada hoje (domingo/segunda)'
                     : todayCashier?.closed_at
                     ? `Fechado às ${new Date(todayCashier.closed_at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`
                     : 'Nenhum caixa aberto hoje'}

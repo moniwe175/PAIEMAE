@@ -94,8 +94,9 @@ export default function Reports() {
         const { data, error } = await supabase
           .from('sheet_transactions')
           .select(
-            'gross, date_ref, pix, credito, debito, dinheiro, client, procedure, professional, payment_method, commission_value, row_type, tipo'
+            'gross, date_ref, pix, credito, debito, dinheiro, client, procedure, professional, payment_method, commission_value'
           )
+          .eq('row_type', 'receita')
           .eq('is_metadata', false)
           .is('deleted_at', null)
           .gte('date_ref', startDateStr)
@@ -107,34 +108,16 @@ export default function Reports() {
 
         const rows = data || [];
 
-        const isDespesaRow = (t) => {
-          const rt = String(t.row_type || t.tipo || '').toLowerCase();
-          const desc = String(t.client || t.cliente || t.procedure || '').toLowerCase();
-          return rt.includes('despesa') || rt.includes('saida') || rt.includes('saída') || rt.includes('sangria') || desc.includes('passagem') || desc.includes('produto') || desc.includes('tributo') || desc.includes('outras');
-        };
-
-        const receitas = rows.filter((t) => !isDespesaRow(t));
-
-        const faturamento = receitas.reduce((sum, t) => sum + (parseFloat(t.gross) || 0), 0);
-        const totalSessoes = receitas.length;
+        const faturamento = rows.reduce((sum, t) => sum + (parseFloat(t.gross) || 0), 0);
+        const totalSessoes = rows.length;
         const ticketMedio = totalSessoes > 0 ? faturamento / totalSessoes : 0;
-        const totalPix = receitas.reduce((sum, t) => sum + (parseFloat(t.pix) || 0), 0);
-        const totalCartao = receitas.reduce(
+        const totalPix = rows.reduce((sum, t) => sum + (parseFloat(t.pix) || 0), 0);
+        const totalCartao = rows.reduce(
           (sum, t) => sum + (parseFloat(t.credito) || 0) + (parseFloat(t.debito) || 0),
           0
         );
-        const totalDinheiro = receitas.reduce((sum, t) => {
-          const din = parseFloat(t.dinheiro) || 0;
-          if (din > 0) return sum + din;
-          const pg = String(t.payment_method || t.pagamento || '').toLowerCase();
-          if (!parseFloat(t.pix) && !parseFloat(t.credito) && !parseFloat(t.debito)) {
-            if (pg.includes('dinheiro') || pg.includes('especie') || pg.includes('espécie') || pg.includes('cash')) {
-              return sum + (parseFloat(t.gross) || 0);
-            }
-          }
-          return sum;
-        }, 0);
-        const novosPacientes = new Set(receitas.map((t) => t.client).filter(Boolean)).size;
+        const totalDinheiro = rows.reduce((sum, t) => sum + (parseFloat(t.dinheiro) || 0), 0);
+        const novosPacientes = new Set(rows.map((t) => t.client).filter(Boolean)).size;
 
         setSheetKpis({
           faturamento,
@@ -161,44 +144,6 @@ export default function Reports() {
     };
   }, [startDateStr, endDateStr]);
 
-  // ─── Mapa de totais diários por data_ref vindos de sheet_transactions ───
-  const dailySheetTotals = useMemo(() => {
-    const map = {};
-    (sheetTxData || []).forEach(t => {
-      const d = t.date_ref || '';
-      if (!d) return;
-      if (!map[d]) {
-        map[d] = { dinheiro: 0, pix: 0, credito: 0, debito: 0, cartao: 0, saidas: 0, gross: 0 };
-      }
-      const gross = parseFloat(t.gross) || 0;
-      const pix = parseFloat(t.pix) || 0;
-      const credito = parseFloat(t.credito) || 0;
-      const debito = parseFloat(t.debito) || 0;
-      const dinheiro = parseFloat(t.dinheiro) || 0;
-      const rt = String(t.row_type || t.tipo || '').toLowerCase();
-      const desc = String(t.client || t.cliente || t.procedure || '').toLowerCase();
-
-      if (rt.includes('despesa') || rt.includes('saida') || rt.includes('saída') || rt.includes('sangria') || desc.includes('passagem') || desc.includes('produto') || desc.includes('tributo') || desc.includes('outras')) {
-        map[d].saidas += gross;
-      } else {
-        map[d].gross += gross;
-        map[d].pix += pix;
-        map[d].credito += credito;
-        map[d].debito += debito;
-        map[d].cartao += (credito + debito);
-        if (dinheiro > 0) {
-          map[d].dinheiro += dinheiro;
-        } else if (!pix && !credito && !debito) {
-          const pg = String(t.payment_method || t.pagamento || '').toLowerCase();
-          if (pg.includes('dinheiro') || pg.includes('especie') || pg.includes('espécie') || pg.includes('cash')) {
-            map[d].dinheiro += gross;
-          }
-        }
-      }
-    });
-    return map;
-  }, [sheetTxData]);
-
   // ─── Monthly revenue chart (from sheet_transactions) ────────
   const faturamentoMensal = useMemo(() => {
     const months = {};
@@ -221,9 +166,6 @@ export default function Reports() {
   const servicosPopulares = useMemo(() => {
     const services = {};
     sheetTxData.forEach((t) => {
-      const rt = String(t.row_type || t.tipo || '').toLowerCase();
-      const desc = String(t.client || t.cliente || t.procedure || '').toLowerCase();
-      if (rt.includes('despesa') || rt.includes('saida') || rt.includes('sangria') || desc.includes('passagem') || desc.includes('produto') || desc.includes('tributo') || desc.includes('outras')) return;
       const name = (t.procedure || 'Sem procedimento').trim();
       if (!services[name]) services[name] = { nome: name, qtd: 0, valor: 0 };
       services[name].qtd++;
@@ -264,32 +206,14 @@ export default function Reports() {
       .slice(0, 8);
   }, [sheetTxData, comissoes]);
 
-  // ─── Filtered cashier history merged with sheet data by date range ─────────────────
+  // ─── Filtered cashier history by date range ─────────────────
   const filteredCashierHistory = useMemo(() => {
-    const mapByDate = {};
-    (cashierHistory || []).forEach(c => {
-      if (c.date >= startDateStr && c.date <= endDateStr) {
-        mapByDate[c.date] = { ...c };
-      }
+    if (!cashierHistory || cashierHistory.length === 0) return [];
+    return cashierHistory.filter((c) => {
+      const d = c.date || '';
+      return d >= startDateStr && d <= endDateStr;
     });
-
-    Object.keys(dailySheetTotals).forEach(d => {
-      if (d >= startDateStr && d <= endDateStr) {
-        if (!mapByDate[d]) {
-          mapByDate[d] = {
-            id: `sheet-${d}`,
-            date: d,
-            opening_balance: 0,
-            closing_balance: null,
-            status: 'fechado',
-            auto_closed: true,
-          };
-        }
-      }
-    });
-
-    return Object.values(mapByDate).sort((a, b) => (b.date > a.date ? 1 : -1));
-  }, [cashierHistory, dailySheetTotals, startDateStr, endDateStr]);
+  }, [cashierHistory, startDateStr, endDateStr]);
 
   // Synced count from legacy transactions (for badge compat)
   const syncedCount = useMemo(
@@ -542,14 +466,13 @@ export default function Reports() {
                 </tr>
               ) : (
                 filteredCashierHistory.map((c, i) => {
-                  const dayStats = dailySheetTotals[c.date] || {};
-                  const entradas = numField(c, 'total_cash_in', 'dinheiro_entradas') || (dayStats.dinheiro || 0);
-                  const saidas = numField(c, 'total_cash_out', 'dinheiro_saidas') || (dayStats.saidas || 0);
-                  const pix = numField(c, 'pix', 'total_pix') || (dayStats.pix || 0);
+                  const entradas = numField(c, 'total_cash_in', 'dinheiro_entradas');
+                  const saidas = numField(c, 'total_cash_out', 'dinheiro_saidas');
+                  const pix = numField(c, 'pix', 'total_pix');
                   const credito = numField(c, 'credito', 'total_credito');
                   const debito = numField(c, 'debito', 'total_debito');
                   const cartao =
-                    numField(c, 'cartao', 'card', 'total_cartao') || (credito + debito) || (dayStats.cartao || 0);
+                    numField(c, 'cartao', 'card', 'total_cartao') || credito + debito;
                   const hasClosing =
                     c.closing_balance !== null &&
                     c.closing_balance !== undefined &&
@@ -729,14 +652,14 @@ export default function Reports() {
       </div>
 
       {/* ─── Professional ranking ───────────────────────────── */}
-      {profRanking.length > 0 && (
-        <div className="card section-gap">
+      <div className="card section-gap">
           <div className="card-header">
             <span className="card-title">
               <Users />
               Ranking de Profissionais
             </span>
           </div>
+          {profRanking.length > 0 ? (
           <ResponsiveContainer
             width="100%"
             height={Math.max(profRanking.length * 50, 120)}
@@ -777,18 +700,31 @@ export default function Reports() {
               />
             </BarChart>
           </ResponsiveContainer>
+          ) : (
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                height: 160,
+                color: 'var(--text-muted)',
+                fontSize: 13,
+              }}
+            >
+              Sem dados no período
+            </div>
+          )}
         </div>
-      )}
 
       {/* ─── Services chart ─────────────────────────────────── */}
-      {servicosPopulares.length > 0 && (
-        <div className="card section-gap">
+      <div className="card section-gap">
           <div className="card-header">
             <span className="card-title">
               <BarChart3 />
               Serviços Mais Realizados
             </span>
           </div>
+          {servicosPopulares.length > 0 ? (
           <ResponsiveContainer width="100%" height={200}>
             <BarChart
               data={servicosPopulares}
@@ -827,8 +763,21 @@ export default function Reports() {
               />
             </BarChart>
           </ResponsiveContainer>
+          ) : (
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                height: 160,
+                color: 'var(--text-muted)',
+                fontSize: 13,
+              }}
+            >
+              Sem dados no período
+            </div>
+          )}
         </div>
-      )}
 
       {/* ─── Detail table ───────────────────────────────────── */}
       <div className="card" style={{ padding: 0, overflow: 'hidden' }}>

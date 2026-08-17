@@ -5,16 +5,9 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
-// Dias de atendimento: terça a sábado. Se a data cair em domingo (0)
-// ou segunda (1), avança até a próxima terça — o caixa de sábado
-// herda direto para terça, sem caixa nesses dois dias.
-function nextOpenDate(dateStr: string): string {
-  const d = new Date(`${dateStr}T00:00:00Z`)
-  while (d.getUTCDay() === 0 || d.getUTCDay() === 1) {
-    d.setUTCDate(d.getUTCDate() + 1)
-  }
-  return d.toISOString().split('T')[0]
-}
+// Política atual: caixa 100% automático — abre e fecha TODOS os dias
+// (inclusive domingo/segunda/feriados). Dia sem movimento simplesmente
+// fecha zerado; nenhum dia é pulado.
 
 Deno.serve(async (req) => {
   // Handle CORS preflight
@@ -29,10 +22,9 @@ Deno.serve(async (req) => {
     )
 
     const today = new Date().toISOString().split('T')[0]
-    // Dia-alvo do próximo caixa: hoje em dia de atendimento,
-    // terça-feira quando roda em domingo/segunda (caminho único,
-    // a checagem de existência abaixo garante idempotência)
-    const targetDate = nextOpenDate(today)
+    // Dia-alvo do próximo caixa: sempre hoje (a checagem de existência
+    // abaixo garante idempotência)
+    const targetDate = today
     const closedIds: number[] = []
     let lastClosingBalance = 0
 

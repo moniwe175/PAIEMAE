@@ -434,19 +434,10 @@ export function SyncProvider({ children }) {
 
   // ─── Cashier actions — Sistema Real ──────────────────────────
 
-  /** Dias de atendimento: terça a sábado (domingo/segunda = fechado) */
-  const isDiaAtendimento = useCallback((dateObj = new Date()) => {
-    const day = dateObj.getDay();
-    return day >= 2 && day <= 6;
-  }, []);
-
-  /** Abre caixa de hoje automaticamente herdando o saldo do último fechamento */
+  /** Abre caixa de hoje automaticamente herdando o saldo do último fechamento.
+   *  Política atual: caixa 100% automático — abre e fecha todos os dias
+   *  (inclusive domingo/segunda/feriados); dia sem movimento fecha zerado. */
   const abrirCaixaHoje = useCallback(async (customBalance = null) => {
-    if (!isDiaAtendimento()) {
-      // Empresa fechada (domingo/segunda): nunca abrir caixa nesses dias
-      console.log('[SyncContext] Empresa fechada hoje (dom/seg) — caixa não abre');
-      return null;
-    }
     if (!requireConnection('abrir caixa')) return null;
     try {
       let openingBal = customBalance;
@@ -476,7 +467,7 @@ export function SyncProvider({ children }) {
       console.warn('[SyncContext] abrirCaixaHoje error:', e);
       return null;
     }
-  }, [requireConnection, addLog, isDiaAtendimento]);
+  }, [requireConnection, addLog]);
 
   /** Carrega caixa de hoje + sangrias + histórico do Supabase */
   const loadCaixaHoje = useCallback(async () => {
@@ -507,16 +498,11 @@ export function SyncProvider({ children }) {
           setTodayCashier(fechadoHoje);
           setCashier(prev => ({ ...prev, status: 'fechado', saldo: Number(fechadoHoje.closing_balance || 0) }));
         } else {
-          // Nenhum caixa existe para hoje
-          if (!isDiaAtendimento()) {
-            console.log('[SyncContext] Empresa fechada hoje — sem abertura automática de caixa');
-            setCashier(prev => ({ ...prev, status: 'dia_fechado' }));
-          } else {
-            console.log('[SyncContext] Nenhum caixa para hoje, abrindo automaticamente...');
-            const result = await abrirCaixaHoje();
-            if (!result) {
-              setCashier(prev => ({ ...prev, status: 'fechado' }));
-            }
+          // Nenhum caixa existe para hoje — abre automaticamente (todos os dias)
+          console.log('[SyncContext] Nenhum caixa para hoje, abrindo automaticamente...');
+          const result = await abrirCaixaHoje();
+          if (!result) {
+            setCashier(prev => ({ ...prev, status: 'fechado' }));
           }
         }
       }
@@ -532,7 +518,7 @@ export function SyncProvider({ children }) {
     } catch (e) {
       console.warn('[SyncContext] loadCaixaHoje error:', e);
     }
-  }, [addLog, abrirCaixaHoje, isDiaAtendimento]);
+  }, [addLog, abrirCaixaHoje]);
 
   /** Garante que o caixa está aberto antes de uma operação (auto-open silencioso) */
   const ensureCaixaAberto = useCallback(async () => {
@@ -953,7 +939,7 @@ export function SyncProvider({ children }) {
     todayCashier, cashierSangrias, cashierHistory, autoClosed,
     abrirCaixa, fecharCaixa, realizarSangria, ensureCaixaAberto,
     loadCaixaHoje, abrirCaixaHoje,
-    getFundoInicialHerdado, isDiaAtendimento,
+    getFundoInicialHerdado,
     updateSplitConfig,
 
     importFromSheet,
