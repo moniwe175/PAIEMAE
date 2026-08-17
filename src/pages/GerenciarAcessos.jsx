@@ -29,6 +29,66 @@ const MODULE_LIST = [
   { key: 'acessos', label: 'Acessos' },
 ];
 
+// ─── Popup de confirmação de exclusão (cargo ou usuário) ───
+function ConfirmDeleteModal({ title, description, busy, onCancel, onConfirm }) {
+  return (
+    <div style={{
+      position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+      background: 'rgba(67, 47, 45, 0.4)', backdropFilter: 'blur(4px)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      zIndex: 10000, padding: 20
+    }}>
+      <div style={{
+        background: '#fff', borderRadius: 'var(--radius-lg)', width: '100%', maxWidth: 420,
+        padding: 24, boxShadow: 'var(--shadow-lg)', border: '1px solid var(--border-color)'
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 16 }}>
+          <div style={{
+            width: 46, height: 46, borderRadius: 12, background: 'var(--danger-bg)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0
+          }}>
+            <AlertTriangle style={{ width: 22, height: 22, color: 'var(--danger)' }} />
+          </div>
+          <div>
+            <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--text-dark)' }}>{title}</div>
+            <div style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 2 }}>Esta ação não pode ser desfeita.</div>
+          </div>
+        </div>
+        <div style={{
+          background: 'var(--bg-main)', borderRadius: 'var(--radius-sm)',
+          padding: '12px 14px', marginBottom: 18, fontSize: 13, color: 'var(--text-light)', lineHeight: 1.5
+        }}>
+          {description}
+        </div>
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+          <button
+            onClick={onCancel}
+            style={{
+              background: 'var(--bg-main)', color: 'var(--text-dark)', border: '1px solid var(--border-color)',
+              padding: '9px 16px', borderRadius: 'var(--radius-sm)', fontSize: 13, fontWeight: 600, cursor: 'pointer'
+            }}
+          >
+            Cancelar
+          </button>
+          <button
+            onClick={onConfirm}
+            disabled={busy}
+            style={{
+              background: 'var(--danger)', color: '#fff', border: 'none',
+              padding: '9px 16px', borderRadius: 'var(--radius-sm)', fontSize: 13, fontWeight: 700,
+              cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6,
+              opacity: busy ? 0.7 : 1
+            }}
+          >
+            {busy ? <Loader2 style={{ width: 14, height: 14, animation: 'spin 1s linear infinite' }} /> : <Trash2 style={{ width: 14, height: 14 }} />}
+            Excluir
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function GerenciarAcessos() {
   const { user } = useAuth();
   const [members, setMembers] = useState([]);
@@ -53,6 +113,10 @@ export default function GerenciarAcessos() {
   const [inviteCargo, setInviteCargo] = useState('Recepcionista');
   const [inviteSaving, setInviteSaving] = useState(false);
   const [inviteMsg, setInviteMsg] = useState(null);
+
+  // Popup "tem certeza?" para excluir cargo / usuário
+  const [confirmTarget, setConfirmTarget] = useState(null); // { type:'role', role } | { type:'member', member }
+  const [confirmBusy, setConfirmBusy] = useState(false);
 
   // Carrega cargos da tabela roles (com fallback para seed local se a tabela ainda não existir)
   const loadRoles = async () => {
@@ -216,22 +280,43 @@ export default function GerenciarAcessos() {
     handleCloseModal();
   };
 
-  const handleDeleteRole = async (roleId) => {
-    const role = roles.find(r => r.id === roleId);
+  const requestDeleteRole = (role) => {
     if (!role) return;
     const inUse = members.some(m => m.role !== 'admin' && (m.assignedRole === role.name || m.cargo === role.name));
     if (inUse) {
       alert('Este cargo não pode ser excluído: há colaboradores vinculados a ele.');
       return;
     }
-    if (window.confirm('Tem certeza que deseja excluir este cargo?')) {
-      const { error: delError } = await supabase.from('roles').delete().eq('id', roleId);
-      if (delError) {
-        setError(delError.message);
-        return;
+    setConfirmTarget({ type: 'role', role });
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!confirmTarget || confirmBusy) return;
+    setConfirmBusy(true);
+    setError(null);
+    try {
+      if (confirmTarget.type === 'role') {
+        const role = confirmTarget.role;
+        const { error: delError } = await supabase.from('roles').delete().eq('id', role.id);
+        if (delError) throw new Error(delError.message);
+        setRoles(prev => prev.filter(r => r.id !== role.id));
+        if (editingRole?.id === role.id) handleCloseModal();
+      } else {
+        const member = confirmTarget.member;
+        const { data, error: fnErr } = await supabase.functions.invoke('admin-delete-user', {
+          body: { userId: member.id },
+        });
+        if (fnErr) throw fnErr;
+        const res = data || {};
+        if (res.success === false) throw new Error(res.error || 'Falha ao excluir o usuário.');
+        setMembers(prev => prev.filter(m => m.id !== member.id));
       }
-      setRoles(prev => prev.filter(r => r.id !== roleId));
-      handleCloseModal();
+      setConfirmTarget(null);
+    } catch (e) {
+      setError(e?.message || 'Erro ao excluir.');
+      setConfirmTarget(null);
+    } finally {
+      setConfirmBusy(false);
     }
   };
 
@@ -450,6 +535,18 @@ export default function GerenciarAcessos() {
               e.currentTarget.style.background = 'var(--bg-card)';
             }}
           >
+            <button
+              onClick={(e) => { e.stopPropagation(); requestDeleteRole(role); }}
+              title="Excluir cargo"
+              style={{
+                position: 'absolute', top: 14, right: 14,
+                background: 'var(--danger-bg)', border: 'none', color: 'var(--danger)',
+                cursor: 'pointer', padding: 7, borderRadius: 'var(--radius-sm)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center'
+              }}
+            >
+              <Trash2 style={{ width: 14, height: 14 }} />
+            </button>
             <div>
               <div style={{
                 width: 44,
@@ -576,6 +673,20 @@ export default function GerenciarAcessos() {
                     )}
                     {savedMemberId === member.id ? 'Salvo' : 'Salvar'}
                   </button>
+
+                  {member.role !== 'admin' && (
+                    <button
+                      onClick={() => setConfirmTarget({ type: 'member', member })}
+                      title="Excluir usuário"
+                      style={{
+                        background: 'var(--danger-bg)', border: '1px solid var(--border-color)',
+                        color: 'var(--danger)', cursor: 'pointer', padding: '8px 10px',
+                        borderRadius: 'var(--radius-sm)', display: 'flex', alignItems: 'center', justifyContent: 'center'
+                      }}
+                    >
+                      <Trash2 style={{ width: 14, height: 14 }} />
+                    </button>
+                  )}
                 </div>
               </div>
             );
@@ -713,7 +824,7 @@ export default function GerenciarAcessos() {
               <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                 {editingRole && (
                   <button
-                    onClick={() => handleDeleteRole(editingRole.id)}
+                    onClick={() => requestDeleteRole(editingRole)}
                     style={{ background: 'none', border: 'none', color: 'var(--danger)', cursor: 'pointer', padding: 4 }}
                     title="Excluir cargo"
                   >
@@ -873,6 +984,23 @@ export default function GerenciarAcessos() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* ─── POPUP CONFIRMAR EXCLUSÃO (cargo ou usuário) ─── */}
+      {confirmTarget && (
+        <ConfirmDeleteModal
+          busy={confirmBusy}
+          title={confirmTarget.type === 'role' ? 'Excluir Cargo' : 'Excluir Usuário'}
+          description={
+            confirmTarget.type === 'role' ? (
+              <>Tem certeza que deseja excluir o cargo <strong style={{ color: 'var(--text-dark)' }}>{confirmTarget.role.name}</strong>?</>
+            ) : (
+              <>Tem certeza que deseja excluir o acesso de <strong style={{ color: 'var(--text-dark)' }}>{confirmTarget.member.full_name || confirmTarget.member.email}</strong>? A pessoa não conseguirá mais entrar no sistema.</>
+            )
+          }
+          onCancel={() => setConfirmTarget(null)}
+          onConfirm={handleConfirmDelete}
+        />
       )}
     </div>
   );

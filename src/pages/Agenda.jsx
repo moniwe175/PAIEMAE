@@ -1432,6 +1432,21 @@ export default function Agenda() {
   const aptsDodia = useMemo(() => agendamentos.filter(a => a.data === fmtDate(selectedDate)), [agendamentos, selectedDate]);
   const blqDodia = useMemo(() => bloqueios.filter(b => b.data === fmtDate(selectedDate)), [bloqueios, selectedDate]);
 
+  // Colunas do modo dia: equipe atual + profissionais fora da equipe que têm itens no dia
+  // (garante que agendamentos antigos nunca fiquem invisíveis)
+  const dayColumns = useMemo(() => {
+    if (viewMode !== 'day') return weekDays;
+    const known = new Set(profissionais.map(p => p.nome));
+    const extras = [...new Set([
+      ...aptsDodia.map(a => a.profissional),
+      ...blqDodia.map(b => b.profissional),
+    ])].filter(n => n && !known.has(n));
+    return [
+      ...profissionais,
+      ...extras.map(n => ({ id: 'ext_' + n, nome: n, cargo: 'Fora da equipe', cor: '#9CA3AF' })),
+    ];
+  }, [viewMode, profissionais, weekDays, aptsDodia, blqDodia]);
+
   // Posição no grid
   function itemPos(item) {
     const startMins = timeToMinutes(item.hora) - HOUR_START * 60;
@@ -1551,7 +1566,7 @@ export default function Agenda() {
           {/* Header colunas */}
           <div style={{ display: 'flex', borderBottom: '2px solid #F0EBE6', background: '#FAFAFA', flexShrink: 0 }}>
             <div style={{ width: 64, flexShrink: 0 }} />
-            {(viewMode === 'day' ? profissionais : weekDays).map((item, i) => {
+            {dayColumns.map((item, i) => {
               if (viewMode === 'day') {
                 const p = item;
                 const cnt = aptsDodia.filter(a => a.profissional === p.nome).length;
@@ -1611,7 +1626,7 @@ export default function Agenda() {
               </div>
 
               {/* Colunas das profissionais */}
-              {(viewMode === 'day' ? profissionais : weekDays).map((item, colIdx) => {
+              {dayColumns.map((item, colIdx) => {
                 const key = viewMode === 'day' ? item.nome : fmtDate(item);
                 const colApts = viewMode === 'day'
                   ? aptsDodia.filter(a => a.profissional === item.nome)
