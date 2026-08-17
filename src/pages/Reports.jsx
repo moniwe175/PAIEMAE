@@ -151,7 +151,7 @@ export default function Reports() {
       const dr = t.date_ref || '';
       const parts = dr.split('-');
       if (parts.length !== 3) return;
-      const key = `${parts[1]}/${parts[2]}`;
+      const key = `${parts[1]}/${parts[0]}`; // MM/YYYY (agrupamento por mês/ano)
       if (!months[key]) months[key] = { mes: key, valor: 0 };
       months[key].valor += parseFloat(t.gross) || 0;
     });
@@ -554,7 +554,7 @@ export default function Reports() {
           </div>
           {faturamentoMensal.length > 0 ? (
             <ResponsiveContainer width="100%" height={220}>
-              <LineChart
+              <BarChart
                 data={faturamentoMensal}
                 margin={{ top: 5, right: 5, left: -15, bottom: 0 }}
               >
@@ -575,15 +575,17 @@ export default function Reports() {
                   tick={{ fontSize: 10, fill: 'var(--text-muted)' }}
                   tickFormatter={(v) => `R$${v / 1000}k`}
                 />
-                <Tooltip formatter={(v) => [formatBRL(v), 'Faturamento']} />
-                <Line
-                  type="monotone"
-                  dataKey="valor"
-                  stroke="var(--color-primary)"
-                  strokeWidth={2.5}
-                  dot={false}
+                <Tooltip
+                  formatter={(v) => [formatBRL(v), 'Faturamento']}
+                  cursor={{ fill: 'rgba(0,0,0,0.04)' }}
                 />
-              </LineChart>
+                <Bar
+                  dataKey="valor"
+                  fill="var(--color-primary)"
+                  radius={[6, 6, 0, 0]}
+                  maxBarSize={48}
+                />
+              </BarChart>
             </ResponsiveContainer>
           ) : (
             <div
