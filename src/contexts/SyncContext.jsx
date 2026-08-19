@@ -17,7 +17,7 @@ import {
   // ─── Novo sistema de caixa real ───
   fetchTodayCashier, fetchLastClosingBalance, openNewCashier, closeCashierById,
   fetchCashierHistory, insertSangria as sbInsertSangria, fetchTodaySangrias,
-  updateCashierTotals,
+  updateCashierTotals, todayBRT,
 } from '../services/supabaseService';
 import { defaultCashier, defaultSplitConfig } from '../mocks/financial';
 // Sincronização da planilha é server-side (Apps Script + Edge Function).
@@ -490,7 +490,7 @@ export function SyncProvider({ children }) {
         const { data: fechadoHoje } = await supabase
           .from('cashier_state')
           .select('*')
-          .eq('date', new Date().toISOString().split('T')[0])
+          .eq('date', todayBRT())
           .eq('status', 'fechado')
           .limit(1)
           .maybeSingle();
@@ -617,7 +617,7 @@ export function SyncProvider({ children }) {
       const { data, error } = await sbInsertSangria({
         valor: Number(valor),
         motivo,
-        cashierDate: new Date().toISOString().split('T')[0],
+        cashierDate: todayBRT(),
       });
       if (error) {
         addLog('error', `Erro ao registrar sangria: ${error.message || error}`);

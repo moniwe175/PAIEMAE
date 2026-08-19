@@ -8,6 +8,18 @@ function handleError(error, fallback = null) {
 }
 
 /**
+ * Dia calendário ATUAL no fuso da clínica (America/Sao_Paulo), YYYY-MM-DD.
+ * NUNCA usar UTC (toISOString) para caixa/planilha: a partir das 21h de
+ * Brasília o UTC já é "amanhã", o que abria o caixa do dia seguinte
+ * adiantado e com fundo herdado errado.
+ */
+export function todayBRT() {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(new Date());
+}
+
+/**
  * Retorna o user_id do usuário autenticado atual.
  * Usado para garantir que todos os inserts/upserts tenham user_id correto para RLS.
  */
@@ -126,6 +138,7 @@ export async function fetchSheetTransactions() {
     .from('sheet_transactions')
     .select('*')
     .is('deleted_at', null)
+    .eq('date_ref', todayBRT())
     .order('date_ref', { ascending: false });
   if (error) return handleError(error, []);
   const filtered = (data || []).filter(r => {
@@ -140,7 +153,8 @@ export async function fetchSheetTransactionsSummary() {
   const { data, error } = await supabase
     .from('sheet_transactions')
     .select('row_type, tipo, gross')
-    .is('deleted_at', null);
+    .is('deleted_at', null)
+    .eq('date_ref', todayBRT());
   if (error) return handleError(error, { receitas: 0, despesas: 0, sangrias: 0, count: { receitas: 0, despesas: 0, sangrias: 0 } });
   const summary = { receitas: 0, despesas: 0, sangrias: 0, count: { receitas: 0, despesas: 0, sangrias: 0 } };
   (data || []).forEach(row => {
@@ -167,7 +181,7 @@ export async function upsertSheetTransaction(st) {
   const comandaStr = st.comanda ? String(st.comanda).trim() : null;
 
   const payload = {
-    date_ref: st.date_ref || new Date().toISOString().split('T')[0],
+    date_ref: st.date_ref || todayBRT(),
     client: st.client || null,
     procedure: st.procedure || null,
     professional: st.professional || null,
@@ -320,7 +334,7 @@ export async function updateComissao(id, updates) {
 /** Busca o registro de caixa do dia atual (status = 'aberto', date = hoje) */
 export async function fetchTodayCashier() {
   if (!isSupabaseConfigured()) return handleError('Supabase not configured', null);
-  const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+  const today = todayBRT(); // YYYY-MM-DD no fuso da clínica
   const { data, error } = await supabase
     .from('cashier_state')
     .select('*')
@@ -334,7 +348,7 @@ export async function fetchTodayCashier() {
 /** Busca qualquer registro de caixa do dia atual (aberto ou fechado) */
 export async function fetchAnyCashierToday() {
   if (!isSupabaseConfigured()) return handleError('Supabase not configured', null);
-  const today = new Date().toISOString().split('T')[0];
+  const today = todayBRT();
   const { data, error } = await supabase
     .from('cashier_state')
     .select('*')
@@ -387,7 +401,7 @@ export async function fetchLastClosingBalance() {
 /** Cria um novo caixa para hoje com o saldo herdado */
 export async function openNewCashier(openingBalance = 0) {
   if (!isSupabaseConfigured()) return handleError('Supabase not configured');
-  const today = new Date().toISOString().split('T')[0];
+  const today = todayBRT();
   // Somente colunas confirmadas em produção (sem campos legados
   // saldo/horaAbertura/dataAbertura/sangrias/user_id — não existem na tabela)
   const payload = {
@@ -481,7 +495,7 @@ export async function fetchCashierHistory(limit = 30) {
 export async function insertSangria({ valor, motivo, cashierDate }) {
   if (!isSupabaseConfigured()) return handleError('Supabase not configured');
   const userId = await getUserId();
-  const today = cashierDate || new Date().toISOString().split('T')[0];
+  const today = cashierDate || todayBRT();
   const payload = { valor: Number(valor), motivo: motivo || '', cashier_date: today };
   if (userId) payload.user_id = userId;
   const { data, error } = await supabase.from('cashier_sangrias').insert([payload]).select().single();
@@ -492,7 +506,7 @@ export async function insertSangria({ valor, motivo, cashierDate }) {
 /** Busca sangrias do dia atual */
 export async function fetchTodaySangrias() {
   if (!isSupabaseConfigured()) return handleError('Supabase not configured', []);
-  const today = new Date().toISOString().split('T')[0];
+  const today = todayBRT();
   const { data, error } = await supabase
     .from('cashier_sangrias')
     .select('*')
@@ -505,7 +519,7 @@ export async function fetchTodaySangrias() {
 /** Fecha caixas de dias anteriores que ainda estão abertos (auto-close frontend) */
 export async function autoClosePreviousCashiers() {
   if (!isSupabaseConfigured()) return { closed: 0, error: null };
-  const today = new Date().toISOString().split('T')[0];
+  const today = todayBRT();
   try {
     const { data: openOld, error } = await supabase
       .from('cashier_state')
@@ -548,7 +562,7 @@ export async function fetchCashierState() {
 export async function upsertCashierState(state) {
   if (!isSupabaseConfigured()) return handleError('Supabase not configured');
   const userId = state.user_id || await getUserId();
-  const today = new Date().toISOString().split('T')[0];
+  const today = todayBRT();
   const stateWithUser = {
     ...state,
     user_id: userId,
