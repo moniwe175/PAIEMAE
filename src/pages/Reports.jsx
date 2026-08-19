@@ -144,6 +144,21 @@ export default function Reports() {
     };
   }, [startDateStr, endDateStr]);
 
+  // ─── Totais de pix/cartão por dia (para o Histórico de Caixas) ──
+  // O cashier_state só rastreia dinheiro físico; pix e cartão vêm da planilha.
+  const sheetByDate = useMemo(() => {
+    const map = {};
+    (sheetTxData || []).forEach((t) => {
+      const d = t.date_ref;
+      if (!d) return;
+      if (!map[d]) map[d] = { pix: 0, cartao: 0, dinheiro: 0 };
+      map[d].pix += parseFloat(t.pix) || 0;
+      map[d].cartao += (parseFloat(t.credito) || 0) + (parseFloat(t.debito) || 0);
+      map[d].dinheiro += parseFloat(t.dinheiro) || 0;
+    });
+    return map;
+  }, [sheetTxData]);
+
   // ─── Monthly revenue chart (from sheet_transactions) ────────
   const faturamentoMensal = useMemo(() => {
     const months = {};
@@ -468,11 +483,10 @@ export default function Reports() {
                 filteredCashierHistory.map((c, i) => {
                   const entradas = numField(c, 'total_cash_in', 'dinheiro_entradas');
                   const saidas = numField(c, 'total_cash_out', 'dinheiro_saidas');
-                  const pix = numField(c, 'pix', 'total_pix');
-                  const credito = numField(c, 'credito', 'total_credito');
-                  const debito = numField(c, 'debito', 'total_debito');
-                  const cartao =
-                    numField(c, 'cartao', 'card', 'total_cartao') || credito + debito;
+                  // Pix/cartão do dia vêm da sheet_transactions (o caixa só rastreia dinheiro)
+                  const doDia = sheetByDate[c.date] || { pix: 0, cartao: 0 };
+                  const pix = doDia.pix;
+                  const cartao = doDia.cartao;
                   const hasClosing =
                     c.closing_balance !== null &&
                     c.closing_balance !== undefined &&
