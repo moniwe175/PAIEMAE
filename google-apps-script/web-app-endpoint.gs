@@ -192,7 +192,9 @@ function parseSheetData(rows) {
  * 4. ENVIO DE DADOS VIA REST API DO SUPABASE
  */
 function enviarParaSupabase(transactions, serviceKey, userId) {
-  var restUrl = SUPABASE_URL + '/rest/v1/sheet_transactions';
+  // on_conflict=comanda,user_id: diz ao PostgREST qual índice único usar no
+  // merge-duplicates (sem isso ele usa a PK "id" e cria duplicatas/409).
+  var restUrl = SUPABASE_URL + '/rest/v1/sheet_transactions?on_conflict=comanda,user_id';
   
   var payload = transactions.map(function(tx) {
     tx.user_id = userId;
