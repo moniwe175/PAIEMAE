@@ -19,7 +19,8 @@ import {
   Sparkles,
   ClipboardCheck,
   Target,
-  Shield
+  Shield,
+  BookOpen
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { fetchQueuePendingCount } from '../../services/supabaseService';
@@ -39,6 +40,7 @@ const menuItems = [
   { key: 'tarefas', name: 'Tarefas', path: '/kanban', icon: ClipboardList },
   { key: 'marketing', name: 'Marketing', path: '/marketing', icon: Megaphone },
   { key: 'motor', name: 'Motor', path: '/motor-marketing', icon: Zap, badgeKey: 'pending' },
+  { key: 'marketing', name: 'Guia Marketing', path: '/guia-marketing', icon: BookOpen },
   { key: 'comissoes', name: 'Comissões', path: '/comissoes', icon: Coins },
   { key: 'financeiro', name: 'Financeiro', path: '/financial', icon: Wallet },
   { key: 'integracoes', name: 'Integrações', path: '/integration', icon: Zap },
