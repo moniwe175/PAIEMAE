@@ -1353,6 +1353,7 @@ export default function Agenda() {
   const handleSave = async (payload) => {
     const list = Array.isArray(payload) ? payload : [payload];
     const updatedApts = [];
+    let falhas = 0;
     for (const item of list) {
       const sbItem = mapToSupabase(item, false);
       let res;
@@ -1363,7 +1364,12 @@ export default function Agenda() {
       }
       if (res.data) {
         updatedApts.push(mapFromSupabase(res.data));
+      } else {
+        falhas++;
       }
+    }
+    if (falhas > 0) {
+      alert(`Não foi possível salvar ${falhas > 1 ? falhas + ' agendamentos' : 'o agendamento'} no banco de dados. Tente novamente — se o erro persistir, avise o suporte.`);
     }
     setAgendamentos(prev => {
       const ids = new Set(updatedApts.map(a => a.id));

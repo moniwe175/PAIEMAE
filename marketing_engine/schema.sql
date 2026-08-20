@@ -75,7 +75,7 @@ COMMENT ON COLUMN public.clients.total_consultas_concluidas IS
 -- 3. ALTERAÇÕES NA TABELA EXISTENTE: appointments
 -- =============================================================================
 
--- FK para clients (uuid) — necessária para as queries do rules.py
+-- FK para clients (integer) — necessária para as queries do rules.py
 DO $$
 BEGIN
     IF NOT EXISTS (
@@ -83,7 +83,7 @@ BEGIN
         WHERE table_name = 'appointments' AND column_name = 'client_id'
     ) THEN
         ALTER TABLE public.appointments
-            ADD COLUMN client_id uuid REFERENCES public.clients(id) ON DELETE SET NULL;
+            ADD COLUMN client_id integer REFERENCES public.clients(id) ON DELETE SET NULL;
     END IF;
 END;
 $$;
