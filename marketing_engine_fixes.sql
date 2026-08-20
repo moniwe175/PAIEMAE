@@ -23,7 +23,7 @@ RETURNS trigger
 LANGUAGE plpgsql
 AS $$
 DECLARE
-  cid uuid;
+  cid integer;
 BEGIN
   cid := COALESCE(NEW.client_id, OLD.client_id);
   IF cid IS NULL THEN
