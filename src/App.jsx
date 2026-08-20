@@ -17,7 +17,6 @@ import Dashboard from './pages/Dashboard';
 import Agenda from './pages/Agenda';
 import Pacientes from './pages/Pacientes';
 import Clients from './pages/Clients';
-import Kanban from './pages/Kanban';
 import Financial from './pages/Financial';
 import Comissoes from './pages/Comissoes';
 import Inventory from './pages/Inventory';
@@ -58,7 +57,6 @@ function MainLayout() {
           <Route path="/agenda" element={<ModuleGate module="agenda"><Agenda /></ModuleGate>} />
           <Route path="/pacientes" element={<ModuleGate module="pacientes"><Pacientes /></ModuleGate>} />
           <Route path="/clients" element={<Clients />} />
-          <Route path="/kanban" element={<ModuleGate module="tarefas"><Kanban /></ModuleGate>} />
           <Route path="/financial" element={<ModuleGate module="financeiro"><Financial /></ModuleGate>} />
           <Route path="/comissoes" element={<ModuleGate module="comissoes"><Comissoes /></ModuleGate>} />
           <Route path="/inventory" element={<ModuleGate module="estoque"><Inventory /></ModuleGate>} />

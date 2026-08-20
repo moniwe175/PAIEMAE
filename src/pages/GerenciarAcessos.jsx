@@ -20,7 +20,6 @@ const MODULE_LIST = [
   { key: 'pacotes', label: 'Pacotes' },
   { key: 'relatorios', label: 'Relatórios' },
   { key: 'estrategia', label: 'Estratégia' },
-  { key: 'tarefas', label: 'Tarefas' },
   { key: 'marketing', label: 'Marketing' },
   { key: 'motor', label: 'Motor' },
   { key: 'comissoes', label: 'Comissões' },

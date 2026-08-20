@@ -46,7 +46,6 @@ export const INITIAL_ROLES = [
       estoque: { ver: true, edit: true },
       pacotes: { ver: true, edit: true },
       relatorios: { ver: true, edit: true },
-      tarefas: { ver: true, edit: true },
       marketing: { ver: true, edit: true }
     }
   }

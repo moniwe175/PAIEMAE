@@ -1149,39 +1149,6 @@ export async function deletePackage(id) {
   return { data: true, error: null };
 }
 
-// ─── Kanban Leads ───────────────────────────────────────────
-
-export async function fetchKanbanLeads() {
-  if (!isSupabaseConfigured()) return handleError('Supabase not configured', []);
-  const { data, error } = await supabase
-    .from('kanban_leads')
-    .select('*')
-    .order('ordem', { ascending: true });
-  if (error) return handleError(error, []);
-  return { data: data || [], error: null };
-}
-
-export async function insertKanbanLead(lead) {
-  if (!isSupabaseConfigured()) return handleError('Supabase not configured');
-  const userId = lead.user_id || await getUserId();
-  const { data, error } = await supabase.from('kanban_leads').insert([{ ...lead, user_id: userId }]).select().single();
-  if (error) return handleError(error);
-  return { data, error: null };
-}
-
-export async function updateKanbanLead(id, updates) {
-  if (!isSupabaseConfigured()) return handleError('Supabase not configured');
-  const { data, error } = await supabase.from('kanban_leads').update(updates).eq('id', id).select().single();
-  if (error) return handleError(error);
-  return { data, error: null };
-}
-
-export async function deleteKanbanLead(id) {
-  if (!isSupabaseConfigured()) return handleError('Supabase not configured');
-  const { error } = await supabase.from('kanban_leads').delete().eq('id', id);
-  if (error) return handleError(error);
-  return { data: true, error: null };
-}
 
 // ─── Motor Marketing — Templates ─────────────────────────────
 
