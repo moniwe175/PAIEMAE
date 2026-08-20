@@ -7,7 +7,7 @@ import {
 
 const Sidebar = () => {
   const menuItems = [
-    { name: 'Dashboard', path: '/', icon: LayoutDashboard },
+    { name: 'Painel de Controle', path: '/', icon: LayoutDashboard },
     { name: 'Agenda', path: '/agenda', icon: Calendar },
     { name: 'Pacientes', path: '/pacientes', icon: Users },
     { name: 'Financeiro', path: '/financial', icon: DollarSign },

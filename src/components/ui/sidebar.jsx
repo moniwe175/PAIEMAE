@@ -25,7 +25,7 @@ import { fetchQueuePendingCount } from '../../services/supabaseService';
 import { supabase } from '../../lib/supabase';
 
 const menuItems = [
-  { key: 'dashboard', name: 'Dashboard', path: '/', icon: LayoutDashboard },
+  { key: 'dashboard', name: 'Painel de Controle', path: '/', icon: LayoutDashboard },
   { key: 'agenda', name: 'Agenda', path: '/agenda', icon: Calendar },
   { key: 'pacientes', name: 'Pacientes', path: '/pacientes', icon: Users },
   { key: 'anamnese', name: 'Anamnese', path: '/anamnese', icon: ClipboardCheck },

@@ -132,6 +132,21 @@ export async function deleteTransactionsByIds(idsToDelete) {
 // Os dados vêm do readdy.ai sincronizando a planilha Google Sheets.
 // Filtros obrigatórios: is_metadata = false AND deleted_at IS NULL
 
+export async function fetchSheetTransactionsRange(startDate, endDate) {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured', []);
+  const { data, error } = await supabase
+    .from('sheet_transactions')
+    .select('date_ref, gross, row_type, is_metadata, client')
+    .is('deleted_at', null)
+    .eq('row_type', 'receita')
+    .eq('is_metadata', false)
+    .gte('date_ref', startDate)
+    .lte('date_ref', endDate)
+    .order('date_ref', { ascending: true });
+  if (error) return handleError(error, []);
+  return { data: data || [], error: null };
+}
+
 export async function fetchSheetTransactions() {
   if (!isSupabaseConfigured()) return handleError('Supabase not configured', []);
   const { data, error } = await supabase

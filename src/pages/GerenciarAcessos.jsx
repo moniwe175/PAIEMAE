@@ -10,7 +10,7 @@ import { INITIAL_ROLES } from '../lib/defaultRoles';
 
 // Exact modules matching the user's clinic system:
 const MODULE_LIST = [
-  { key: 'dashboard', label: 'Dashboard' },
+  { key: 'dashboard', label: 'Painel de Controle' },
   { key: 'agenda', label: 'Agenda' },
   { key: 'pacientes', label: 'Pacientes' },
   { key: 'anamnese', label: 'Anamnese' },

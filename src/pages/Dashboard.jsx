@@ -6,13 +6,12 @@ import {
   DollarSign, Calendar, Users, AlertTriangle,
   TrendingUp, Package, ChevronRight, Clock, Star
 } from 'lucide-react';
-import { useSync } from '../contexts/SyncContext';
 import SheetSyncStatus from '../components/integration/SheetSyncStatus';
 import OKRWeeklySnapshot from '../components/dashboard/OKRWeeklySnapshot';
 import StickyNotesPanel from '../components/dashboard/StickyNotesPanel';
 import { generateAutoNotes } from '../lib/noteAutomation';
 import { fetchStickyNotes, insertStickyNote, updateStickyNote, fetchActiveOKRTasks } from '../services/okrService';
-import { fetchInventory, fetchAppointments } from '../services/supabaseService';
+import { fetchInventory, fetchAppointments, fetchSheetTransactionsRange, todayBRT } from '../services/supabaseService';
 import { getCurrentUser } from '../lib/supabase';
 
 // ─── Sub-components ───────────────────────────────────────────
@@ -60,12 +59,12 @@ const CustomTooltip = ({ active, payload, label }) => {
 
 // ─── Dashboard ────────────────────────────────────────────────
 export default function Dashboard() {
-  const { transactions, dailySheet } = useSync();
   const [manualNotes, setManualNotes] = useState([]);
   const [okrTasks, setOkrTasks] = useState([]);
   const [okrCycle, setOkrCycle] = useState(null);
   const [stockAlerts, setStockAlerts] = useState([]);
   const [todayAppointments, setTodayAppointments] = useState([]);
+  const [sheetTx, setSheetTx] = useState([]); // receitas reais da planilha (sheet_transactions)
 
   useEffect(() => {
     async function loadNotes() {
@@ -102,64 +101,57 @@ export default function Dashboard() {
       setOkrTasks(data || []);
       setOkrCycle(cycle || null);
     }
+    async function loadRevenue() {
+      // Cobre o mês atual e os últimos 7 dias de uma vez
+      const hoje = todayBRT();
+      const d7 = new Date();
+      d7.setDate(d7.getDate() - 6);
+      const fmt = (dt) => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(dt);
+      const start7 = fmt(d7);
+      const startMes = `${hoje.slice(0, 7)}-01`;
+      const start = startMes < start7 ? startMes : start7;
+      const { data } = await fetchSheetTransactionsRange(start, hoje);
+      if (data) setSheetTx(data);
+    }
     loadNotes();
     loadStock();
     loadAppointments();
     loadOKRTasks();
+    loadRevenue();
   }, []);
 
   const today = new Date();
   const diaSemana = today.toLocaleDateString('pt-BR', { weekday: 'long' });
   const dataBr = today.toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
 
-  // Compute real stats from transactions
-  const currentMonth = today.getMonth();
-  const currentYear = today.getFullYear();
+  // Compute real stats from sheet_transactions (mesma fonte dos Relatórios)
+  const hoje = todayBRT();
+  const startMes = `${hoje.slice(0, 7)}-01`;
+  const gross = (r) => Number(r.gross) || 0;
+  const fmtBRT = (dt) => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(dt);
 
-  const monthTransactions = transactions.filter(t => {
-    const parts = t.data.split('/');
-    if (parts.length !== 3) return true;
-    const txMonth = parseInt(parts[1], 10) - 1;
-    const txYear = parseInt(parts[2], 10);
-    return txMonth === currentMonth && txYear === currentYear;
-  });
+  const txMes = sheetTx.filter(r => r.date_ref >= startMes);
+  const faturamentoMes = txMes.reduce((sum, r) => sum + gross(r), 0);
 
-  const faturamentoMes = monthTransactions
-    .filter(t => t.tipo === 'receita')
-    .reduce((sum, t) => sum + t.valor, 0);
+  const txHoje = sheetTx.filter(r => r.date_ref === hoje);
+  const faturamentoHoje = txHoje.reduce((sum, r) => sum + gross(r), 0);
 
-  const receitasHoje = transactions.filter(t => {
-    const todayStr = today.toLocaleDateString('pt-BR');
-    return t.tipo === 'receita' && t.data === todayStr;
-  });
-  // Use dailySheet faturamento when available, fallback to transactions
-  const faturamentoHoje = dailySheet ? dailySheet.faturamentoBruto : receitasHoje.reduce((sum, t) => sum + t.valor, 0);
-
-  // Unique active patients count
-  const activePatients = new Set(
-    transactions
-      .filter(t => t.tipo === 'receita')
-      .map(t => {
-        const match = t.desc.match(/-\s*(.+)/);
-        return match ? match[1].trim() : null;
-      })
-      .filter(Boolean)
-  ).size;
+  // Unique active patients count (clientes com receita no mês)
+  const activePatients = new Set(txMes.filter(r => r.client).map(r => r.client)).size;
 
   // Revenue data for last 7 days
   const revenueData = (() => {
     const days = [];
     const dayLabels = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sab'];
     for (let i = 6; i >= 0; i--) {
-      const d = new Date(today);
+      const d = new Date();
       d.setDate(d.getDate() - i);
-      const dateStr = d.toLocaleDateString('pt-BR');
-      const dayTotal = transactions
-        .filter(t => t.tipo === 'receita' && t.data === dateStr)
-        .reduce((sum, t) => sum + t.valor, 0);
+      const key = fmtBRT(d);
+      const [y, m, dd] = key.split('-').map(Number);
+      const wd = new Date(Date.UTC(y, m - 1, dd)).getUTCDay();
       days.push({
-        dia: dayLabels[d.getDay()],
-        valor: dayTotal,
+        dia: dayLabels[wd],
+        valor: sheetTx.filter(r => r.date_ref === key).reduce((sum, r) => sum + gross(r), 0),
       });
     }
     return days;
@@ -198,8 +190,6 @@ export default function Dashboard() {
   };
 
   // Sync stats
-  const syncedTxCount = transactions.filter(t => t.origem === 'planilha').length;
-
   return (
     <div>
       {/* Page Header */}
@@ -208,7 +198,7 @@ export default function Dashboard() {
           <div>
             <div className="page-header-label">
               <Star />
-              DASHBOARD
+              PAINEL DE CONTROLE
             </div>
             <h1 className="page-title">
               Bom {diaSemana.split('-')[0].trim().includes('seg') || diaSemana.startsWith('ter') || diaSemana.startsWith('qua') || diaSemana.startsWith('qui') || diaSemana.startsWith('sex') ? 'dia' : 'dia'}, Evelyn
@@ -225,11 +215,9 @@ export default function Dashboard() {
           icon={DollarSign}
           iconBg="#EFF7F2"
           iconColor="var(--success)"
-          badge={syncedTxCount > 0 ? `${syncedTxCount} sync` : null}
-          badgeClass="up"
           value={`R$ ${faturamentoMes.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`}
           label="Faturamento do Mês"
-          sub={syncedTxCount > 0 ? `${syncedTxCount} transações da planilha` : 'vs. mês anterior'}
+          sub={`${txMes.length} transações da planilha`}
         />
         <StatCard
           icon={Calendar}
@@ -237,9 +225,9 @@ export default function Dashboard() {
           iconColor="var(--info)"
           badge="hoje"
           badgeClass="neutral"
-          value={`R$ ${faturamentoHoje.toLocaleString('pt-BR')}`}
+          value={`R$ ${faturamentoHoje.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`}
           label="Faturamento Hoje"
-          sub={dailySheet ? `${dailySheet.totalTransacoes} transações da planilha` : `${receitasHoje.length} receitas`}
+          sub={`${txHoje.length} receitas`}
         />
         <StatCard
           icon={Users}
@@ -247,7 +235,7 @@ export default function Dashboard() {
           iconColor="var(--info)"
           value={String(activePatients)}
           label="Clientes Ativos"
-          sub="com transações no período"
+          sub="com receitas no mês"
         />
         <StatCard
           icon={AlertTriangle}
