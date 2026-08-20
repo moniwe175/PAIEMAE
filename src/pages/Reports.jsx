@@ -8,6 +8,7 @@ import {
   Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend
 } from 'recharts';
 import { supabase } from '../lib/supabase';
+import { todayBRT } from '../services/supabaseService';
 import { useSync } from '../contexts/SyncContext';
 import SheetSyncStatus from '../components/integration/SheetSyncStatus';
 
@@ -101,6 +102,9 @@ export default function Reports() {
           .is('deleted_at', null)
           .gte('date_ref', startDateStr)
           .lte('date_ref', endDateStr)
+          // Dia em andamento (caixa aberto) NÃO entra no relatório:
+          // os valores só aparecem após a virada/fechamento do caixa.
+          .lt('date_ref', todayBRT())
           .order('date_ref', { ascending: false });
 
         if (error) throw error;
@@ -516,7 +520,7 @@ export default function Reports() {
                           fontWeight: 600,
                         }}
                       >
-                        {formatBRL(entradas)}
+                        {isAberto ? '—' : formatBRL(entradas)}
                       </td>
                       <td
                         style={{
@@ -525,10 +529,10 @@ export default function Reports() {
                           fontWeight: 600,
                         }}
                       >
-                        {formatBRL(saidas)}
+                        {isAberto ? '—' : formatBRL(saidas)}
                       </td>
-                      <td style={{ textAlign: 'right' }}>{formatBRL(pix)}</td>
-                      <td style={{ textAlign: 'right' }}>{formatBRL(cartao)}</td>
+                      <td style={{ textAlign: 'right' }}>{isAberto ? '—' : formatBRL(pix)}</td>
+                      <td style={{ textAlign: 'right' }}>{isAberto ? '—' : formatBRL(cartao)}</td>
                       <td style={{ textAlign: 'center' }}>
                         {c.auto_closed ? (
                           <span className="badge badge-info">
