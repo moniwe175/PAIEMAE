@@ -17,7 +17,6 @@ const MODULE_LIST = [
   { key: 'equipe', label: 'Equipe' },
   { key: 'servicos', label: 'Serviços' },
   { key: 'estoque', label: 'Estoque' },
-  { key: 'pacotes', label: 'Pacotes' },
   { key: 'relatorios', label: 'Relatórios' },
   { key: 'estrategia', label: 'Estratégia' },
   { key: 'marketing', label: 'Marketing' },

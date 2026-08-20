@@ -21,7 +21,6 @@ import Financial from './pages/Financial';
 import Comissoes from './pages/Comissoes';
 import Inventory from './pages/Inventory';
 import Services from './pages/Services';
-import Packages from './pages/Packages';
 import Equipe from './pages/Equipe';
 import Marketing from './pages/Marketing';
 import MotorMarketing from './pages/MotorMarketing';
@@ -61,7 +60,6 @@ function MainLayout() {
           <Route path="/comissoes" element={<ModuleGate module="comissoes"><Comissoes /></ModuleGate>} />
           <Route path="/inventory" element={<ModuleGate module="estoque"><Inventory /></ModuleGate>} />
           <Route path="/services" element={<ModuleGate module="servicos"><Services /></ModuleGate>} />
-          <Route path="/packages" element={<ModuleGate module="pacotes"><Packages /></ModuleGate>} />
           <Route path="/equipe" element={<ModuleGate module="equipe"><Equipe /></ModuleGate>} />
           <Route path="/marketing" element={<ModuleGate module="marketing"><Marketing /></ModuleGate>} />
           <Route path="/motor-marketing" element={<ModuleGate module="motor"><MotorMarketing /></ModuleGate>} />
