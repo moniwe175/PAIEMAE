@@ -51,6 +51,8 @@ export default function Reports() {
     ticketMedio: 0,
     totalPix: 0,
     totalCartao: 0,
+    totalCredito: 0,
+    totalDebito: 0,
     totalDinheiro: 0,
     novosPacientes: 0,
     loading: true,
@@ -125,10 +127,9 @@ export default function Reports() {
         const totalSessoes = rows.length;
         const ticketMedio = totalSessoes > 0 ? faturamento / totalSessoes : 0;
         const totalPix = rows.reduce((sum, t) => sum + (parseFloat(t.pix) || 0), 0);
-        const totalCartao = rows.reduce(
-          (sum, t) => sum + (parseFloat(t.credito) || 0) + (parseFloat(t.debito) || 0),
-          0
-        );
+        const totalCredito = rows.reduce((sum, t) => sum + (parseFloat(t.credito) || 0), 0);
+        const totalDebito = rows.reduce((sum, t) => sum + (parseFloat(t.debito) || 0), 0);
+        const totalCartao = totalCredito + totalDebito;
         const totalDinheiro = rows.reduce((sum, t) => sum + (parseFloat(t.dinheiro) || 0), 0);
         const novosPacientes = new Set(rows.map((t) => t.client).filter(Boolean)).size;
 
@@ -138,6 +139,8 @@ export default function Reports() {
           ticketMedio,
           totalPix,
           totalCartao,
+          totalCredito,
+          totalDebito,
           totalDinheiro,
           novosPacientes,
           loading: false,
@@ -164,9 +167,10 @@ export default function Reports() {
     (sheetTxData || []).forEach((t) => {
       const d = t.date_ref;
       if (!d) return;
-      if (!map[d]) map[d] = { pix: 0, cartao: 0, dinheiro: 0 };
+      if (!map[d]) map[d] = { pix: 0, credito: 0, debito: 0, dinheiro: 0 };
       map[d].pix += parseFloat(t.pix) || 0;
-      map[d].cartao += (parseFloat(t.credito) || 0) + (parseFloat(t.debito) || 0);
+      map[d].credito += parseFloat(t.credito) || 0;
+      map[d].debito += parseFloat(t.debito) || 0;
       map[d].dinheiro += parseFloat(t.dinheiro) || 0;
     });
     return map;
@@ -230,7 +234,8 @@ export default function Reports() {
       return [];
     return [
       { name: 'Pix', value: sheetKpis.totalPix, color: 'var(--color-primary)' },
-      { name: 'Cartão', value: sheetKpis.totalCartao, color: '#4285F4' },
+      { name: 'Crédito', value: sheetKpis.totalCredito, color: '#4285F4' },
+      { name: 'Débito', value: sheetKpis.totalDebito, color: '#A142F4' },
       { name: 'Dinheiro', value: sheetKpis.totalDinheiro, color: '#6B9B7A' },
     ].filter((d) => d.value > 0);
   }, [sheetKpis]);
@@ -424,7 +429,7 @@ export default function Reports() {
             {
               label: 'Ticket Médio',
               val: formatBRL(sheetKpis.ticketMedio),
-              sub: `Pix: ${formatBRL(sheetKpis.totalPix)} • Cartão: ${formatBRL(sheetKpis.totalCartao)}`,
+              sub: `Pix: ${formatBRL(sheetKpis.totalPix)} • Crédito: ${formatBRL(sheetKpis.totalCredito)} • Débito: ${formatBRL(sheetKpis.totalDebito)}`,
               cor: 'var(--warning)',
               icon: TrendingUp,
               bgIcon: 'var(--warning-bg)',
@@ -499,7 +504,8 @@ export default function Reports() {
                 <th style={{ textAlign: 'right' }}>Entradas (R$)</th>
                 <th style={{ textAlign: 'right' }}>Saídas (R$)</th>
                 <th style={{ textAlign: 'right' }}>Pix</th>
-                <th style={{ textAlign: 'right' }}>Cartão</th>
+                <th style={{ textAlign: 'right' }}>Crédito</th>
+                <th style={{ textAlign: 'right' }}>Débito</th>
                 <th style={{ textAlign: 'center' }}>Auto</th>
                 <th style={{ textAlign: 'center' }}>Status</th>
               </tr>
@@ -508,7 +514,7 @@ export default function Reports() {
               {filteredCashierHistory.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={9}
+                    colSpan={10}
                     style={{ textAlign: 'center', padding: 24, color: 'var(--text-muted)' }}
                   >
                     Nenhum registro de caixa no período selecionado
@@ -519,9 +525,10 @@ export default function Reports() {
                   const entradas = numField(c, 'total_cash_in', 'dinheiro_entradas');
                   const saidas = numField(c, 'total_cash_out', 'dinheiro_saidas');
                   // Pix/cartão do dia vêm da sheet_transactions (o caixa só rastreia dinheiro)
-                  const doDia = sheetByDate[c.date] || { pix: 0, cartao: 0 };
+                  const doDia = sheetByDate[c.date] || { pix: 0, credito: 0, debito: 0 };
                   const pix = doDia.pix;
-                  const cartao = doDia.cartao;
+                  const credito = doDia.credito;
+                  const debito = doDia.debito;
                   const hasClosing =
                     c.closing_balance !== null &&
                     c.closing_balance !== undefined &&
@@ -563,7 +570,8 @@ export default function Reports() {
                         {isAberto ? '—' : formatBRL(saidas)}
                       </td>
                       <td style={{ textAlign: 'right' }}>{isAberto ? '—' : formatBRL(pix)}</td>
-                      <td style={{ textAlign: 'right' }}>{isAberto ? '—' : formatBRL(cartao)}</td>
+                      <td style={{ textAlign: 'right' }}>{isAberto ? '—' : formatBRL(credito)}</td>
+                      <td style={{ textAlign: 'right' }}>{isAberto ? '—' : formatBRL(debito)}</td>
                       <td style={{ textAlign: 'center' }}>
                         {c.auto_closed ? (
                           <span className="badge badge-info">
