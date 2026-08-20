@@ -59,6 +59,15 @@ export default function Reports() {
 
   // ─── Date range computation ─────────────────────────────────
   const { startDateStr, endDateStr, daysCount } = useMemo(() => {
+    // Datas no fuso da clínica (BRT) — evita "amanhã" após 21h
+    const fmtBRT = (d) =>
+      new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'America/Sao_Paulo',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      }).format(d);
+
     const today = new Date();
     let end = new Date(today);
     end.setHours(23, 59, 59, 999);
@@ -79,8 +88,8 @@ export default function Reports() {
     const days = Math.max(1, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
 
     return {
-      startDateStr: start.toISOString().split('T')[0],
-      endDateStr: end.toISOString().split('T')[0],
+      startDateStr: fmtBRT(start),
+      endDateStr: fmtBRT(end),
       daysCount: days,
     };
   }, [periodo, customStart, customEnd]);
@@ -163,23 +172,45 @@ export default function Reports() {
     return map;
   }, [sheetTxData]);
 
-  // ─── Monthly revenue chart (from sheet_transactions) ────────
-  const faturamentoMensal = useMemo(() => {
+  // ─── Revenue chart: DIÁRIO para períodos curtos (até ~90 dias),
+  //     MENSAL para períodos longos (Ano / personalizado > 90 dias) ──
+  const faturamentoChart = useMemo(() => {
+    const daily = daysCount <= 92;
+
+    if (daily) {
+      // Uma barra por dia do período (inclusive dias sem venda = 0)
+      const map = new Map();
+      const cur = new Date(startDateStr + 'T12:00:00Z');
+      const end = new Date(endDateStr + 'T12:00:00Z');
+      while (cur <= end) {
+        const key = cur.toISOString().slice(0, 10);
+        map.set(key, { label: `${key.slice(8, 10)}/${key.slice(5, 7)}`, valor: 0 });
+        cur.setUTCDate(cur.getUTCDate() + 1);
+      }
+      sheetTxData.forEach((t) => {
+        const entry = map.get(t.date_ref);
+        if (entry) entry.valor += parseFloat(t.gross) || 0;
+      });
+      return { daily, data: [...map.values()] };
+    }
+
+    // Agrupamento mensal (MM/YYYY)
     const months = {};
     sheetTxData.forEach((t) => {
       const dr = t.date_ref || '';
       const parts = dr.split('-');
       if (parts.length !== 3) return;
-      const key = `${parts[1]}/${parts[0]}`; // MM/YYYY (agrupamento por mês/ano)
-      if (!months[key]) months[key] = { mes: key, valor: 0 };
+      const key = `${parts[1]}/${parts[0]}`;
+      if (!months[key]) months[key] = { label: key, valor: 0 };
       months[key].valor += parseFloat(t.gross) || 0;
     });
-    return Object.values(months).sort((a, b) => {
-      const [am, ay] = a.mes.split('/').map(Number);
-      const [bm, by] = b.mes.split('/').map(Number);
+    const data = Object.values(months).sort((a, b) => {
+      const [am, ay] = a.label.split('/').map(Number);
+      const [bm, by] = b.label.split('/').map(Number);
       return ay * 12 + am - (by * 12 + bm);
     });
-  }, [sheetTxData]);
+    return { daily, data };
+  }, [sheetTxData, startDateStr, endDateStr, daysCount]);
 
   // ─── Service popularity (from sheet_transactions) ──────────
   const servicosPopulares = useMemo(() => {
@@ -567,13 +598,13 @@ export default function Reports() {
           <div className="card-header">
             <span className="card-title">
               <TrendingUp />
-              Faturamento Mensal
+              {faturamentoChart.daily ? 'Faturamento por Dia' : 'Faturamento Mensal'}
             </span>
           </div>
-          {faturamentoMensal.length > 0 ? (
+          {faturamentoChart.data.length > 0 && faturamentoChart.data.some((d) => d.valor > 0) ? (
             <ResponsiveContainer width="100%" height={220}>
               <BarChart
-                data={faturamentoMensal}
+                data={faturamentoChart.data}
                 margin={{ top: 5, right: 5, left: -15, bottom: 0 }}
               >
                 <CartesianGrid
@@ -582,16 +613,17 @@ export default function Reports() {
                   vertical={false}
                 />
                 <XAxis
-                  dataKey="mes"
+                  dataKey="label"
                   axisLine={false}
                   tickLine={false}
-                  tick={{ fontSize: 10, fill: 'var(--text-muted)' }}
+                  minTickGap={18}
+                  tick={{ fontSize: 9, fill: 'var(--text-muted)' }}
                 />
                 <YAxis
                   axisLine={false}
                   tickLine={false}
                   tick={{ fontSize: 10, fill: 'var(--text-muted)' }}
-                  tickFormatter={(v) => `R$${v / 1000}k`}
+                  tickFormatter={(v) => `R$${v >= 1000 ? (v / 1000).toFixed(1) + 'k' : v}`}
                 />
                 <Tooltip
                   formatter={(v) => [formatBRL(v), 'Faturamento']}

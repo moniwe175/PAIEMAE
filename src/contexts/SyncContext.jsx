@@ -725,11 +725,13 @@ export function SyncProvider({ children }) {
   // ─── Virada de Dia — agora server-side via Edge Function + pg_cron ───
 
   // ─── Carregar caixa ao inicializar ─────────────────────────
+  // Também recarrega após o login (sessão nova/InPrivate): sem isso o
+  // histórico era buscado anônimo (RLS vazio) e nunca mais atualizava.
   useEffect(() => {
-    if (supabaseReady) {
+    if (supabaseReady && authed) {
       loadCaixaHoje();
     }
-  }, [supabaseReady, loadCaixaHoje]);
+  }, [supabaseReady, authed, loadCaixaHoje]);
 
   // ─── Split config ───────────────────────────────────────────
   const updateSplitConfig = useCallback((profissional, percentual) => {
