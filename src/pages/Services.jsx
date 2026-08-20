@@ -2,10 +2,11 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import {
   Scissors, Plus, Search, XCircle, Clock, DollarSign,
-  Edit3, Trash2, CheckCircle, Users, X, UserPlus, UserMinus, FileText, AlertTriangle
+  Edit3, Trash2, CheckCircle, Users, X, UserPlus, UserMinus, FileText, AlertTriangle, ShoppingBag
 } from 'lucide-react';
 import { useServicos, CATEGORIAS, CAT_COLORS, TIPOS_FICHA_OPCOES } from '../lib/servicos';
 import { useProfissionais } from '../lib/profissionais';
+import PackagesSection from '../components/services/PacotesSection';
 
 // ─── Edit / Create Modal ────────────────────────────────────
 function ServicoModal({ onClose, onSave, servico }) {
@@ -367,6 +368,7 @@ export default function Services() {
   const [deleteId, setDeleteId] = useState(null);
   const [busca, setBusca] = useState('');
   const [catFiltro, setCatFiltro] = useState('Todos');
+  const [view, setView] = useState('servicos'); // 'servicos' | 'pacotes'
 
   // Get unique categories from data
   const catsAtivas = [...new Set(servicos.map(s => s.categoria).filter(Boolean))];
@@ -427,13 +429,25 @@ export default function Services() {
         <div>
           <div className="page-header-label"><Scissors />SERVIÇOS</div>
           <h1 className="page-title">Serviços</h1>
-          <p className="page-subtitle">{servicos.length} serviços cadastrados</p>
+          <p className="page-subtitle">{view === 'servicos' ? `${servicos.length} serviços cadastrados` : 'Pacotes de sessões'}</p>
         </div>
-        {canEdit('servicos') && (
+        {view === 'servicos' && canEdit('servicos') && (
           <button className="btn btn-primary" onClick={() => setEditModal('new')}><Plus />Novo Serviço</button>
         )}
       </div>
 
+      {/* Alternador Serviços / Pacotes */}
+      <div className="tabs" style={{ marginBottom: 16 }}>
+        <button className={`tab-item${view === 'servicos' ? ' active' : ''}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }} onClick={() => setView('servicos')}>
+          <Scissors style={{ width: 13, height: 13 }} />Serviços
+        </button>
+        <button className={`tab-item${view === 'pacotes' ? ' active' : ''}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }} onClick={() => setView('pacotes')}>
+          <ShoppingBag style={{ width: 13, height: 13 }} />Pacotes
+        </button>
+      </div>
+
+      {view === 'servicos' && (
+      <>
       {/* Stats */}
       <div className="grid-4 section-gap">
         {[
@@ -542,6 +556,10 @@ export default function Services() {
           <p style={{ fontSize: 14 }}>Nenhum serviço encontrado</p>
         </div>
       )}
+      </>
+      )}
+
+      {view === 'pacotes' && <PackagesSection />}
     </div>
   );
 }

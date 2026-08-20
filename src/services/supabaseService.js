@@ -1110,6 +1110,40 @@ export async function deleteInventoryItem(id) {
   return { data: true, error: null };
 }
 
+// ─── Packages (Pacotes) ─────────────────────────────────────
+
+export async function fetchPackages() {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured', []);
+  const { data, error } = await supabase
+    .from('packages')
+    .select('*')
+    .order('created_at', { ascending: false });
+  if (error) return handleError(error, []);
+  return { data: data || [], error: null };
+}
+
+export async function insertPackage(pkg) {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured');
+  const userId = pkg.user_id || await getUserId();
+  const { data, error } = await supabase.from('packages').insert([{ ...pkg, user_id: userId }]).select().single();
+  if (error) return handleError(error);
+  return { data, error: null };
+}
+
+export async function updatePackage(id, updates) {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured');
+  const { data, error } = await supabase.from('packages').update(updates).eq('id', id).select().single();
+  if (error) return handleError(error);
+  return { data, error: null };
+}
+
+export async function deletePackage(id) {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured');
+  const { error } = await supabase.from('packages').delete().eq('id', id);
+  if (error) return handleError(error);
+  return { data: true, error: null };
+}
+
 
 // ─── Motor Marketing — Templates ─────────────────────────────
 
