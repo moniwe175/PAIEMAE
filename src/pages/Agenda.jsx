@@ -6,7 +6,7 @@ import {
   Clock, User, Scissors, AlertCircle, Calendar, UserPlus,
   Trash2, Edit3, Phone, DollarSign, TrendingUp,
   CalendarCheck, Grid, List, CheckSquare, X,
-  Ban, Coffee, UtensilsCrossed, Lock, AlertTriangle, Repeat2, FileText
+  Ban, Coffee, UtensilsCrossed, Lock, AlertTriangle, Repeat2, FileText, Tablet
 } from 'lucide-react';
 import { useProfissionais } from '../lib/profissionais';
 import { useServicos } from '../lib/servicos';
@@ -19,6 +19,7 @@ import {
   deleteAppointment,
   fetchAnamneses
 } from '../services/supabaseService';
+import TabletAnamneseModal from '../components/agenda/TabletAnamneseModal';
 
 // ─── Constants ───────────────────────────────────────────────
 
@@ -107,7 +108,8 @@ function mapToSupabase(item, isBlock = false) {
         valor: item.valor,
         duracao: item.duracao,
         observacoes: item.observacoes,
-        fixo: item.fixo
+        fixo: item.fixo,
+        ficha_pendente: !!item.ficha_pendente
       })
     };
   }
@@ -127,7 +129,7 @@ function mapFromSupabase(item) {
       observacoes: item.notes || ''
     };
   } else {
-    let extra = { valor: 0, duracao: 60, observacoes: '', fixo: false };
+    let extra = { valor: 0, duracao: 60, observacoes: '', fixo: false, ficha_pendente: false };
     try {
       if (item.notes && item.notes.startsWith('{')) {
         extra = JSON.parse(item.notes);
@@ -149,6 +151,7 @@ function mapFromSupabase(item) {
       status: item.status || 'aguardando_confirmacao',
       client_id: item.client_id || null,
       exames_pendentes: !!item.exames_pendentes,
+      ficha_pendente: !!extra.ficha_pendente,
       valor: extra.valor || 0,
       observacoes: extra.observacoes || '',
       fixo: extra.fixo || false
@@ -587,7 +590,7 @@ function AppointmentDetailModal({ apt, profissionais, onClose, onEdit, onDelete,
             <div style={{ fontSize: 11, color: '#9CA3AF', fontWeight: 700, marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 }}>Alterar Status</div>
             <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
               {Object.entries(STATUS_CONFIG).map(([k, v]) => (
-                <button key={k} onClick={() => onStatusChange(apt.id, k)} style={{
+                <button key={k} onClick={() => onStatusChange(apt, k)} style={{
                   padding: '4px 9px', borderRadius: 20, fontSize: 11, fontWeight: 600,
                   border: `1.5px solid ${apt.status === k ? v.color : v.border}`,
                   background: apt.status === k ? v.bg : '#fff',
@@ -622,74 +625,33 @@ function AppointmentDetailModal({ apt, profissionais, onClose, onEdit, onDelete,
   );
 }
 
-// ─── Search Helpers for Client Names ────────────────────────────
-function normalizeSearchText(str) {
-  if (!str) return '';
-  return str
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .trim();
-}
-
-/**
- * Pontuação de relevância para busca de clientes.
- * Usa APENAS prefix do nome completo ou telefone.
- * Sem word-by-word matching para evitar resultados confusos
- * (ex: "Adriana Cavalcante" aparecendo como "Adriana" para query "ca").
- */
-function scoreClientMatch(clientName, clientPhone, rawQuery) {
-  if (!rawQuery) return 0;
-  const q = normalizeSearchText(rawQuery);
-  if (!q) return 0;
-
-  const nameNorm = normalizeSearchText(clientName);
-  const phoneNorm = (clientPhone || '').replace(/\D/g, '');
-  const qPhone = rawQuery.replace(/\D/g, '');
-
-  // 1. Match exato
-  if (nameNorm === q) return 1000;
-
-  // 2. Nome começa com a query  (ex: "ca" → Camila, Carla, Cássia)
-  if (nameNorm.startsWith(q)) return 900;
-
-  // 3. Telefone contém a query (só para queries numéricas com 3+ dígitos)
-  if (qPhone.length >= 3 && phoneNorm.includes(qPhone)) return 300;
-
-  return 0;
-}
-
-// ─── Anamnese Blocked Alert Modal ──────────────────────────────
-function AnamneseBlockedModal({ info, onClose }) {
-  const navigate = useNavigate();
+// ─── Atendimento Blocked Alert Modal ──────────────────────────
+function AtendimentoBlockedModal({ info, onClose, onPreencherFicha }) {
   if (!info) return null;
 
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,20,30,0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 12000, backdropFilter: 'blur(6px)', padding: 16 }} onClick={onClose}>
-      <div style={{ background: '#fff', borderRadius: 22, width: '100%', maxWidth: 450, padding: 28, boxShadow: '0 24px 64px rgba(0,0,0,0.3)', textAlign: 'center' }} onClick={e => e.stopPropagation()}>
+      <div style={{ background: '#fff', borderRadius: 22, width: '100%', maxWidth: 460, padding: 28, boxShadow: '0 24px 64px rgba(0,0,0,0.3)', textAlign: 'center' }} onClick={e => e.stopPropagation()}>
         <div style={{ width: 56, height: 56, borderRadius: '50%', background: '#FEE2E2', border: '1px solid #FCA5A5', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px' }}>
           <AlertTriangle style={{ width: 28, height: 28, color: '#DC2626' }} />
         </div>
         <div style={{ fontSize: 18, fontWeight: 700, color: '#1F2937', marginBottom: 8 }}>
-          Agendamento Bloqueado
+          Atendimento Bloqueado
         </div>
         <div style={{ fontSize: 13, color: '#4B5563', lineHeight: 1.6, marginBottom: 20 }}>
-          O agendamento para o procedimento <strong style={{ color: '#1F2937' }}>"{info.servico}"</strong> não pode ser concluído porque o(a) cliente <strong style={{ color: '#1F2937' }}>"{info.paciente}"</strong> não possui a <span style={{ color: '#DC2626', fontWeight: 700 }}>"{info.fichaExigida}"</span> preenchida em seu perfil.
+          O atendimento para o procedimento <strong style={{ color: '#1F2937' }}>"{info.servico}"</strong> não pode ser iniciado porque o(a) cliente <strong style={{ color: '#1F2937' }}>"{info.paciente}"</strong> não possui a <span style={{ color: '#DC2626', fontWeight: 700 }}>"{info.fichaExigida}"</span> preenchida em seu perfil.
         </div>
         <div style={{ background: '#FFF1F2', borderRadius: 12, padding: 12, border: '1px solid #FECDD3', fontSize: 12, color: '#9F1239', marginBottom: 24, textAlign: 'left', display: 'flex', alignItems: 'center', gap: 10 }}>
           <FileText style={{ width: 20, height: 20, flexShrink: 0, color: '#E11D48' }} />
-          <span>Trava de segurança: é obrigatório preencher a ficha de anamnese antes de realizar a marcação deste serviço.</span>
+          <span>Trava de segurança: é obrigatório preencher a ficha de anamnese antes de iniciar o atendimento deste serviço.</span>
         </div>
         <div style={{ display: 'flex', gap: 10 }}>
           <button onClick={onClose} style={{ flex: 1, padding: '10px 16px', borderRadius: 10, border: '1.5px solid #E5E7EB', background: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer', color: '#6B7280' }}>
             Voltar
           </button>
           <button
-            onClick={() => {
-              onClose();
-              navigate('/anamnese');
-            }}
-            style={{ flex: 1, padding: '10px 16px', borderRadius: 10, border: 'none', background: 'linear-gradient(135deg,#C73B6D,#A83158)', fontSize: 13, fontWeight: 700, cursor: 'pointer', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+            onClick={() => onPreencherFicha(info)}
+            style={{ flex: 1, padding: '10px 16px', borderRadius: 10, border: 'none', background: 'linear-gradient(135deg,#C73B6D,#A83158)', fontSize: 13, fontWeight: 700, cursor: 'pointer', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, boxShadow: '0 4px 14px rgba(199,59,109,0.35)' }}>
             <FileText style={{ width: 14, height: 14 }} /> Preencher Ficha
           </button>
         </div>
@@ -701,7 +663,7 @@ function AnamneseBlockedModal({ info, onClose }) {
 // ═══════════════════════════════════════════════════════════════
 // ─── AgendamentoModal ─────────────────────────────────────────
 // ═══════════════════════════════════════════════════════════════
-function AgendamentoModal({ onClose, date, profissional: prefillProf, hora: prefillHora, profissionais, apt, onSave }) {
+function AgendamentoModal({ onClose, date, profissional: prefillProf, hora: prefillHora, profissionais, apt, onSave, onOpenTablet }) {
   const isEdit = !!apt;
   const { servicos: todosServicos } = useServicos();
   const [pacientes, setPacientes] = useState([]);
@@ -727,7 +689,6 @@ function AgendamentoModal({ onClose, date, profissional: prefillProf, hora: pref
     load();
   }, []);
 
-  // Close dropdown on outside click
   useEffect(() => {
     const handler = (e) => {
       if (clienteRef.current && !clienteRef.current.contains(e.target)) setShowClienteList(false);
@@ -760,6 +721,7 @@ function AgendamentoModal({ onClose, date, profissional: prefillProf, hora: pref
     horaFim: calcEndTime(prefillHora || '09:00', 60), duracao: 60,
     paciente: '', telefone: '', profissional: prefillProf || '', servico: '',
     status: 'aguardando_confirmacao', valor: '', observacoes: '', exames_pendentes: false,
+    ficha_pendente: false,
   });
   const [repetir, setRepetir] = useState(false);
   const [recFreq, setRecFreq] = useState('semanal');
@@ -810,9 +772,10 @@ function AgendamentoModal({ onClose, date, profissional: prefillProf, hora: pref
   const handleSave = async () => {
     if (!canSave || isChecking) return;
 
-    // Check if the service has required Fichas de Anamnese
     const targetService = (todosServicos || []).find(s => s.nome === form.servico);
     const requiredFichas = targetService?.fichasObrigatorias || (targetService?.fichaObrigatoria ? [targetService.fichaObrigatoria] : []);
+    
+    let isFichaPendente = false;
 
     if (requiredFichas.length > 0) {
       setIsChecking(true);
@@ -836,20 +799,26 @@ function AgendamentoModal({ onClose, date, profissional: prefillProf, hora: pref
         });
 
         const filledTypes = clientAnamneses.map(a => a.form_data?.tipoFicha || a.tipo_ficha || a.tipoFicha).filter(Boolean);
-
         const missingFichas = requiredFichas.filter(rf => {
           if (rf === 'Qualquer Ficha') return clientAnamneses.length === 0;
           return !filledTypes.includes(rf);
         });
 
         if (missingFichas.length > 0) {
-          setIsChecking(false);
-          setBlockedInfo({
-            paciente: form.paciente,
-            servico: form.servico,
-            fichaExigida: missingFichas.join(', '),
-          });
-          return; // BLOCK APPOINTMENT SAVE!
+          isFichaPendente = true;
+          // Se tentar salvar diretamente com status "Em Atendimento", exibe a trava
+          if (form.status === 'em_atendimento') {
+            setIsChecking(false);
+            setBlockedInfo({
+              apt: { ...form, id: apt?.id || genId() },
+              paciente: form.paciente,
+              servico: form.servico,
+              fichaExigida: missingFichas.join(', '),
+              missingFichas,
+              clientObj: clientObj || { id: form.client_id, nome: form.paciente, telefone: form.telefone },
+            });
+            return; // Bloqueia apenas se o status selecionado for "Em Atendimento"
+          }
         }
       } catch (err) {
         console.warn('[Anamnese Check Warning]', err);
@@ -862,7 +831,15 @@ function AgendamentoModal({ onClose, date, profissional: prefillProf, hora: pref
     // Vincula o agendamento ao cadastro do cliente (client_id) — exigido pelo motor de marketing
     const nomeNorm = (form.paciente || '').trim().toLowerCase();
     const clientMatch = pacientes.find(p => (p.nome || '').trim().toLowerCase() === nomeNorm);
-    const base = { ...form, horaFim: calcEndTime(form.hora, Number(form.duracao) || 60), duracao: Number(form.duracao) || 60, valor: Number(form.valor) || 0, fixo: isFixo || false, client_id: form.client_id || clientMatch?.id || null };
+    const base = {
+      ...form,
+      horaFim: calcEndTime(form.hora, Number(form.duracao) || 60),
+      duracao: Number(form.duracao) || 60,
+      valor: Number(form.valor) || 0,
+      fixo: isFixo || false,
+      client_id: form.client_id || clientMatch?.id || null,
+      ficha_pendente: isFichaPendente,
+    };
     if (isFixo && !isEdit) {
       const all = [{ ...base, id: genId() }];
       previewRecDates.forEach(d => all.push({ ...base, id: genId(), data: d }));
@@ -879,7 +856,15 @@ function AgendamentoModal({ onClose, date, profissional: prefillProf, hora: pref
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,20,30,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10000, backdropFilter: 'blur(6px)', padding: 16 }} onClick={onClose}>
       {blockedInfo && (
-        <AnamneseBlockedModal info={blockedInfo} onClose={() => setBlockedInfo(null)} />
+        <AtendimentoBlockedModal
+          info={blockedInfo}
+          onClose={() => setBlockedInfo(null)}
+          onPreencherFicha={(info) => {
+            setBlockedInfo(null);
+            onClose();
+            if (onOpenTablet) onOpenTablet(info);
+          }}
+        />
       )}
       {showNewClient && (
         <QuickClientModal onClose={() => setShowNewClient(false)} onSave={async (c) => {
@@ -1303,6 +1288,7 @@ function AppointmentCard({ apt, prof, onClick, col, totalCols }) {
 // ═══════════════════════════════════════════════════════════════
 export default function Agenda() {
   const { profissionais } = useProfissionais();
+  const { servicos: todosServicos } = useServicos();
   const { canEdit } = useAuth();
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [agendamentos, setAgendamentos] = useState([]);
@@ -1313,6 +1299,8 @@ export default function Agenda() {
   const [formModal, setFormModal] = useState({ open: false, apt: null, prefillProf: '', prefillHora: '' });
   const [detailModal, setDetailModal] = useState({ open: false, apt: null });
   const [bloqueioModal, setBloqueioModal] = useState({ open: false, bloqueio: null, prefillProf: '', prefillHora: '' });
+  const [atendimentoBlockedInfo, setAtendimentoBlockedInfo] = useState(null);
+  const [tabletModal, setTabletModal] = useState({ open: false, paciente: null, tipoFicha: '', apt: null });
 
   // Load from Supabase on mount
   useEffect(() => {
@@ -1399,13 +1387,105 @@ export default function Agenda() {
     setDetailModal({ open: false, apt: null });
   };
 
-  const handleStatusChange = async (id, status) => {
-    const { data } = await updateAppointment(id, { status });
+  const handleStatusChange = async (aptOrId, newStatus) => {
+    const apt = typeof aptOrId === 'object' ? aptOrId : agendamentos.find(a => a.id === aptOrId);
+    const id = typeof aptOrId === 'object' ? aptOrId.id : aptOrId;
+    if (!apt || !id) return;
+
+    // Se a transição for para "Em Atendimento", validação obrigatória da ficha
+    if (newStatus === 'em_atendimento') {
+      const targetService = (todosServicos || []).find(s => s.nome === apt.servico);
+      const requiredFichas = targetService?.fichasObrigatorias || (targetService?.fichaObrigatoria ? [targetService.fichaObrigatoria] : []);
+
+      if (requiredFichas.length > 0) {
+        try {
+          const { data: anamnesesData } = await fetchAnamneses();
+          const { data: clientsData } = await fetchClients();
+
+          const pacienteNameNorm = (apt.paciente || '').trim().toLowerCase();
+          const clientObj = (clientsData || []).find(c =>
+            (c.name && c.name.trim().toLowerCase() === pacienteNameNorm) ||
+            (c.nome && c.nome.trim().toLowerCase() === pacienteNameNorm)
+          );
+
+          const clientIdStr = clientObj ? String(clientObj.id) : (apt.client_id ? String(apt.client_id) : null);
+
+          const clientAnamneses = (anamnesesData || []).filter(a => {
+            const matchId = clientIdStr && String(a.client_id) === clientIdStr;
+            const matchName = a.form_data?.paciente && a.form_data.paciente.trim().toLowerCase() === pacienteNameNorm;
+            const matchClientName = a.client_name && a.client_name.trim().toLowerCase() === pacienteNameNorm;
+            return matchId || matchName || matchClientName;
+          });
+
+          const filledTypes = clientAnamneses.map(a => a.form_data?.tipoFicha || a.tipo_ficha || a.tipoFicha).filter(Boolean);
+
+          const missingFichas = requiredFichas.filter(rf => {
+            if (rf === 'Qualquer Ficha') return clientAnamneses.length === 0;
+            return !filledTypes.includes(rf);
+          });
+
+          if (missingFichas.length > 0) {
+            // Exibe o pop-up de bloqueio e impede a alteração de status
+            setAtendimentoBlockedInfo({
+              apt,
+              paciente: apt.paciente,
+              servico: apt.servico,
+              fichaExigida: missingFichas.join(', '),
+              missingFichas,
+              clientObj: clientObj || { id: apt.client_id, nome: apt.paciente, telefone: apt.telefone },
+            });
+            return; // Bloqueio total sem alteração de status
+          }
+        } catch (err) {
+          console.warn('[Anamnese Status Check Warning]', err);
+        }
+      }
+    }
+
+    // Para outros status ou se a ficha já estiver preenchida, atualiza diretamente
+    const { data } = await updateAppointment(id, { status: newStatus });
     if (data) {
       const mapped = mapFromSupabase(data);
       setAgendamentos(prev => prev.map(a => a.id === id ? mapped : a));
       setDetailModal(prev => prev.apt?.id === id ? { ...prev, apt: mapped } : prev);
     }
+  };
+
+  const handleOpenTabletMode = (info) => {
+    setAtendimentoBlockedInfo(null);
+    setTabletModal({
+      open: true,
+      paciente: info.clientObj || { id: info.apt?.client_id, nome: info.paciente, telefone: info.apt?.telefone },
+      tipoFicha: info.missingFichas?.[0] || 'Ficha Facial',
+      apt: info.apt,
+    });
+  };
+
+  const handleTabletSuccess = async ({ anamnese, clientId, pacienteNome, tipoFicha, apt: aptTarget }) => {
+    const aptId = aptTarget?.id;
+    if (!aptId) {
+      setTabletModal({ open: false, paciente: null, tipoFicha: '', apt: null });
+      return;
+    }
+
+    // Atualiza automaticamente o agendamento para "Em Atendimento" no Supabase
+    const { data } = await updateAppointment(aptId, {
+      status: 'em_atendimento',
+      client_id: clientId || aptTarget.client_id || null,
+    });
+
+    if (data) {
+      const mapped = mapFromSupabase(data);
+      mapped.ficha_pendente = false;
+      setAgendamentos(prev => prev.map(a => a.id === aptId ? mapped : a));
+      setDetailModal(prev => prev.apt?.id === aptId ? { ...prev, apt: mapped } : prev);
+    } else {
+      setAgendamentos(prev => prev.map(a => a.id === aptId ? { ...a, status: 'em_atendimento', ficha_pendente: false } : a));
+      setDetailModal(prev => prev.apt?.id === aptId ? { ...prev, apt: { ...prev.apt, status: 'em_atendimento', ficha_pendente: false } } : prev);
+    }
+
+    setTabletModal({ open: false, paciente: null, tipoFicha: '', apt: null });
+    setAtendimentoBlockedInfo(null);
   };
 
   const handleSaveBloqueio = async (payload) => {
@@ -1481,7 +1561,7 @@ export default function Agenda() {
       {formModal.open && (
         <AgendamentoModal onClose={() => setFormModal({ open: false, apt: null, prefillProf: '', prefillHora: '' })}
           date={selectedDate} profissional={formModal.prefillProf} hora={formModal.prefillHora}
-          profissionais={profissionais} apt={formModal.apt} onSave={handleSave} />
+          profissionais={profissionais} apt={formModal.apt} onSave={handleSave} onOpenTablet={handleOpenTabletMode} />
       )}
       {detailModal.open && detailModal.apt && (
         <AppointmentDetailModal apt={detailModal.apt} profissionais={profissionais}
@@ -1493,6 +1573,22 @@ export default function Agenda() {
           date={selectedDate} profissional={bloqueioModal.prefillProf} hora={bloqueioModal.prefillHora}
           profissionais={profissionais} bloqueio={bloqueioModal.bloqueio}
           onSave={handleSaveBloqueio} onDelete={handleDeleteBloqueio} />
+      )}
+      {atendimentoBlockedInfo && (
+        <AtendimentoBlockedModal
+          info={atendimentoBlockedInfo}
+          onClose={() => setAtendimentoBlockedInfo(null)}
+          onPreencherFicha={handleOpenTabletMode}
+        />
+      )}
+      {tabletModal.open && (
+        <TabletAnamneseModal
+          paciente={tabletModal.paciente}
+          tipoFicha={tabletModal.tipoFicha}
+          apt={tabletModal.apt}
+          onClose={() => setTabletModal({ open: false, paciente: null, tipoFicha: '', apt: null })}
+          onSuccess={handleTabletSuccess}
+        />
       )}
 
       {/* Top Nav */}
