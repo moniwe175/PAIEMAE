@@ -663,15 +663,12 @@ function AtendimentoBlockedModal({ info, onClose, onPreencherFicha }) {
 // ═══════════════════════════════════════════════════════════════
 // ─── AgendamentoModal ─────────────────────────────────────────
 // ═══════════════════════════════════════════════════════════════
-function AgendamentoModal({ onClose, date, profissional: prefillProf, hora: prefillHora, profissionais, apt, onSave, onOpenTablet }) {
+function AgendamentoModal({ onClose, date, profissional: prefillProf, hora: prefillHora, profissionais, apt, onSave }) {
   const isEdit = !!apt;
-  const { servicos: todosServicos } = useServicos();
   const [pacientes, setPacientes] = useState([]);
   const [showNewClient, setShowNewClient] = useState(false);
   const [clienteBusca, setClienteBusca] = useState(isEdit ? apt.paciente : '');
   const [showClienteList, setShowClienteList] = useState(false);
-  const [blockedInfo, setBlockedInfo] = useState(null);
-  const [isChecking, setIsChecking] = useState(false);
   const clienteRef = useRef(null);
 
   useEffect(() => {
@@ -769,63 +766,8 @@ function AgendamentoModal({ onClose, date, profissional: prefillProf, hora: pref
   const servicos = profObj ? profObj.servicos : [];
   const canSave = form.paciente && form.profissional && form.servico && form.hora && form.data;
 
-  const handleSave = async () => {
-    if (!canSave || isChecking) return;
-
-    const targetService = (todosServicos || []).find(s => s.nome === form.servico);
-    const requiredFichas = targetService?.fichasObrigatorias || (targetService?.fichaObrigatoria ? [targetService.fichaObrigatoria] : []);
-    
-    let isFichaPendente = false;
-
-    if (requiredFichas.length > 0) {
-      setIsChecking(true);
-      try {
-        const { data: anamnesesData } = await fetchAnamneses();
-        const { data: clientsData } = await fetchClients();
-
-        const clientObj = (clientsData || []).find(c =>
-          (c.name && c.name.trim().toLowerCase() === form.paciente.trim().toLowerCase()) ||
-          (c.nome && c.nome.trim().toLowerCase() === form.paciente.trim().toLowerCase())
-        );
-
-        const clientIdStr = clientObj ? String(clientObj.id) : null;
-        const pacienteNameNorm = form.paciente.trim().toLowerCase();
-
-        const clientAnamneses = (anamnesesData || []).filter(a => {
-          const matchId = clientIdStr && String(a.client_id) === clientIdStr;
-          const matchName = a.form_data?.paciente && a.form_data.paciente.trim().toLowerCase() === pacienteNameNorm;
-          const matchClientName = a.client_name && a.client_name.trim().toLowerCase() === pacienteNameNorm;
-          return matchId || matchName || matchClientName;
-        });
-
-        const filledTypes = clientAnamneses.map(a => a.form_data?.tipoFicha || a.tipo_ficha || a.tipoFicha).filter(Boolean);
-        const missingFichas = requiredFichas.filter(rf => {
-          if (rf === 'Qualquer Ficha') return clientAnamneses.length === 0;
-          return !filledTypes.includes(rf);
-        });
-
-        if (missingFichas.length > 0) {
-          isFichaPendente = true;
-          // Se tentar salvar diretamente com status "Em Atendimento", exibe a trava
-          if (form.status === 'em_atendimento') {
-            setIsChecking(false);
-            setBlockedInfo({
-              apt: { ...form, id: apt?.id || genId() },
-              paciente: form.paciente,
-              servico: form.servico,
-              fichaExigida: missingFichas.join(', '),
-              missingFichas,
-              clientObj: clientObj || { id: form.client_id, nome: form.paciente, telefone: form.telefone },
-            });
-            return; // Bloqueia apenas se o status selecionado for "Em Atendimento"
-          }
-        }
-      } catch (err) {
-        console.warn('[Anamnese Check Warning]', err);
-      } finally {
-        setIsChecking(false);
-      }
-    }
+  const handleSave = () => {
+    if (!canSave) return;
 
     const isFixo = repetir && previewRecDates.length > 0;
     // Vincula o agendamento ao cadastro do cliente (client_id) — exigido pelo motor de marketing
@@ -838,7 +780,7 @@ function AgendamentoModal({ onClose, date, profissional: prefillProf, hora: pref
       valor: Number(form.valor) || 0,
       fixo: isFixo || false,
       client_id: form.client_id || clientMatch?.id || null,
-      ficha_pendente: isFichaPendente,
+      ficha_pendente: false,
     };
     if (isFixo && !isEdit) {
       const all = [{ ...base, id: genId() }];
@@ -855,17 +797,6 @@ function AgendamentoModal({ onClose, date, profissional: prefillProf, hora: pref
 
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,20,30,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10000, backdropFilter: 'blur(6px)', padding: 16 }} onClick={onClose}>
-      {blockedInfo && (
-        <AtendimentoBlockedModal
-          info={blockedInfo}
-          onClose={() => setBlockedInfo(null)}
-          onPreencherFicha={(info) => {
-            setBlockedInfo(null);
-            onClose();
-            if (onOpenTablet) onOpenTablet(info);
-          }}
-        />
-      )}
       {showNewClient && (
         <QuickClientModal onClose={() => setShowNewClient(false)} onSave={async (c) => {
           const clientData = {
