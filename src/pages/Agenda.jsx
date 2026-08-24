@@ -21,6 +21,53 @@ import {
 } from '../services/supabaseService';
 import TabletAnamneseModal from '../components/agenda/TabletAnamneseModal';
 
+// ─── Search helpers ──────────────────────────────────────────
+
+function normalizeSearchText(str) {
+  if (!str) return '';
+  return str
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim();
+}
+
+function getPhoneticKey(str) {
+  return normalizeSearchText(str)
+    .replace(/z/g, 's')
+    .replace(/c([ei])/g, 's$1')
+    .replace(/ç/g, 's');
+}
+
+function scoreClientMatch(clientName, clientPhone, rawQuery) {
+  if (!rawQuery) return 0;
+  const q = normalizeSearchText(rawQuery);
+  if (!q) return 0;
+
+  const qPhonetic = getPhoneticKey(rawQuery);
+  const nameNorm = normalizeSearchText(clientName);
+  const namePhonetic = getPhoneticKey(clientName);
+  const phoneNorm = (clientPhone || '').replace(/\D/g, '');
+  const qPhone = rawQuery.replace(/\D/g, '');
+
+  if (nameNorm === q) return 1000;
+  if (nameNorm.startsWith(q)) return 900;
+
+  const wordsNorm = nameNorm.split(/\s+/);
+  if (wordsNorm.some(w => w.startsWith(q))) return 800;
+
+  if (namePhonetic.startsWith(qPhonetic)) return 700;
+  const wordsPhonetic = namePhonetic.split(/\s+/);
+  if (wordsPhonetic.some(w => w.startsWith(qPhonetic))) return 600;
+
+  if (nameNorm.includes(q)) return 500;
+  if (namePhonetic.includes(qPhonetic)) return 400;
+
+  if (qPhone && phoneNorm.includes(qPhone)) return 300;
+
+  return 0;
+}
+
 // ─── Constants ───────────────────────────────────────────────
 
 const SLOT_HEIGHT = 80; // px por hora — maior para melhor visualização
