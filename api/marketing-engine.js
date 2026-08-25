@@ -482,25 +482,171 @@ async function tool_16_retorno_inteligente(db) {
   const tmpl = await getTemplate(db, 16);
   if (!tmpl) return [];
   const { data: servicos } = await db.from('servicos')
-    .select('nome, dias_para_retorno').not('dias_para_retorno', 'is', null).eq('ativo', true);
+    .select('nome, dias_para_retorno')
+    .not('dias_para_retorno', 'is', null)
+    .gt('dias_para_retorno', 0)
+    .eq('ativo', true);
 
   const out = [];
   for (const s of servicos || []) {
-    const dias = s.dias_para_retorno;
-    const target = daysFromToday(-dias);
+    const dias = Number(s.dias_para_retorno);
+    // Janela 24h: o último finalizado deste serviço foi exatamente há `dias` dias
+    const targetFim = daysFromToday(-dias);
+    const targetIni = daysFromToday(-(dias + 1));
+
     const { data: appts } = await db.from('appointments')
-      .select('id, client_id, client_name, client_phone, procedure')
-      .eq('appointment_date', target).in('status', STATUS_CONCLUIDO)
-      .ilike('procedure', s.nome);
+      .select('id, client_id, client_name, client_phone, appointment_date')
+      .in('status', STATUS_CONCLUIDO)
+      .ilike('procedure', s.nome)
+      .lte('appointment_date', targetFim)
+      .gte('appointment_date', targetIni);
 
     for (const a of appts || []) {
-      if (!a.client_id) continue;
-      if (await alreadyQueued(db, a.client_id, 16, 24 * 30)) continue;
+      if (!a.client_id || !a.client_phone) continue;
+
+      // Confirma que este é o ÚLTIMO finalizado desse serviço para o cliente
+      const { count: maisRecente } = await db.from('appointments')
+        .select('id', { count: 'exact', head: true })
+        .eq('client_id', a.client_id)
+        .ilike('procedure', s.nome)
+        .in('status', STATUS_CONCLUIDO)
+        .gt('appointment_date', a.appointment_date);
+      if (maisRecente > 0) continue; // serviço já foi refeito — cronômetro reiniciado
+
+      if (await alreadyQueued(db, a.client_id, 16, 24 * dias)) continue;
       out.push(entry(a, tmpl, 'B', {
         nome_paciente: firstName(a.client_name),
-        nome_servico: a.procedure || s.nome,
+        nome_servico: s.nome,
         dias_retorno: String(dias),
-      }, { appointmentId: a.id, context: { servico: s.nome, dias_retorno: dias, data_base: target } }));
+      }, { appointmentId: a.id, context: { servico: s.nome, dias_retorno: dias, data_base: a.appointment_date, etapa: '1_lembrete' } }));
+    }
+  }
+  return out;
+}
+
+async function tool_20_segunda_cobranca(db, carenciaDias = 15) {
+  // 2º Lembrete + entrada na geladeira (Etapa 4)
+  // Dispara quando: hoje = data_último_finalizado + dias_para_retorno + carenciaDias
+  // Só dispara se o cliente NÃO agendou nem realizou o serviço desde então.
+  const tmpl = await getTemplate(db, 20);
+  if (!tmpl) return [];
+  const { data: servicos } = await db.from('servicos')
+    .select('nome, dias_para_retorno')
+    .not('dias_para_retorno', 'is', null)
+    .gt('dias_para_retorno', 0)
+    .eq('ativo', true);
+
+  const out = [];
+  for (const s of servicos || []) {
+    const dias = Number(s.dias_para_retorno);
+    const offset = dias + carenciaDias;
+    const targetFim = daysFromToday(-offset);
+    const targetIni = daysFromToday(-(offset + 1));
+
+    const { data: appts } = await db.from('appointments')
+      .select('id, client_id, client_name, client_phone, appointment_date')
+      .in('status', STATUS_CONCLUIDO)
+      .ilike('procedure', s.nome)
+      .lte('appointment_date', targetFim)
+      .gte('appointment_date', targetIni);
+
+    for (const a of appts || []) {
+      if (!a.client_id || !a.client_phone) continue;
+
+      // Confirma que o serviço NÃO foi refeito (finalizado) desde a data base
+      const { count: refeito } = await db.from('appointments')
+        .select('id', { count: 'exact', head: true })
+        .eq('client_id', a.client_id)
+        .ilike('procedure', s.nome)
+        .in('status', STATUS_CONCLUIDO)
+        .gt('appointment_date', a.appointment_date);
+      if (refeito > 0) continue;
+
+      // Confirma que o serviço NÃO está ativamente agendado
+      const { count: agendado } = await db.from('appointments')
+        .select('id', { count: 'exact', head: true })
+        .eq('client_id', a.client_id)
+        .ilike('procedure', s.nome)
+        .in('status', STATUS_ATIVOS)
+        .gt('appointment_date', a.appointment_date);
+      if (agendado > 0) continue;
+
+      if (await alreadyQueued(db, a.client_id, 20, 24 * offset)) continue;
+      out.push(entry(a, tmpl, 'B', {
+        nome_paciente: firstName(a.client_name),
+        nome_servico: s.nome,
+        dias_retorno: String(dias),
+      }, { appointmentId: a.id, context: { servico: s.nome, dias_retorno: dias, data_base: a.appointment_date, etapa: '2_geladeira' } }));
+    }
+  }
+  return out;
+}
+
+async function tool_21_resgate_inteligente(db, carenciaDias = 15, geladeirasDias = 30) {
+  // Resgate inteligente com oferta personalizada (Etapa 5)
+  // Dispara quando: hoje = data_último_finalizado + dias_para_retorno + carenciaDias + geladeirasDias
+  const tmpl = await getTemplate(db, 21);
+  if (!tmpl) return [];
+  const { data: servicos } = await db.from('servicos')
+    .select('nome, dias_para_retorno')
+    .not('dias_para_retorno', 'is', null)
+    .gt('dias_para_retorno', 0)
+    .eq('ativo', true);
+
+  const out = [];
+  for (const s of servicos || []) {
+    const dias = Number(s.dias_para_retorno);
+    const offset = dias + carenciaDias + geladeirasDias;
+    const targetFim = daysFromToday(-offset);
+    const targetIni = daysFromToday(-(offset + 1));
+
+    const { data: appts } = await db.from('appointments')
+      .select('id, client_id, client_name, client_phone, appointment_date')
+      .in('status', STATUS_CONCLUIDO)
+      .ilike('procedure', s.nome)
+      .lte('appointment_date', targetFim)
+      .gte('appointment_date', targetIni);
+
+    for (const a of appts || []) {
+      if (!a.client_id || !a.client_phone) continue;
+
+      // Confirma que o serviço NÃO foi refeito
+      const { count: refeito } = await db.from('appointments')
+        .select('id', { count: 'exact', head: true })
+        .eq('client_id', a.client_id)
+        .ilike('procedure', s.nome)
+        .in('status', STATUS_CONCLUIDO)
+        .gt('appointment_date', a.appointment_date);
+      if (refeito > 0) continue;
+
+      // Confirma que NÃO está agendado
+      const { count: agendado } = await db.from('appointments')
+        .select('id', { count: 'exact', head: true })
+        .eq('client_id', a.client_id)
+        .ilike('procedure', s.nome)
+        .in('status', STATUS_ATIVOS)
+        .gt('appointment_date', a.appointment_date);
+      if (agendado > 0) continue;
+
+      if (await alreadyQueued(db, a.client_id, 21, 24 * offset)) continue;
+
+      // Busca outro serviço recente para cross-sell personalizado
+      const { data: outros } = await db.from('appointments')
+        .select('procedure')
+        .eq('client_id', a.client_id)
+        .in('status', STATUS_CONCLUIDO)
+        .not('procedure', 'ilike', s.nome)
+        .gt('appointment_date', a.appointment_date)
+        .order('appointment_date', { ascending: false })
+        .limit(1);
+      const outroServico = outros?.[0]?.procedure || '';
+
+      out.push(entry(a, tmpl, 'B', {
+        nome_paciente: firstName(a.client_name),
+        nome_servico: s.nome,
+        outro_servico: outroServico,
+        dias_retorno: String(dias),
+      }, { appointmentId: a.id, context: { servico: s.nome, dias_retorno: dias, data_base: a.appointment_date, etapa: '3_resgate', outro_servico: outroServico } }));
     }
   }
   return out;
@@ -601,6 +747,9 @@ const ALL_TOOLS = [
   { id: 17, name: 'tool_17_recuperacao_cancelamento', fn: tool_17_recuperacao_cancelamento },
   { id: 18, name: 'tool_18_upgrade_crosssell', fn: tool_18_upgrade_crosssell },
   { id: 19, name: 'tool_19_data_comemorativa', fn: tool_19_data_comemorativa },
+  // Fluxo de manutenção por serviço (Etapas 4 e 5)
+  { id: 20, name: 'tool_20_segunda_cobranca', fn: tool_20_segunda_cobranca },
+  { id: 21, name: 'tool_21_resgate_inteligente', fn: tool_21_resgate_inteligente },
 ];
 
 async function logCycle(db, toolId, toolName, generated, inserted, error) {
