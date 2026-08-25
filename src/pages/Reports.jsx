@@ -505,10 +505,10 @@ export default function Reports() {
                 Icon = TrendingUp;
                 bgIcon = 'rgba(107, 114, 128, 0.1)';
               } else if (anterior === 0) {
-                val = atual > 0 ? '+100%' : '—';
-                cor = 'var(--success)';
+                val = atual > 0 ? 'Sem histórico' : '—';
+                cor = 'var(--text-muted)';
                 Icon = TrendingUp;
-                bgIcon = 'var(--success-bg)';
+                bgIcon = 'rgba(107, 114, 128, 0.1)';
               } else {
                 const pct = ((atual - anterior) / anterior) * 100;
                 const sinal = pct > 0 ? '+' : '';
