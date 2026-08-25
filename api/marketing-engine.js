@@ -90,14 +90,16 @@ async function getConfig(db, key, def = '') {
 }
 
 async function alreadyQueued(db, clientId, toolId, windowHours = 24) {
+  if (!clientId) return false;
+  // Respeita o histórico e decisões humanas: se já existe qualquer registro (pending, approved, sent, cancelled, etc.)
+  // dentro da janela de tempo, NÃO recria para o mesmo cliente + ferramenta.
   const cutoff = new Date(Date.now() - windowHours * HOUR_MS).toISOString();
   const { data } = await db
     .from('marketing_queue')
     .select('id')
     .eq('client_id', clientId)
     .eq('tool_id', toolId)
-    .gte('created_at', cutoff)
-    .in('status', ['pending', 'approved', 'sent']);
+    .gte('created_at', cutoff);
   return (data || []).length > 0;
 }
 
