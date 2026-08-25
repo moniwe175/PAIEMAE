@@ -17,6 +17,24 @@
 --   {{dias_retorno}}   → Tempo configurado de manutenção do serviço em dias
 -- =============================================================================
 
+-- =============================================================================
+-- PASSO 1: Expandir o limite do CHECK constraint de tool_id (era 1–19, agora 1–21)
+-- =============================================================================
+
+-- Remove a constraint antiga que bloqueou o insert
+ALTER TABLE public.message_templates
+  DROP CONSTRAINT IF EXISTS message_templates_tool_id_check;
+
+-- Recria aceitando até 21 (comporta as novas tools 20 e 21)
+ALTER TABLE public.message_templates
+  ADD CONSTRAINT message_templates_tool_id_check
+  CHECK (tool_id BETWEEN 1 AND 21);
+
+-- =============================================================================
+-- PASSO 2: Inserir os templates das novas ferramentas
+-- =============================================================================
+
+
 INSERT INTO message_templates (tool_id, tool_name, group_type, template_text, active)
 VALUES
 (

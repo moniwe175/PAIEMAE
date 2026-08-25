@@ -132,7 +132,7 @@ CREATE POLICY "auth_all_integration_configs" ON public.integration_configs
 
 CREATE TABLE IF NOT EXISTS public.message_templates (
     id              serial          PRIMARY KEY,
-    tool_id         integer         NOT NULL UNIQUE CHECK (tool_id BETWEEN 1 AND 19),
+    tool_id         integer         NOT NULL UNIQUE CHECK (tool_id BETWEEN 1 AND 21),
     tool_name       text            NOT NULL,
     group_type      text            NOT NULL CHECK (group_type IN ('A', 'B')),
     template_text   text            NOT NULL,
