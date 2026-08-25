@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect } from 'react';
 import {
-  BarChart3, TrendingUp, Users, Calendar, DollarSign,
+  BarChart3, TrendingUp, TrendingDown, Users, Calendar, DollarSign,
   FileSpreadsheet, Wallet, Zap, Loader2
 } from 'lucide-react';
 import {
@@ -47,6 +47,7 @@ export default function Reports() {
   // KPI state from sheet_transactions
   const [sheetKpis, setSheetKpis] = useState({
     faturamento: 0,
+    faturamentoAnterior: 0,
     totalSessoes: 0,
     ticketMedio: 0,
     totalPix: 0,
@@ -62,7 +63,7 @@ export default function Reports() {
   const [despesasSheetList, setDespesasSheetList] = useState([]);
 
   // ─── Date range computation ─────────────────────────────────
-  const { startDateStr, endDateStr, daysCount } = useMemo(() => {
+  const { startDateStr, endDateStr, prevStartDateStr, prevEndDateStr, daysCount } = useMemo(() => {
     // Datas no fuso da clínica (BRT) — evita "amanhã" após 21h
     const fmtBRT = (d) =>
       new Intl.DateTimeFormat('en-CA', {
@@ -78,14 +79,42 @@ export default function Reports() {
     let start = new Date(today);
     start.setHours(0, 0, 0, 0);
 
-    if (periodo === '7d') start.setDate(today.getDate() - 7);
-    else if (periodo === '30d') start.setDate(today.getDate() - 30);
-    else if (periodo === '90d') start.setDate(today.getDate() - 90);
-    else if (periodo === '6m') start.setMonth(today.getMonth() - 6);
-    else if (periodo === 'ano') start.setFullYear(today.getFullYear() - 1);
-    else if (periodo === 'custom') {
+    let prevStart = new Date(today);
+    prevStart.setHours(0, 0, 0, 0);
+    let prevEnd = new Date(today);
+    prevEnd.setHours(23, 59, 59, 999);
+
+    if (periodo === '7d') {
+      start.setDate(today.getDate() - 7);
+      prevEnd.setDate(today.getDate() - 8);
+      prevStart.setDate(today.getDate() - 14);
+    } else if (periodo === '30d') {
+      start.setDate(today.getDate() - 30);
+      prevEnd.setDate(today.getDate() - 31);
+      prevStart.setDate(today.getDate() - 60);
+    } else if (periodo === '90d') {
+      start.setDate(today.getDate() - 90);
+      prevEnd.setDate(today.getDate() - 91);
+      prevStart.setDate(today.getDate() - 180);
+    } else if (periodo === '6m') {
+      start.setMonth(today.getMonth() - 6);
+      prevEnd.setMonth(today.getMonth() - 6);
+      prevEnd.setDate(prevEnd.getDate() - 1);
+      prevStart.setMonth(today.getMonth() - 12);
+    } else if (periodo === 'ano') {
+      // Ano corrente (01/01/YYYY até hoje) vs mesmo intervalo no ano anterior (01/01/(YYYY-1) até mesma data)
+      const currentYear = today.getFullYear();
+      start = new Date(currentYear, 0, 1, 0, 0, 0);
+      prevStart = new Date(currentYear - 1, 0, 1, 0, 0, 0);
+      prevEnd = new Date(currentYear - 1, today.getMonth(), today.getDate(), 23, 59, 59, 999);
+    } else if (periodo === 'custom') {
       if (customStart) start = new Date(customStart + 'T00:00:00');
       if (customEnd) end = new Date(customEnd + 'T23:59:59');
+
+      const diffMs = end - start;
+      const days = Math.max(1, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
+      prevEnd = new Date(start.getTime() - 1);
+      prevStart = new Date(start.getTime() - days * 24 * 60 * 60 * 1000);
     }
 
     const diffMs = end - start;
@@ -94,6 +123,8 @@ export default function Reports() {
     return {
       startDateStr: fmtBRT(start),
       endDateStr: fmtBRT(end),
+      prevStartDateStr: fmtBRT(prevStart),
+      prevEndDateStr: fmtBRT(prevEnd),
       daysCount: days,
     };
   }, [periodo, customStart, customEnd]);
@@ -105,7 +136,7 @@ export default function Reports() {
     async function fetchSheetKpis() {
       setSheetKpis((prev) => ({ ...prev, loading: true }));
       try {
-        const [txRes, sangriasRes, despesasRes] = await Promise.all([
+        const [txRes, prevTxRes, sangriasRes, despesasRes] = await Promise.all([
           supabase
             .from('sheet_transactions')
             .select(
@@ -118,6 +149,14 @@ export default function Reports() {
             .lte('date_ref', endDateStr)
             .lt('date_ref', todayBRT())
             .order('date_ref', { ascending: false }),
+          supabase
+            .from('sheet_transactions')
+            .select('gross')
+            .eq('row_type', 'receita')
+            .eq('is_metadata', false)
+            .is('deleted_at', null)
+            .gte('date_ref', prevStartDateStr)
+            .lte('date_ref', prevEndDateStr),
           supabase
             .from('cashier_sangrias')
             .select('valor, cashier_date, motivo')
@@ -137,10 +176,12 @@ export default function Reports() {
         if (cancelled) return;
 
         const rows = txRes.data || [];
+        const prevRows = prevTxRes?.data || [];
         const sangrias = sangriasRes?.data || [];
         const despesas = despesasRes?.data || [];
 
         const faturamento = rows.reduce((sum, t) => sum + (parseFloat(t.gross) || 0), 0);
+        const faturamentoAnterior = prevRows.reduce((sum, t) => sum + (parseFloat(t.gross) || 0), 0);
         const totalSessoes = rows.length;
         const ticketMedio = totalSessoes > 0 ? faturamento / totalSessoes : 0;
         const totalPix = rows.reduce((sum, t) => sum + (parseFloat(t.pix) || 0), 0);
@@ -152,6 +193,7 @@ export default function Reports() {
 
         setSheetKpis({
           faturamento,
+          faturamentoAnterior,
           totalSessoes,
           ticketMedio,
           totalPix,
@@ -177,7 +219,7 @@ export default function Reports() {
     return () => {
       cancelled = true;
     };
-  }, [startDateStr, endDateStr]);
+  }, [startDateStr, endDateStr, prevStartDateStr, prevEndDateStr]);
 
   // ─── Totais de pix/cartão/dinheiro/sangria por dia (para o Histórico de Caixas) ──
   const sheetByDate = useMemo(() => {
@@ -448,14 +490,54 @@ export default function Reports() {
               icon: Calendar,
               bgIcon: 'var(--info-bg)',
             },
-            {
-              label: 'Pacientes Únicos',
-              val: String(sheetKpis.novosPacientes),
-              sub: `Dinheiro: ${formatBRL(sheetKpis.totalDinheiro)}`,
-              cor: 'var(--color-primary)',
-              icon: Users,
-              bgIcon: 'var(--color-accent-soft)',
-            },
+            (() => {
+              const atual = sheetKpis.faturamento || 0;
+              const anterior = sheetKpis.faturamentoAnterior || 0;
+
+              let val = '—';
+              let cor = 'var(--text-muted)';
+              let Icon = TrendingUp;
+              let bgIcon = 'rgba(107, 114, 128, 0.1)';
+
+              if (atual === 0 && anterior === 0) {
+                val = 'Sem dados';
+                cor = 'var(--text-muted)';
+                Icon = TrendingUp;
+                bgIcon = 'rgba(107, 114, 128, 0.1)';
+              } else if (anterior === 0) {
+                val = atual > 0 ? '+100%' : '—';
+                cor = 'var(--success)';
+                Icon = TrendingUp;
+                bgIcon = 'var(--success-bg)';
+              } else {
+                const pct = ((atual - anterior) / anterior) * 100;
+                const sinal = pct > 0 ? '+' : '';
+                val = `${sinal}${pct.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`;
+
+                if (pct > 0) {
+                  cor = 'var(--success)';
+                  Icon = TrendingUp;
+                  bgIcon = 'var(--success-bg)';
+                } else if (pct < 0) {
+                  cor = 'var(--danger)';
+                  Icon = TrendingDown;
+                  bgIcon = 'rgba(239, 68, 68, 0.12)';
+                } else {
+                  cor = 'var(--text-muted)';
+                  Icon = TrendingUp;
+                  bgIcon = 'rgba(107, 114, 128, 0.1)';
+                }
+              }
+
+              return {
+                label: 'Crescimento de Faturamento',
+                val,
+                sub: 'vs período anterior equivalente',
+                cor,
+                icon: Icon,
+                bgIcon,
+              };
+            })(),
             {
               label: 'Faturamento Médio Diário',
               val: formatBRL(daysCount > 0 ? sheetKpis.faturamento / daysCount : 0),
