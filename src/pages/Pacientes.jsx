@@ -3,7 +3,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useLocation } from 'react-router-dom';
 import { Users, Plus, Search, Phone, Calendar, FileText, Star, XCircle, ChevronRight, Mail, Instagram, Upload, Trash2, AlertTriangle } from 'lucide-react';
 import { fetchClients, insertClient, deleteClient, updateClient, fetchAppointments } from '../services/supabaseService';
-import { getCurrentUser } from '../lib/supabase';
+import { getCurrentUser, supabase } from '../lib/supabase';
 
 const defaultPacientes = [
   { id:1, nome:'Ana Beatriz Souza', telefone:'(11) 98765-4321', email:'ana@email.com', cidade:'São Paulo', nascimento:'15/03/1990', ultimaVisita:'10/05/2026', totalSessoes:8, totalGasto:2850, status:'ativo', avatar:'A' },
@@ -125,16 +125,32 @@ export default function Pacientes() {
   const [busca, setBusca] = useState('');
   const [filtro, setFiltro] = useState('Todos');
   const [selected, setSelected] = useState(null);
+  const [servicos, setServicos] = useState([]); // { nome, dias_para_retorno }
+
+  // Calcula quantos dias o serviço está atrasado em relação ao prazo ideal.
+  // Retorna número positivo (dias de atraso), 0 = no prazo, negativo = ainda dentro do prazo, null = sem prazo configurado.
+  function calcDiasAtraso(nomeServico, dataIso) {
+    if (!dataIso) return null;
+    const svc = servicos.find(s =>
+      s.nome && nomeServico &&
+      s.nome.toLowerCase().trim() === nomeServico.toLowerCase().trim()
+    );
+    if (!svc || !svc.dias_para_retorno) return null; // serviço sem prazo = não exibe badge
+    const diasPassados = Math.floor((Date.now() - new Date(dataIso).getTime()) / 86400000);
+    return diasPassados - svc.dias_para_retorno; // positivo = atrasado, negativo = em dia
+  }
 
   // Load fresh data from Supabase on mount
   useEffect(() => {
     async function load() {
-      const [clientsRes, apptsRes] = await Promise.all([
+      const [clientsRes, apptsRes, svcRes] = await Promise.all([
         fetchClients(),
-        fetchAppointments()
+        fetchAppointments(),
+        supabase.from('servicos').select('nome, dias_para_retorno').eq('ativo', true)
       ]);
       const data = clientsRes.data;
       const appts = apptsRes.data || [];
+      if (svcRes.data) setServicos(svcRes.data);
 
       if (data) {
         const mapped = data.map(item => {
@@ -167,6 +183,7 @@ export default function Pacientes() {
               }
             } catch(e) {}
             return {
+              dataIso: a.appointment_date || '',   // ISO para cálculo de atraso
               data: a.appointment_date ? a.appointment_date.split('-').reverse().join('/') : '',
               servico: a.procedure || 'Sessão',
               valor: v
@@ -655,15 +672,36 @@ export default function Pacientes() {
                 </div>
               </div>
               <div style={{fontSize:12,fontWeight:600,color:'var(--text-medium)',marginBottom:8}}>Histórico de Sessões</div>
-              {(selected.historico || historicoDefault).map((h,i)=>(
-                <div key={i} className="alert-item">
-                  <div>
-                    <div className="alert-item-label">{h.servico}</div>
-                    <div className="alert-item-sub">{h.data}</div>
+              {(selected.historico || historicoDefault).map((h, i) => {
+                const atraso = calcDiasAtraso(h.servico, h.dataIso);
+                return (
+                  <div key={i} className="alert-item">
+                    <div style={{ flex: 1 }}>
+                      <div className="alert-item-label">{h.servico}</div>
+                      <div className="alert-item-sub">{h.data}</div>
+                      {/* Badge de status do serviço */}
+                      {atraso !== null && (
+                        atraso > 0
+                          ? <span style={{
+                              display: 'inline-block', marginTop: 4,
+                              fontSize: 10, fontWeight: 700, padding: '2px 7px',
+                              borderRadius: 20, background: '#FEE2E2', color: '#DC2626'
+                            }}>
+                              ⚠ Atrasado {atraso}d
+                            </span>
+                          : <span style={{
+                              display: 'inline-block', marginTop: 4,
+                              fontSize: 10, fontWeight: 700, padding: '2px 7px',
+                              borderRadius: 20, background: '#DCFCE7', color: '#16A34A'
+                            }}>
+                              ✓ Em dia
+                            </span>
+                      )}
+                    </div>
+                    <div style={{ fontWeight: 700, color: 'var(--success)', fontSize: 13 }}>R$ {h.valor.toLocaleString('pt-BR')}</div>
                   </div>
-                  <div style={{fontWeight:700,color:'var(--success)',fontSize:13}}>R$ {h.valor.toLocaleString('pt-BR')}</div>
-                </div>
-              ))}
+                );
+              })}
               {(selected.historico || historicoDefault).length === 0 && (
                 <div style={{fontSize:12, color:'var(--text-muted)', textAlign:'center', margin:'12px 0'}}>Nenhuma sessão finalizada.</div>
               )}
