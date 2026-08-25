@@ -921,9 +921,15 @@ def tool_15_pacote_proximo_fim(db: Client) -> list[QueueEntry]:
 
 def tool_16_retorno_inteligente(db: Client) -> list[QueueEntry]:
     """
-    Ferramenta mais dinâmica: baseada em servicos.dias_para_retorno.
-    CRONÔMETRO IMUTÁVEL: calcula se hoje = appointment_date + dias_para_retorno.
-    Editar o template não reinicia nenhuma contagem.
+    1º Lembrete de manutenção por serviço.
+
+    FONTE DE VERDADE: Histórico do Paciente.
+    O Dia 0 é a data do ÚLTIMO appointment com status finalizado para aquele
+    serviço específico — nunca a data de agendamento original.
+
+    Dispara quando: hoje = data_último_finalizado + dias_para_retorno (janela 24h).
+    Cada serviço tem seu próprio cronômetro independente.
+    Editar o template NÃO reinicia nenhuma contagem.
     """
     tmpl = get_template(db, 16)
     if not tmpl:
@@ -933,33 +939,55 @@ def tool_16_retorno_inteligente(db: Client) -> list[QueueEntry]:
         db.table("servicos")
         .select("nome, dias_para_retorno")
         .not_.is_("dias_para_retorno", "null")
+        .gt("dias_para_retorno", 0)
         .eq("ativo", True)
         .execute()
     )
 
     entries = []
     for servico in servicos_resp.data or []:
-        dias = servico["dias_para_retorno"]
-        target_date = (now_clinic().date() - timedelta(days=dias)).isoformat()
+        dias = int(servico["dias_para_retorno"])
+        nome_servico = servico["nome"]
+
+        # Janela 24h: o último finalizado deste serviço foi exatamente há `dias` dias
+        target_fim = (now_clinic().date() - timedelta(days=dias)).isoformat()
+        target_ini = (now_clinic().date() - timedelta(days=dias + 1)).isoformat()
 
         appts_resp = (
             db.table("appointments")
-            .select("id, client_id, client_name, client_phone, procedure")
-            .eq("appointment_date", target_date)
+            .select("id, client_id, client_name, client_phone, appointment_date")
             .in_("status", STATUS_CONCLUIDO)
-            .ilike("procedure", servico["nome"])
+            .ilike("procedure", nome_servico)
+            .lte("appointment_date", target_fim)
+            .gte("appointment_date", target_ini)
             .execute()
         )
 
         for appt in appts_resp.data or []:
-            if not appt.get("client_id"):
+            if not appt.get("client_id") or not appt.get("client_phone"):
                 continue
-            if already_queued(db, appt["client_id"], 16, window_hours=24 * 30):
+
+            # Confirma que este é o ÚLTIMO finalizado desse serviço para o cliente.
+            # Se existir um appointment mais recente e finalizado, o cronômetro
+            # já foi reiniciado — não notificar.
+            check_mais_recente = (
+                db.table("appointments")
+                .select("id", count="exact")
+                .eq("client_id", appt["client_id"])
+                .ilike("procedure", nome_servico)
+                .in_("status", STATUS_CONCLUIDO)
+                .gt("appointment_date", appt["appointment_date"])
+                .execute()
+            )
+            if check_mais_recente.count and check_mais_recente.count > 0:
+                continue  # Serviço já foi refeito — cronômetro reiniciado
+
+            if already_queued(db, appt["client_id"], 16, window_hours=24 * dias):
                 continue
 
             tags = {
                 "nome_paciente": appt["client_name"].split()[0],
-                "nome_servico":  appt.get("procedure", servico["nome"]),
+                "nome_servico":  nome_servico,
                 "dias_retorno":  str(dias),
             }
             entries.append(QueueEntry(
@@ -973,9 +1001,10 @@ def tool_16_retorno_inteligente(db: Client) -> list[QueueEntry]:
                 scheduled_at=now_utc(),
                 appointment_id=appt["id"],
                 context_data={
-                    "servico":      servico["nome"],
+                    "servico":      nome_servico,
                     "dias_retorno": dias,
-                    "data_base":    target_date,
+                    "data_base":    appt["appointment_date"],
+                    "etapa":        "1_lembrete",
                 },
             ))
     return entries
@@ -1132,6 +1161,231 @@ def tool_19_data_comemorativa(db: Client) -> list[QueueEntry]:
     return entries
 
 
+def tool_20_segunda_cobranca(db: Client, carencia_dias: int = 15) -> list[QueueEntry]:
+    """
+    2º Lembrete de manutenção por serviço + entrada na geladeira (Etapa 4).
+
+    FONTE DE VERDADE: Histórico do Paciente (mesmo critério da tool_16).
+    Dispara quando: hoje = data_último_finalizado + dias_para_retorno + carencia_dias.
+    Carência padrão: 15 dias após o 1º lembrete.
+
+    Só dispara se o cliente NÃO agendou nem realizou o serviço desde então.
+    Status pending: recepcionista revisa antes do envio e pode ajustar o texto.
+    Após envio, a cliente é considerada em 'geladeira' para esse serviço específico.
+    O status GLOBAL da cliente permanece Ativo — apenas o cronômetro do serviço
+    específico está em espera.
+    """
+    tmpl = get_template(db, 20)
+    if not tmpl:
+        return []
+
+    servicos_resp = (
+        db.table("servicos")
+        .select("nome, dias_para_retorno")
+        .not_.is_("dias_para_retorno", "null")
+        .gt("dias_para_retorno", 0)
+        .eq("ativo", True)
+        .execute()
+    )
+
+    entries = []
+    for servico in servicos_resp.data or []:
+        dias = int(servico["dias_para_retorno"])
+        nome_servico = servico["nome"]
+        offset = dias + carencia_dias  # Ex: 30 + 15 = Dia 45
+
+        target_fim = (now_clinic().date() - timedelta(days=offset)).isoformat()
+        target_ini = (now_clinic().date() - timedelta(days=offset + 1)).isoformat()
+
+        appts_resp = (
+            db.table("appointments")
+            .select("id, client_id, client_name, client_phone, appointment_date")
+            .in_("status", STATUS_CONCLUIDO)
+            .ilike("procedure", nome_servico)
+            .lte("appointment_date", target_fim)
+            .gte("appointment_date", target_ini)
+            .execute()
+        )
+
+        for appt in appts_resp.data or []:
+            if not appt.get("client_id") or not appt.get("client_phone"):
+                continue
+
+            # Confirma que o serviço NÃO foi refeito (finalizado) desde a data base
+            check_finalizado = (
+                db.table("appointments")
+                .select("id", count="exact")
+                .eq("client_id", appt["client_id"])
+                .ilike("procedure", nome_servico)
+                .in_("status", STATUS_CONCLUIDO)
+                .gt("appointment_date", appt["appointment_date"])
+                .execute()
+            )
+            if check_finalizado.count and check_finalizado.count > 0:
+                continue  # Serviço já foi refeito — cronômetro reiniciado
+
+            # Confirma que o serviço NÃO está ativamente agendado
+            check_agendado = (
+                db.table("appointments")
+                .select("id", count="exact")
+                .eq("client_id", appt["client_id"])
+                .ilike("procedure", nome_servico)
+                .in_("status", STATUS_ATIVOS)
+                .gt("appointment_date", appt["appointment_date"])
+                .execute()
+            )
+            if check_agendado.count and check_agendado.count > 0:
+                continue  # Já reagendou — não cobrar
+
+            if already_queued(db, appt["client_id"], 20, window_hours=24 * offset):
+                continue
+
+            tags = {
+                "nome_paciente": appt["client_name"].split()[0],
+                "nome_servico":  nome_servico,
+                "dias_retorno":  str(dias),
+            }
+            entries.append(QueueEntry(
+                client_id=appt["client_id"],
+                client_name=appt["client_name"],
+                client_phone=appt["client_phone"],
+                tool_id=20,
+                tool_name=tmpl["tool_name"],
+                group_type="B",
+                message_text=render(tmpl["template_text"], tags),
+                scheduled_at=now_utc(),
+                appointment_id=appt["id"],
+                context_data={
+                    "servico":      nome_servico,
+                    "dias_retorno": dias,
+                    "data_base":    appt["appointment_date"],
+                    "etapa":        "2_geladeira",
+                    "geladeira_em": now_clinic().date().isoformat(),
+                },
+            ))
+    return entries
+
+
+def tool_21_resgate_inteligente(db: Client, carencia_dias: int = 15, geladeira_dias: int = 30) -> list[QueueEntry]:
+    """
+    Resgate inteligente com oferta personalizada (Etapa 5).
+
+    FONTE DE VERDADE: Histórico do Paciente.
+    Dispara quando: hoje = data_último_finalizado + dias_para_retorno + carencia_dias + geladeira_dias.
+    Padrões: carência = 15 dias, geladeira = 30 dias → Dia 75 para serviço de 30 dias.
+
+    Verifica se a cliente continua frequentando a clínica (outros serviços)
+    para personalizar a mensagem de resgate com cross-sell.
+    Status pending: recepcionista revisa e define o percentual de desconto antes do envio.
+    """
+    tmpl = get_template(db, 21)
+    if not tmpl:
+        return []
+
+    servicos_resp = (
+        db.table("servicos")
+        .select("nome, dias_para_retorno")
+        .not_.is_("dias_para_retorno", "null")
+        .gt("dias_para_retorno", 0)
+        .eq("ativo", True)
+        .execute()
+    )
+
+    entries = []
+    for servico in servicos_resp.data or []:
+        dias = int(servico["dias_para_retorno"])
+        nome_servico = servico["nome"]
+        offset = dias + carencia_dias + geladeira_dias  # Ex: 30 + 15 + 30 = Dia 75
+
+        target_fim = (now_clinic().date() - timedelta(days=offset)).isoformat()
+        target_ini = (now_clinic().date() - timedelta(days=offset + 1)).isoformat()
+
+        appts_resp = (
+            db.table("appointments")
+            .select("id, client_id, client_name, client_phone, appointment_date")
+            .in_("status", STATUS_CONCLUIDO)
+            .ilike("procedure", nome_servico)
+            .lte("appointment_date", target_fim)
+            .gte("appointment_date", target_ini)
+            .execute()
+        )
+
+        for appt in appts_resp.data or []:
+            if not appt.get("client_id") or not appt.get("client_phone"):
+                continue
+
+            # Confirma que o serviço NÃO foi refeito (finalizado) desde a data base
+            check_finalizado = (
+                db.table("appointments")
+                .select("id", count="exact")
+                .eq("client_id", appt["client_id"])
+                .ilike("procedure", nome_servico)
+                .in_("status", STATUS_CONCLUIDO)
+                .gt("appointment_date", appt["appointment_date"])
+                .execute()
+            )
+            if check_finalizado.count and check_finalizado.count > 0:
+                continue  # Serviço já foi refeito — cronômetro reiniciado
+
+            # Confirma que o serviço NÃO está ativamente agendado
+            check_agendado = (
+                db.table("appointments")
+                .select("id", count="exact")
+                .eq("client_id", appt["client_id"])
+                .ilike("procedure", nome_servico)
+                .in_("status", STATUS_ATIVOS)
+                .gt("appointment_date", appt["appointment_date"])
+                .execute()
+            )
+            if check_agendado.count and check_agendado.count > 0:
+                continue  # Já reagendou — não cobrar
+
+            if already_queued(db, appt["client_id"], 21, window_hours=24 * offset):
+                continue
+
+            # Busca o serviço mais recente que a cliente realizou (para cross-sell personalizado)
+            outros_resp = (
+                db.table("appointments")
+                .select("procedure")
+                .eq("client_id", appt["client_id"])
+                .in_("status", STATUS_CONCLUIDO)
+                .not_.ilike("procedure", nome_servico)
+                .gt("appointment_date", appt["appointment_date"])
+                .order("appointment_date", desc=True)
+                .limit(1)
+                .execute()
+            )
+            outro_servico = ""
+            if outros_resp.data:
+                outro_servico = outros_resp.data[0].get("procedure", "")
+
+            tags = {
+                "nome_paciente":  appt["client_name"].split()[0],
+                "nome_servico":   nome_servico,
+                "outro_servico":  outro_servico,
+                "dias_retorno":   str(dias),
+            }
+            entries.append(QueueEntry(
+                client_id=appt["client_id"],
+                client_name=appt["client_name"],
+                client_phone=appt["client_phone"],
+                tool_id=21,
+                tool_name=tmpl["tool_name"],
+                group_type="B",
+                message_text=render(tmpl["template_text"], tags),
+                scheduled_at=now_utc(),
+                appointment_id=appt["id"],
+                context_data={
+                    "servico":       nome_servico,
+                    "dias_retorno":  dias,
+                    "data_base":     appt["appointment_date"],
+                    "etapa":         "3_resgate",
+                    "outro_servico": outro_servico,
+                },
+            ))
+    return entries
+
+
 # ===========================================================================
 # REGISTRY — consumido pelo MarketingEngine.process_all_tasks()
 # ===========================================================================
@@ -1158,4 +1412,7 @@ ALL_TOOLS: list[Callable] = [
     tool_17_recuperacao_cancelamento,
     tool_18_upgrade_crosssell,
     tool_19_data_comemorativa,
+    # Fluxo de manutenção por serviço (Etapas 4 e 5)
+    tool_20_segunda_cobranca,
+    tool_21_resgate_inteligente,
 ]
