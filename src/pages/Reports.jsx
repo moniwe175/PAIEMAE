@@ -531,8 +531,8 @@ export default function Reports() {
                 <th>Data</th>
                 <th style={{ textAlign: 'right' }}>Abertura</th>
                 <th style={{ textAlign: 'right' }}>Fechamento</th>
-                <th style={{ textAlign: 'right' }}>Dinheiro</th>
                 <th style={{ textAlign: 'right' }}>Sangria</th>
+                <th style={{ textAlign: 'right' }}>Dinheiro</th>
                 <th style={{ textAlign: 'right' }}>Pix</th>
                 <th style={{ textAlign: 'right' }}>Crédito</th>
                 <th style={{ textAlign: 'right' }}>Débito</th>
@@ -598,20 +598,20 @@ export default function Reports() {
                       <td
                         style={{
                           textAlign: 'right',
-                          color: 'var(--success)',
-                          fontWeight: 600,
-                        }}
-                      >
-                        {isAberto ? '—' : formatBRL(dinheiro)}
-                      </td>
-                      <td
-                        style={{
-                          textAlign: 'right',
                           color: 'var(--danger)',
                           fontWeight: 600,
                         }}
                       >
                         {isAberto ? '—' : formatBRL(sangria)}
+                      </td>
+                      <td
+                        style={{
+                          textAlign: 'right',
+                          color: 'var(--success)',
+                          fontWeight: 600,
+                        }}
+                      >
+                        {isAberto ? '—' : formatBRL(dinheiro)}
                       </td>
                       <td style={{ textAlign: 'right' }}>{isAberto ? '—' : formatBRL(pix)}</td>
                       <td style={{ textAlign: 'right' }}>{isAberto ? '—' : formatBRL(credito)}</td>
