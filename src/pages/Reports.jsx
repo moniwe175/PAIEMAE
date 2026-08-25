@@ -58,6 +58,8 @@ export default function Reports() {
     loading: true,
   });
   const [sheetTxData, setSheetTxData] = useState([]);
+  const [sangriasList, setSangriasList] = useState([]);
+  const [despesasSheetList, setDespesasSheetList] = useState([]);
 
   // ─── Date range computation ─────────────────────────────────
   const { startDateStr, endDateStr, daysCount } = useMemo(() => {
@@ -96,32 +98,47 @@ export default function Reports() {
     };
   }, [periodo, customStart, customEnd]);
 
-  // ─── Fetch KPIs from sheet_transactions ────────────────────
+  // ─── Fetch KPIs from sheet_transactions and sangrias ────────
   useEffect(() => {
     let cancelled = false;
 
     async function fetchSheetKpis() {
       setSheetKpis((prev) => ({ ...prev, loading: true }));
       try {
-        const { data, error } = await supabase
-          .from('sheet_transactions')
-          .select(
-            'gross, date_ref, pix, credito, debito, dinheiro, client, procedure, professional, payment_method, commission_value'
-          )
-          .eq('row_type', 'receita')
-          .eq('is_metadata', false)
-          .is('deleted_at', null)
-          .gte('date_ref', startDateStr)
-          .lte('date_ref', endDateStr)
-          // Dia em andamento (caixa aberto) NÃO entra no relatório:
-          // os valores só aparecem após a virada/fechamento do caixa.
-          .lt('date_ref', todayBRT())
-          .order('date_ref', { ascending: false });
+        const [txRes, sangriasRes, despesasRes] = await Promise.all([
+          supabase
+            .from('sheet_transactions')
+            .select(
+              'gross, date_ref, pix, credito, debito, dinheiro, client, procedure, professional, payment_method, commission_value'
+            )
+            .eq('row_type', 'receita')
+            .eq('is_metadata', false)
+            .is('deleted_at', null)
+            .gte('date_ref', startDateStr)
+            .lte('date_ref', endDateStr)
+            .lt('date_ref', todayBRT())
+            .order('date_ref', { ascending: false }),
+          supabase
+            .from('cashier_sangrias')
+            .select('valor, cashier_date, motivo')
+            .gte('cashier_date', startDateStr)
+            .lte('cashier_date', endDateStr),
+          supabase
+            .from('sheet_transactions')
+            .select('gross, date_ref, dinheiro, row_type, payment_method')
+            .neq('row_type', 'receita')
+            .eq('is_metadata', false)
+            .is('deleted_at', null)
+            .gte('date_ref', startDateStr)
+            .lte('date_ref', endDateStr),
+        ]);
 
-        if (error) throw error;
+        if (txRes.error) throw txRes.error;
         if (cancelled) return;
 
-        const rows = data || [];
+        const rows = txRes.data || [];
+        const sangrias = sangriasRes?.data || [];
+        const despesas = despesasRes?.data || [];
 
         const faturamento = rows.reduce((sum, t) => sum + (parseFloat(t.gross) || 0), 0);
         const totalSessoes = rows.length;
@@ -146,6 +163,8 @@ export default function Reports() {
           loading: false,
         });
         setSheetTxData(rows);
+        setSangriasList(sangrias);
+        setDespesasSheetList(despesas);
       } catch (e) {
         if (!cancelled) {
           console.warn('[Reports] Erro ao buscar KPIs da planilha:', e?.message || e);
@@ -160,21 +179,32 @@ export default function Reports() {
     };
   }, [startDateStr, endDateStr]);
 
-  // ─── Totais de pix/cartão por dia (para o Histórico de Caixas) ──
-  // O cashier_state só rastreia dinheiro físico; pix e cartão vêm da planilha.
+  // ─── Totais de pix/cartão/dinheiro/sangria por dia (para o Histórico de Caixas) ──
   const sheetByDate = useMemo(() => {
     const map = {};
     (sheetTxData || []).forEach((t) => {
       const d = t.date_ref;
       if (!d) return;
-      if (!map[d]) map[d] = { pix: 0, credito: 0, debito: 0, dinheiro: 0 };
+      if (!map[d]) map[d] = { pix: 0, credito: 0, debito: 0, dinheiro: 0, sangria: 0 };
       map[d].pix += parseFloat(t.pix) || 0;
       map[d].credito += parseFloat(t.credito) || 0;
       map[d].debito += parseFloat(t.debito) || 0;
       map[d].dinheiro += parseFloat(t.dinheiro) || 0;
     });
+    (sangriasList || []).forEach((s) => {
+      const d = s.cashier_date;
+      if (!d) return;
+      if (!map[d]) map[d] = { pix: 0, credito: 0, debito: 0, dinheiro: 0, sangria: 0 };
+      map[d].sangria += parseFloat(s.valor) || 0;
+    });
+    (despesasSheetList || []).forEach((e) => {
+      const d = e.date_ref;
+      if (!d) return;
+      if (!map[d]) map[d] = { pix: 0, credito: 0, debito: 0, dinheiro: 0, sangria: 0 };
+      map[d].sangria += parseFloat(e.dinheiro || e.gross) || 0;
+    });
     return map;
-  }, [sheetTxData]);
+  }, [sheetTxData, sangriasList, despesasSheetList]);
 
   // ─── Revenue chart: DIÁRIO para períodos curtos (até ~90 dias),
   //     MENSAL para períodos longos (Ano / personalizado > 90 dias) ──
@@ -501,8 +531,8 @@ export default function Reports() {
                 <th>Data</th>
                 <th style={{ textAlign: 'right' }}>Abertura</th>
                 <th style={{ textAlign: 'right' }}>Fechamento</th>
-                <th style={{ textAlign: 'right' }}>Entradas (R$)</th>
-                <th style={{ textAlign: 'right' }}>Saídas (R$)</th>
+                <th style={{ textAlign: 'right' }}>Dinheiro</th>
+                <th style={{ textAlign: 'right' }}>Sangria</th>
                 <th style={{ textAlign: 'right' }}>Pix</th>
                 <th style={{ textAlign: 'right' }}>Crédito</th>
                 <th style={{ textAlign: 'right' }}>Débito</th>
@@ -522,10 +552,9 @@ export default function Reports() {
                 </tr>
               ) : (
                 filteredCashierHistory.map((c, i) => {
-                  const entradas = numField(c, 'total_cash_in', 'dinheiro_entradas');
-                  const saidas = numField(c, 'total_cash_out', 'dinheiro_saidas');
-                  // Pix/cartão do dia vêm da sheet_transactions (o caixa só rastreia dinheiro)
-                  const doDia = sheetByDate[c.date] || { pix: 0, credito: 0, debito: 0 };
+                  const rawIn = numField(c, 'total_cash_in', 'dinheiro_entradas');
+                  const rawOut = numField(c, 'total_cash_out', 'dinheiro_saidas');
+                  const doDia = sheetByDate[c.date] || { pix: 0, credito: 0, debito: 0, dinheiro: 0, sangria: 0 };
                   const pix = doDia.pix;
                   const credito = doDia.credito;
                   const debito = doDia.debito;
@@ -534,6 +563,21 @@ export default function Reports() {
                     c.closing_balance !== undefined &&
                     c.closing_balance !== '';
                   const isAberto = c.status === 'aberto';
+                  const opening = Number(c.opening_balance) || 0;
+                  const closing = Number(c.closing_balance) || 0;
+
+                  // 1. Sangria do dia (despesas / retiradas em dinheiro)
+                  let sangria = rawOut > 0 ? rawOut : (doDia.sangria || 0);
+                  if (sangria === 0 && hasClosing && opening > closing && rawIn === 0 && (doDia.dinheiro || 0) === 0) {
+                    sangria = opening - closing;
+                  }
+
+                  // 2. Dinheiro do dia (entradas em espécie no caixa)
+                  let dinheiro = rawIn > 0 ? rawIn : (doDia.dinheiro || 0);
+                  if (dinheiro === 0 && hasClosing) {
+                    const diff = (closing - opening) + sangria;
+                    if (diff > 0) dinheiro = diff;
+                  }
 
                   return (
                     <tr key={c.id || i}>
@@ -558,7 +602,7 @@ export default function Reports() {
                           fontWeight: 600,
                         }}
                       >
-                        {isAberto ? '—' : formatBRL(entradas)}
+                        {isAberto ? '—' : formatBRL(dinheiro)}
                       </td>
                       <td
                         style={{
@@ -567,7 +611,7 @@ export default function Reports() {
                           fontWeight: 600,
                         }}
                       >
-                        {isAberto ? '—' : formatBRL(saidas)}
+                        {isAberto ? '—' : formatBRL(sangria)}
                       </td>
                       <td style={{ textAlign: 'right' }}>{isAberto ? '—' : formatBRL(pix)}</td>
                       <td style={{ textAlign: 'right' }}>{isAberto ? '—' : formatBRL(credito)}</td>
