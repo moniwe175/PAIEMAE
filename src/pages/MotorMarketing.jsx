@@ -27,6 +27,7 @@ const TEMPLATE_TAGS = [
   { tag: '{{hora_consulta}}',     desc: 'Hora da consulta' },
   { tag: '{{data_consulta}}',     desc: 'Data da consulta' },
   { tag: '{{nome_servico}}',      desc: 'Nome do serviço' },
+  { tag: '{{outro_servico}}',     desc: 'Outro serviço feito recentemente (tool 21)' },
   { tag: '{{nome_profissional}}', desc: 'Nome do profissional' },
   { tag: '{{link_google}}',       desc: 'Link do Google Maps' },
   { tag: '{{dias_retorno}}',      desc: 'Dias até o retorno' },
