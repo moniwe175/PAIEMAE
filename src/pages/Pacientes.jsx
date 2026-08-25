@@ -128,16 +128,36 @@ export default function Pacientes() {
   const [servicos, setServicos] = useState([]); // { nome, dias_para_retorno }
 
   // Calcula quantos dias o serviço está atrasado em relação ao prazo ideal.
-  // Retorna número positivo (dias de atraso), 0 = no prazo, negativo = ainda dentro do prazo, null = sem prazo configurado.
+  // Suporta busca flexível (ex: "Limpeza de Pele" casa com "Limpeza de Pele Profunda")
   function calcDiasAtraso(nomeServico, dataIso) {
-    if (!dataIso) return null;
-    const svc = servicos.find(s =>
-      s.nome && nomeServico &&
-      s.nome.toLowerCase().trim() === nomeServico.toLowerCase().trim()
-    );
-    if (!svc || !svc.dias_para_retorno) return null; // serviço sem prazo = não exibe badge
-    const diasPassados = Math.floor((Date.now() - new Date(dataIso).getTime()) / 86400000);
-    return diasPassados - svc.dias_para_retorno; // positivo = atrasado, negativo = em dia
+    if (!dataIso || !nomeServico || !servicos || servicos.length === 0) return null;
+    const n = normalizeSearchText(nomeServico);
+    const svc = servicos.find(s => {
+      if (!s.nome) return false;
+      const sn = normalizeSearchText(s.nome);
+      return sn === n || sn.includes(n) || n.includes(sn);
+    });
+    if (!svc || !svc.dias_para_retorno || Number(svc.dias_para_retorno) <= 0) return null;
+
+    // Parse dataIso com segurança (yyyy-mm-dd)
+    const parts = String(dataIso).slice(0, 10).split('-');
+    if (parts.length < 3) return null;
+    const apptDate = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    apptDate.setHours(0, 0, 0, 0);
+
+    const diffDays = Math.floor((today.getTime() - apptDate.getTime()) / 86400000);
+    const prazo = Number(svc.dias_para_retorno);
+    const atraso = diffDays - prazo; // > 0 = atrasado, <= 0 = em dia
+
+    return {
+      atraso,
+      diasPassados: diffDays,
+      prazo,
+      isAtrasado: atraso > 0,
+      servicoNome: svc.nome
+    };
   }
 
   // Load fresh data from Supabase on mount
@@ -673,29 +693,31 @@ export default function Pacientes() {
               </div>
               <div style={{fontSize:12,fontWeight:600,color:'var(--text-medium)',marginBottom:8}}>Histórico de Sessões</div>
               {(selected.historico || historicoDefault).map((h, i) => {
-                const atraso = calcDiasAtraso(h.servico, h.dataIso);
+                const info = calcDiasAtraso(h.servico, h.dataIso);
                 return (
-                  <div key={i} className="alert-item">
+                  <div key={i} className="alert-item" style={{ alignItems: 'flex-start' }}>
                     <div style={{ flex: 1 }}>
                       <div className="alert-item-label">{h.servico}</div>
                       <div className="alert-item-sub">{h.data}</div>
                       {/* Badge de status do serviço */}
-                      {atraso !== null && (
-                        atraso > 0
-                          ? <span style={{
-                              display: 'inline-block', marginTop: 4,
-                              fontSize: 10, fontWeight: 700, padding: '2px 7px',
-                              borderRadius: 20, background: '#FEE2E2', color: '#DC2626'
-                            }}>
-                              ⚠ Atrasado {atraso}d
-                            </span>
-                          : <span style={{
-                              display: 'inline-block', marginTop: 4,
-                              fontSize: 10, fontWeight: 700, padding: '2px 7px',
-                              borderRadius: 20, background: '#DCFCE7', color: '#16A34A'
-                            }}>
-                              ✓ Em dia
-                            </span>
+                      {info !== null && (
+                        info.isAtrasado ? (
+                          <span style={{
+                            display: 'inline-flex', alignItems: 'center', gap: 3, marginTop: 4,
+                            fontSize: 10, fontWeight: 700, padding: '2px 7px',
+                            borderRadius: 20, background: '#FEE2E2', color: '#DC2626'
+                          }}>
+                            ⚠ Atrasado ({info.atraso}d)
+                          </span>
+                        ) : (
+                          <span style={{
+                            display: 'inline-flex', alignItems: 'center', gap: 3, marginTop: 4,
+                            fontSize: 10, fontWeight: 700, padding: '2px 7px',
+                            borderRadius: 20, background: '#DCFCE7', color: '#16A34A'
+                          }}>
+                            ✓ Em dia ({info.diasPassados}/{info.prazo}d)
+                          </span>
+                        )
                       )}
                     </div>
                     <div style={{ fontWeight: 700, color: 'var(--success)', fontSize: 13 }}>R$ {h.valor.toLocaleString('pt-BR')}</div>
