@@ -457,9 +457,9 @@ export default function Reports() {
               bgIcon: 'var(--color-accent-soft)',
             },
             {
-              label: 'Ticket Médio',
-              val: formatBRL(sheetKpis.ticketMedio),
-              sub: `Pix: ${formatBRL(sheetKpis.totalPix)} • Crédito: ${formatBRL(sheetKpis.totalCredito)} • Débito: ${formatBRL(sheetKpis.totalDebito)}`,
+              label: 'Faturamento Médio Diário',
+              val: formatBRL(daysCount > 0 ? sheetKpis.faturamento / daysCount : 0),
+              sub: 'por dia no período selecionado',
               cor: 'var(--warning)',
               icon: TrendingUp,
               bgIcon: 'var(--warning-bg)',
