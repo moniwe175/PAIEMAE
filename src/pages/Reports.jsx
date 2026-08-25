@@ -36,6 +36,43 @@ const numField = (rec, ...keys) => {
   return 0;
 };
 
+// ─── Clinic work day helpers (Terça a Sábado: pula Domingo=0 e Segunda=1) ───
+const isClinicWorkDay = (d) => {
+  const day = d.getDay();
+  return day !== 0 && day !== 1;
+};
+
+const getWorkDayRange = (endDate, count) => {
+  let cur = new Date(endDate);
+  cur.setHours(0, 0, 0, 0);
+  let accumulated = 0;
+  let startDate = new Date(cur);
+
+  while (accumulated < count) {
+    if (isClinicWorkDay(cur)) {
+      accumulated++;
+      startDate = new Date(cur);
+    }
+    if (accumulated >= count) break;
+    cur.setDate(cur.getDate() - 1);
+  }
+  return startDate;
+};
+
+const countClinicWorkDays = (start, end) => {
+  let cur = new Date(start);
+  cur.setHours(0, 0, 0, 0);
+  const endLimit = new Date(end);
+  endLimit.setHours(0, 0, 0, 0);
+
+  let count = 0;
+  while (cur <= endLimit) {
+    if (isClinicWorkDay(cur)) count++;
+    cur.setDate(cur.getDate() + 1);
+  }
+  return count;
+};
+
 export default function Reports() {
   const { transactions, comissoes, cashierHistory } = useSync();
 
@@ -83,49 +120,61 @@ export default function Reports() {
     prevStart.setHours(0, 0, 0, 0);
     let prevEnd = new Date(today);
     prevEnd.setHours(23, 59, 59, 999);
+    let workDays = 30;
 
     if (periodo === '7d') {
-      start.setDate(today.getDate() - 7);
-      prevEnd.setDate(today.getDate() - 8);
-      prevStart.setDate(today.getDate() - 14);
-    } else if (periodo === '30d') {
-      start.setDate(today.getDate() - 30);
-      prevEnd.setDate(today.getDate() - 31);
-      prevStart.setDate(today.getDate() - 60);
-    } else if (periodo === '90d') {
-      start.setDate(today.getDate() - 90);
-      prevEnd.setDate(today.getDate() - 91);
-      prevStart.setDate(today.getDate() - 180);
-    } else if (periodo === '6m') {
-      start.setMonth(today.getMonth() - 6);
-      prevEnd.setMonth(today.getMonth() - 6);
+      workDays = 7;
+      start = getWorkDayRange(today, 7);
+      prevEnd = new Date(start);
       prevEnd.setDate(prevEnd.getDate() - 1);
-      prevStart.setMonth(today.getMonth() - 12);
+      prevEnd.setHours(23, 59, 59, 999);
+      prevStart = getWorkDayRange(prevEnd, 7);
+    } else if (periodo === '30d') {
+      workDays = 30;
+      start = getWorkDayRange(today, 30);
+      prevEnd = new Date(start);
+      prevEnd.setDate(prevEnd.getDate() - 1);
+      prevEnd.setHours(23, 59, 59, 999);
+      prevStart = getWorkDayRange(prevEnd, 30);
+    } else if (periodo === '90d') {
+      workDays = 90;
+      start = getWorkDayRange(today, 90);
+      prevEnd = new Date(start);
+      prevEnd.setDate(prevEnd.getDate() - 1);
+      prevEnd.setHours(23, 59, 59, 999);
+      prevStart = getWorkDayRange(prevEnd, 90);
+    } else if (periodo === '6m') {
+      workDays = 130;
+      start = getWorkDayRange(today, 130);
+      prevEnd = new Date(start);
+      prevEnd.setDate(prevEnd.getDate() - 1);
+      prevEnd.setHours(23, 59, 59, 999);
+      prevStart = getWorkDayRange(prevEnd, 130);
     } else if (periodo === 'ano') {
-      // Ano corrente (01/01/YYYY até hoje) vs mesmo intervalo no ano anterior (01/01/(YYYY-1) até mesma data)
       const currentYear = today.getFullYear();
       start = new Date(currentYear, 0, 1, 0, 0, 0);
+      end = new Date(today);
+      end.setHours(23, 59, 59, 999);
+      workDays = Math.max(1, countClinicWorkDays(start, end));
       prevStart = new Date(currentYear - 1, 0, 1, 0, 0, 0);
       prevEnd = new Date(currentYear - 1, today.getMonth(), today.getDate(), 23, 59, 59, 999);
     } else if (periodo === 'custom') {
       if (customStart) start = new Date(customStart + 'T00:00:00');
       if (customEnd) end = new Date(customEnd + 'T23:59:59');
 
-      const diffMs = end - start;
-      const days = Math.max(1, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
-      prevEnd = new Date(start.getTime() - 1);
-      prevStart = new Date(start.getTime() - days * 24 * 60 * 60 * 1000);
+      workDays = Math.max(1, countClinicWorkDays(start, end));
+      prevEnd = new Date(start);
+      prevEnd.setDate(prevEnd.getDate() - 1);
+      prevEnd.setHours(23, 59, 59, 999);
+      prevStart = getWorkDayRange(prevEnd, workDays);
     }
-
-    const diffMs = end - start;
-    const days = Math.max(1, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
 
     return {
       startDateStr: fmtBRT(start),
       endDateStr: fmtBRT(end),
       prevStartDateStr: fmtBRT(prevStart),
       prevEndDateStr: fmtBRT(prevEnd),
-      daysCount: days,
+      daysCount: workDays,
     };
   }, [periodo, customStart, customEnd]);
 
