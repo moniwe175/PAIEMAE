@@ -6,7 +6,8 @@ import {
   Clock, User, Scissors, AlertCircle, Calendar, UserPlus,
   Trash2, Edit3, Phone, DollarSign, TrendingUp,
   CalendarCheck, Grid, List, CheckSquare, X,
-  Ban, Coffee, UtensilsCrossed, Lock, AlertTriangle, Repeat2, FileText, Tablet
+  Ban, Coffee, UtensilsCrossed, Lock, AlertTriangle, Repeat2, FileText, Tablet,
+  UserX, Timer
 } from 'lucide-react';
 import { useProfissionais } from '../lib/profissionais';
 import { useServicos } from '../lib/servicos';
@@ -84,9 +85,11 @@ for (let h = HOUR_START; h <= HOUR_END; h++) {
 const STATUS_CONFIG = {
   aguardando_confirmacao: { label: 'Aguardando Confirmação', bg: '#FDF2E9', color: '#E67E22', dot: '#E67E22', border: '#F5CBA7' },
   confirmado: { label: 'Confirmado', bg: '#EAFAF1', color: '#27AE60', dot: '#27AE60', border: '#ABEBC6' },
-  cliente_faltou: { label: 'Cliente Faltou', bg: '#F2F3F4', color: '#7F8C8D', dot: '#95A5A6', border: '#D5DBDB' },
   em_atendimento: { label: 'Em Atendimento', bg: '#E5FAF6', color: '#46D6BF', dot: '#46D6BF', border: '#A8E8DA' },
   finalizado: { label: 'Finalizado', bg: '#EBF5FB', color: '#3498DB', dot: '#3498DB', border: '#AED6F1' },
+  falta: { label: 'Falta / Não Compareceu', bg: '#FEE2E2', color: '#DC2626', dot: '#DC2626', border: '#FCA5A5' },
+  cliente_faltou: { label: 'Cliente Faltou', bg: '#FEE2E2', color: '#DC2626', dot: '#DC2626', border: '#FCA5A5' },
+  cancelado: { label: 'Cancelado', bg: '#F3F4F6', color: '#6B7280', dot: '#6B7280', border: '#D1D5DB' },
 };
 
 // ─── Bloqueios config ─────────────────────────────────────────
@@ -1096,6 +1099,214 @@ function AgendamentoModal({ onClose, date, profissional: prefillProf, hora: pref
 }
 
 // ═══════════════════════════════════════════════════════════════
+// ─── AgendaKpiPanel (Painel Superior de Indicadores) ──────────
+// ═══════════════════════════════════════════════════════════════
+function AgendaKpiPanel({ agendamentos, selectedDate, profissionais, kpiPeriod, setKpiPeriod }) {
+  const stats = useMemo(() => {
+    const activeProfCount = Math.max(1, (profissionais || []).filter(p => p.ativo !== false).length);
+    const slotsPerHour = HOUR_END - HOUR_START; // 13 horários por profissional
+
+    let aptsInPeriod = [];
+    let totalSlots = 0;
+    let periodLabel = '';
+
+    if (kpiPeriod === 'dia') {
+      const dateStr = fmtDate(selectedDate);
+      aptsInPeriod = agendamentos.filter(a => a.data === dateStr);
+      totalSlots = slotsPerHour * activeProfCount;
+      periodLabel = 'Hoje / Dia Selecionado';
+    } else if (kpiPeriod === 'semana') {
+      const dt = new Date(selectedDate);
+      const day = dt.getDay();
+      const diffToMonday = day === 0 ? -6 : 1 - day;
+      const monday = new Date(dt);
+      monday.setDate(dt.getDate() + diffToMonday);
+
+      const weekDates = [];
+      for (let i = 0; i < 6; i++) {
+        const d = new Date(monday);
+        d.setDate(monday.getDate() + i);
+        weekDates.push(fmtDate(d));
+      }
+      aptsInPeriod = agendamentos.filter(a => weekDates.includes(a.data));
+      totalSlots = slotsPerHour * activeProfCount * 6; // 6 dias úteis
+      periodLabel = 'Esta Semana';
+    } else {
+      // Mês
+      const y = selectedDate.getFullYear();
+      const m = String(selectedDate.getMonth() + 1).padStart(2, '0');
+      const ym = `${y}-${m}`;
+      aptsInPeriod = agendamentos.filter(a => a.data && a.data.startsWith(ym));
+      totalSlots = slotsPerHour * activeProfCount * 26; // ~26 dias úteis
+      periodLabel = 'Este Mês';
+    }
+
+    const totalApts = aptsInPeriod.length;
+    const preenchidos = aptsInPeriod.filter(a => a.status !== 'cancelado').length;
+    const taxaOcupacao = totalSlots > 0 ? Math.min(100, Math.round((preenchidos / totalSlots) * 100)) : 0;
+
+    const faltas = aptsInPeriod.filter(a => a.status === 'falta' || a.status === 'cliente_faltou').length;
+    const noShowRate = totalApts > 0 ? Math.round((faltas / totalApts) * 100) : 0;
+
+    const cancelados = aptsInPeriod.filter(a => a.status === 'cancelado').length;
+    const cancelRate = totalApts > 0 ? Math.round((cancelados / totalApts) * 100) : 0;
+
+    const duracoes = aptsInPeriod.map(a => {
+      if (a.duracao && Number(a.duracao) > 0) return Number(a.duracao);
+      if (a.hora && a.horaFim) {
+        const diff = timeToMinutes(a.horaFim) - timeToMinutes(a.hora);
+        if (diff > 0) return diff;
+      }
+      return 60;
+    });
+    const tempoMedioMin = duracoes.length > 0
+      ? Math.round(duracoes.reduce((acc, d) => acc + d, 0) / duracoes.length)
+      : 0;
+
+    let tempoMedioStr = '—';
+    if (tempoMedioMin > 0) {
+      if (tempoMedioMin >= 60) {
+        const h = Math.floor(tempoMedioMin / 60);
+        const min = tempoMedioMin % 60;
+        tempoMedioStr = min > 0 ? `${h}h ${min}m` : `${h}h`;
+      } else {
+        tempoMedioStr = `${tempoMedioMin} min`;
+      }
+    }
+
+    return {
+      taxaOcupacao,
+      preenchidos,
+      totalSlots,
+      noShowRate,
+      faltas,
+      totalApts,
+      cancelRate,
+      cancelados,
+      tempoMedioStr,
+      tempoMedioMin,
+      periodLabel
+    };
+  }, [agendamentos, selectedDate, profissionais, kpiPeriod]);
+
+  return (
+    <div style={{
+      background: '#fff',
+      borderRadius: 16,
+      border: '1px solid #F0EBE6',
+      padding: '12px 16px',
+      marginBottom: 12,
+      boxShadow: '0 1px 4px rgba(0,0,0,0.03)',
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 10
+    }}>
+      {/* Header com Switcher de Período */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <TrendingUp style={{ width: 14, height: 14, color: '#C73B6D' }} />
+          <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.5, color: '#4B5563', textTransform: 'uppercase' }}>
+            Indicadores de Desempenho da Agenda ({stats.periodLabel})
+          </span>
+        </div>
+
+        <div style={{ display: 'flex', background: '#F3F4F6', borderRadius: 8, padding: 2, gap: 2 }}>
+          {[
+            { k: 'dia', l: 'Dia' },
+            { k: 'semana', l: 'Semana' },
+            { k: 'mes', l: 'Mês' }
+          ].map(p => (
+            <button
+              key={p.k}
+              type="button"
+              onClick={() => setKpiPeriod(p.k)}
+              style={{
+                border: 'none',
+                background: kpiPeriod === p.k ? '#fff' : 'transparent',
+                color: kpiPeriod === p.k ? '#1F2937' : '#6B7280',
+                fontWeight: kpiPeriod === p.k ? 700 : 500,
+                fontSize: 11,
+                padding: '3px 12px',
+                borderRadius: 6,
+                cursor: 'pointer',
+                boxShadow: kpiPeriod === p.k ? '0 1px 3px rgba(0,0,0,0.08)' : 'none',
+                transition: 'all 0.12s'
+              }}
+            >
+              {p.l}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Cards 4 Grid */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10 }}>
+        {/* 1. Taxa de Ocupação */}
+        <div style={{ background: '#F0FDF4', border: '1px solid #DCFCE7', borderRadius: 12, padding: '10px 14px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+            <span style={{ fontSize: 11, fontWeight: 600, color: '#166534' }}>Taxa de Ocupação</span>
+            <CalendarCheck style={{ width: 14, height: 14, color: '#16A34A' }} />
+          </div>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+            <span style={{ fontSize: 20, fontWeight: 800, color: '#15803D' }}>{stats.taxaOcupacao}%</span>
+            <span style={{ fontSize: 10, color: '#166534' }}>({stats.preenchidos}/{stats.totalSlots} horários)</span>
+          </div>
+          <div style={{ width: '100%', height: 4, background: '#BBF7D0', borderRadius: 99, marginTop: 6, overflow: 'hidden' }}>
+            <div style={{ width: `${stats.taxaOcupacao}%`, height: '100%', background: '#16A34A', borderRadius: 99, transition: 'width 0.4s ease' }} />
+          </div>
+        </div>
+
+        {/* 2. No-show Rate */}
+        <div style={{ background: '#FEF2F2', border: '1px solid #FEE2E2', borderRadius: 12, padding: '10px 14px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+            <span style={{ fontSize: 11, fontWeight: 600, color: '#991B1B' }}>No-show Rate (Faltas)</span>
+            <UserX style={{ width: 14, height: 14, color: '#DC2626' }} />
+          </div>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+            <span style={{ fontSize: 20, fontWeight: 800, color: stats.noShowRate > 15 ? '#DC2626' : '#991B1B' }}>
+              {stats.noShowRate}%
+            </span>
+            <span style={{ fontSize: 10, color: '#991B1B' }}>({stats.faltas} de {stats.totalApts} agendados)</span>
+          </div>
+          <div style={{ fontSize: 10, color: '#B91C1C', marginTop: 4, fontWeight: 500 }}>
+            {stats.faltas === 0 ? '✓ Nenhuma falta registrada' : `${stats.faltas} cliente(s) não compareceram`}
+          </div>
+        </div>
+
+        {/* 3. Taxa de Cancelamento */}
+        <div style={{ background: '#FFFBEB', border: '1px solid #FEF3C7', borderRadius: 12, padding: '10px 14px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+            <span style={{ fontSize: 11, fontWeight: 600, color: '#92400E' }}>Taxa de Cancelamento</span>
+            <XCircle style={{ width: 14, height: 14, color: '#D97706' }} />
+          </div>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+            <span style={{ fontSize: 20, fontWeight: 800, color: '#B45309' }}>{stats.cancelRate}%</span>
+            <span style={{ fontSize: 10, color: '#92400E' }}>({stats.cancelados} cancelamento(s))</span>
+          </div>
+          <div style={{ fontSize: 10, color: '#B45309', marginTop: 4, fontWeight: 500 }}>
+            {stats.cancelados === 0 ? '✓ Sem cancelamentos no período' : `${stats.cancelados} cancelamento(s)`}
+          </div>
+        </div>
+
+        {/* 4. Tempo Médio de Atendimento */}
+        <div style={{ background: '#EFF6FF', border: '1px solid #DBEAFE', borderRadius: 12, padding: '10px 14px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+            <span style={{ fontSize: 11, fontWeight: 600, color: '#1E40AF' }}>Tempo Médio Atendimento</span>
+            <Clock style={{ width: 14, height: 14, color: '#2563EB' }} />
+          </div>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+            <span style={{ fontSize: 20, fontWeight: 800, color: '#1D4ED8' }}>{stats.tempoMedioStr}</span>
+          </div>
+          <div style={{ fontSize: 10, color: '#3B82F6', marginTop: 4, fontWeight: 500 }}>
+            duração média dos procedimentos
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
 // ─── DayStats ─────────────────────────────────────────────────
 // ═══════════════════════════════════════════════════════════════
 function DayStats({ agendamentos, date }) {
@@ -1107,7 +1318,8 @@ function DayStats({ agendamentos, date }) {
   const pend = apts.filter(a => a.status === 'aguardando_confirmacao').length;
   const atend = apts.filter(a => a.status === 'em_atendimento').length;
   const finalizado = apts.filter(a => a.status === 'finalizado').length;
-  const faltou = apts.filter(a => a.status === 'cliente_faltou').length;
+  const faltou = apts.filter(a => a.status === 'falta' || a.status === 'cliente_faltou').length;
+  const cancelado = apts.filter(a => a.status === 'cancelado').length;
 
   const getPct = (val) => total > 0 ? Math.round((val / total) * 100) : 0;
 
@@ -1116,13 +1328,15 @@ function DayStats({ agendamentos, date }) {
   const atendPct = getPct(atend);
   const finalizadoPct = getPct(finalizado);
   const faltouPct = getPct(faltou);
+  const canceladoPct = getPct(cancelado);
 
   const items = [
     { label: 'Confirmados', value: conf, pct: confPct, icon: CheckSquare, color: '#27AE60', bg: '#EAFAF1' },
     { label: 'Aguardando', value: pend, pct: pendPct, icon: Clock, color: '#E67E22', bg: '#FDF2E9' },
     { label: 'Em Atendimento', value: atend, pct: atendPct, icon: Scissors, color: '#46D6BF', bg: '#E5FAF6' },
     { label: 'Finalizado', value: finalizado, pct: finalizadoPct, icon: CheckCircle, color: '#3498DB', bg: '#EBF5FB' },
-    { label: 'Cliente Faltou', value: faltou, pct: faltouPct, icon: XCircle, color: '#7F8C8D', bg: '#F2F3F4' },
+    { label: 'Falta / Não Compareceu', value: faltou, pct: faltouPct, icon: UserX, color: '#DC2626', bg: '#FEE2E2' },
+    { label: 'Cancelado', value: cancelado, pct: canceladoPct, icon: XCircle, color: '#6B7280', bg: '#F3F4F6' },
   ];
 
   return (
@@ -1147,12 +1361,13 @@ function DayStats({ agendamentos, date }) {
           <div style={{ width: `${pendPct}%`, background: '#E67E22', transition: 'width 0.3s ease' }} title={`Aguardando: ${pendPct}%`} />
           <div style={{ width: `${atendPct}%`, background: '#46D6BF', transition: 'width 0.3s ease' }} title={`Em Atendimento: ${atendPct}%`} />
           <div style={{ width: `${finalizadoPct}%`, background: '#3498DB', transition: 'width 0.3s ease' }} title={`Finalizado: ${finalizadoPct}%`} />
-          <div style={{ width: `${faltouPct}%`, background: '#7F8C8D', transition: 'width 0.3s ease' }} title={`Cliente Faltou: ${faltouPct}%`} />
+          <div style={{ width: `${faltouPct}%`, background: '#DC2626', transition: 'width 0.3s ease' }} title={`Faltas: ${faltouPct}%`} />
+          <div style={{ width: `${canceladoPct}%`, background: '#9CA3AF', transition: 'width 0.3s ease' }} title={`Cancelados: ${canceladoPct}%`} />
         </div>
       )}
 
       {/* Rows */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
         {items.map((item) => {
           const Icon = item.icon;
           return (
@@ -1272,6 +1487,7 @@ export default function Agenda() {
   const [agendamentos, setAgendamentos] = useState([]);
   const [bloqueios, setBloqueios] = useState([]);
   const [viewMode, setViewMode] = useState('day');
+  const [kpiPeriod, setKpiPeriod] = useState('dia'); // 'dia' | 'semana' | 'mes'
 
   // Modals
   const [formModal, setFormModal] = useState({ open: false, apt: null, prefillProf: '', prefillHora: '' });
@@ -1614,6 +1830,15 @@ export default function Agenda() {
           )}
         </div>
       </div>
+
+      {/* Indicadores de Desempenho no Topo da Agenda */}
+      <AgendaKpiPanel
+        agendamentos={agendamentos}
+        selectedDate={selectedDate}
+        profissionais={profissionais}
+        kpiPeriod={kpiPeriod}
+        setKpiPeriod={setKpiPeriod}
+      />
 
       {/* Main Layout */}
       <div style={{ display: 'flex', gap: 12, flex: 1, minHeight: 0 }}>
