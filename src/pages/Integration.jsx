@@ -207,8 +207,8 @@ export default function Integration() {
     return () => clearInterval(t);
   }, []);
 
-  // Se o worker não atualiza updated_at há 2 min, a janela verde fechou:
-  // trata como desconectado (badge vermelho) mesmo com status antigo 'connected'.
+  // Se o worker na VPS não atualiza updated_at há 2 min, trata como
+  // desconectado (badge vermelho) mesmo com status antigo 'connected'.
   const WA_HEARTBEAT_STALE_MS = 2 * 60 * 1000;
   const waHeartbeatStale =
     !!waStatus?.updated_at &&
@@ -915,15 +915,15 @@ export default function Integration() {
                     </p>
                     <div style={{ background: '#f8f9fa', padding: '12px 16px', borderRadius: 6, border: '1px solid #e2e8f0', marginBottom: 10 }}>
                       <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-dark)', margin: '0 0 6px' }}>
-                        Para conectar: abra o terminal no computador da clínica, entre na pasta worker_whatsapp e execute: npm start
+                        Aguardando o serviço de WhatsApp iniciar na VPS.
                       </p>
                     </div>
                     <p style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.5, margin: 0 }}>
-                      Após iniciar o worker, o QR Code aparecerá aqui automaticamente.
+                      Assim que a Evolution API estiver disponível, o QR Code aparecerá aqui automaticamente.
                     </p>
                     {waStatus?.updated_at && (
                       <p style={{ fontSize: 12, color: 'var(--danger)', lineHeight: 1.5, margin: '10px 0 0' }}>
-                        Último sinal do worker: {new Date(waStatus.updated_at).toLocaleString('pt-BR')}. Se a janela verde estiver aberta na clínica, aguarde alguns segundos.
+                        Último sinal da VPS: {new Date(waStatus.updated_at).toLocaleString('pt-BR')}. Se persistir, verifique os contêineres da Evolution API.
                       </p>
                     )}
                   </div>
@@ -985,7 +985,7 @@ export default function Integration() {
                       Número ativo: {waStatus.phone_number}
                     </p>
                     <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: 0 }}>
-                      Conexão estável. O worker está rodando no computador da clínica.
+                      Conexão estável. A Evolution API e o worker estão ativos na VPS.
                     </p>
                   </div>
                 )}
@@ -1002,7 +1002,7 @@ export default function Integration() {
                       </div>
                     )}
                     <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: 0 }}>
-                      Reinicie o worker para tentar novamente.
+                      Verifique ou reinicie os serviços da Evolution API na VPS.
                     </p>
                   </div>
                 )}

@@ -261,14 +261,14 @@ ON CONFLICT (tool_id) DO NOTHING;
 -- =============================================================================
 -- 7. NOVA TABELA: marketing_queue
 --    Fila unificada de mensagens.
---    Python insere → Baileys (Node.js) lê e envia.
+--    Motor insere → worker da Evolution API lê e envia.
 -- =============================================================================
 --
 -- STATUS:
 --   pending   → Grupo B aguardando aprovação da recepcionista no React
---   approved  → pronto para o Baileys enviar
+--   approved  → pronto para o worker enviar
 --   sent      → enviado com sucesso
---   failed    → falha no envio (Baileys registra o erro)
+--   failed    → falha no envio (worker registra o erro)
 --   cancelled → descartado manualmente ou por opt-out
 --   expired   → janela de tempo crítica passou (ex: alerta 15min)
 
@@ -276,7 +276,7 @@ CREATE TABLE IF NOT EXISTS public.marketing_queue (
     id              uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
 
     -- Cliente destinatário
-    -- Desnormalizado para que o Baileys não precise fazer JOIN extra
+    -- Desnormalizado para que o worker não precise fazer JOIN extra
     client_id       integer     REFERENCES public.clients(id) ON DELETE CASCADE,
     client_name     text        NOT NULL,
     client_phone    text        NOT NULL,
@@ -293,12 +293,12 @@ CREATE TABLE IF NOT EXISTS public.marketing_queue (
     status          text        NOT NULL DEFAULT 'pending'
                     CHECK (status IN ('pending','approved','sent','failed','cancelled','expired')),
 
-    -- scheduled_at: quando o Baileys deve enviar esta mensagem.
-    --   Regra da Retenção: ao ligar de manhã, Baileys busca approved WHERE scheduled_at <= now()
+    -- scheduled_at: quando o worker deve enviar esta mensagem.
+    --   Regra da Retenção: worker busca approved WHERE scheduled_at <= now()
     scheduled_at    timestamptz NOT NULL DEFAULT now(),
 
     -- expires_at: deadline para gatilhos críticos (NULL = sem vencimento).
-    --   Regra de Vencimento: se now() > expires_at e status = 'approved', Baileys muda para 'expired'
+    --   Regra de Vencimento: se now() > expires_at e status = 'approved', worker muda para 'expired'
     expires_at      timestamptz DEFAULT NULL,
 
     -- Rastreabilidade
@@ -322,7 +322,7 @@ CREATE TRIGGER trg_queue_updated_at
     BEFORE UPDATE ON public.marketing_queue
     FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 
--- Índices críticos para a performance do Baileys e do Python
+-- Índices críticos para a performance do worker e do motor
 CREATE INDEX IF NOT EXISTS idx_queue_status_scheduled
     ON public.marketing_queue (status, scheduled_at);
 
@@ -333,11 +333,11 @@ CREATE INDEX IF NOT EXISTS idx_queue_tool
     ON public.marketing_queue (tool_id);
 
 COMMENT ON TABLE  public.marketing_queue IS
-    'Fila unificada de mensagens. Python insere, Baileys lê e envia.';
+    'Fila unificada de mensagens. Motor insere, worker da Evolution API lê e envia.';
 COMMENT ON COLUMN public.marketing_queue.expires_at IS
-    'Regra de Vencimento: se now() > expires_at e status = approved, Baileys muda para expired.';
+    'Regra de Vencimento: se now() > expires_at e status = approved, worker muda para expired.';
 COMMENT ON COLUMN public.marketing_queue.scheduled_at IS
-    'Regra de Retenção: ao ligar de manhã, Baileys busca approved WHERE scheduled_at <= now().';
+    'Regra de Retenção: worker busca approved WHERE scheduled_at <= now().';
 
 -- RLS
 ALTER TABLE public.marketing_queue ENABLE ROW LEVEL SECURITY;
@@ -350,7 +350,7 @@ CREATE POLICY "auth_update_queue" ON public.marketing_queue
 
 -- =============================================================================
 -- 8. NOVA TABELA: whatsapp_connection_status
---    Baileys escreve aqui. React lê via Supabase Realtime.
+--    Worker da Evolution API escreve aqui. React lê via Supabase Realtime.
 --    Elimina o QR Code no terminal — aparece direto na aba Integrações.
 --    Sempre terá apenas 1 linha (id = 1).
 -- =============================================================================
@@ -372,9 +372,9 @@ VALUES (1, 'disconnected')
 ON CONFLICT (id) DO NOTHING;
 
 COMMENT ON TABLE public.whatsapp_connection_status IS
-    'Status da conexão Baileys. React escuta via Realtime e renderiza QR Code na aba Integrações.';
+    'Status da Evolution API. React escuta via Realtime e renderiza QR Code na aba Integrações.';
 
--- RLS: autenticados leem; service_role (Baileys) tem acesso total (bypass RLS)
+-- RLS: autenticados leem; segredo do worker tem acesso de backend (bypass RLS)
 ALTER TABLE public.whatsapp_connection_status ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "auth_read_wa_status" ON public.whatsapp_connection_status

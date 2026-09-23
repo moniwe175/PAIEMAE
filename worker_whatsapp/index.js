@@ -1,223 +1,365 @@
+/* global process */
+
 import dotenv from 'dotenv';
 import { createClient } from '@supabase/supabase-js';
-import makeWASocket, { useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, makeCacheableSignalKeyStore } from '@whiskeysockets/baileys';
-import pino from 'pino';
-import qrcode from 'qrcode';
+import { pathToFileURL } from 'node:url';
 
 dotenv.config();
 
-const SUPABASE_URL = process.env.SUPABASE_URL;
-const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_KEY;
-const AUTH_FOLDER = process.env.AUTH_FOLDER || './sessao_whatsapp';
-const POLL_INTERVAL_MS = parseInt(process.env.POLL_INTERVAL_MS || '30000', 10);
-const MAX_EXPIRY_LAG_MS = parseInt(process.env.MAX_EXPIRY_LAG_MS || '3600000', 10);
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
-  console.error('[Worker WhatsApp] ERRO: SUPABASE_URL e SUPABASE_SERVICE_KEY devem estar configurados no .env');
-  process.exit(1);
+export function normalizePhone(phone) {
+  if (!phone) return null;
+
+  let clean = String(phone).replace(/\D/g, '');
+  if (!clean) return null;
+
+  if (!clean.startsWith('55') && (clean.length === 10 || clean.length === 11)) {
+    clean = `55${clean}`;
+  }
+
+  return clean.length >= 12 ? clean : null;
 }
 
-const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
-const logger = pino({ level: 'silent' });
+export function extractQrCode(payload) {
+  return payload?.qrcode?.base64 || payload?.qrCode?.base64 || payload?.base64 || null;
+}
 
-let sock = null;
-let isConnected = false;
-let lastStatus = null; // último status publicado (usado pelo heartbeat)
+export function mapEvolutionState(state) {
+  if (state === 'open') return 'connected';
+  if (state === 'connecting') return 'connecting';
+  if (state === 'close' || state === 'refused') return 'disconnected';
+  return 'disconnected';
+}
 
-async function setWAStatus(status, extra = {}) {
-  try {
-    lastStatus = status;
+function errorText(error) {
+  const text = error instanceof Error ? error.message : String(error);
+  return text.slice(0, 500);
+}
+
+function getInstanceList(payload) {
+  if (Array.isArray(payload)) return payload;
+  if (Array.isArray(payload?.instances)) return payload.instances;
+  return [];
+}
+
+function phoneFromInstance(instance) {
+  const jid = instance?.ownerJid || instance?.owner || instance?.number;
+  if (!jid) return null;
+  return String(jid).split('@')[0].split(':')[0].replace(/\D/g, '') || null;
+}
+
+class EvolutionWorker {
+  constructor({ supabase, evolutionUrl, evolutionApiKey, instanceName, pollIntervalMs, connectionPollIntervalMs, maxExpiryLagMs, requestTimeoutMs }) {
+    this.supabase = supabase;
+    this.evolutionUrl = evolutionUrl.replace(/\/$/, '');
+    this.evolutionApiKey = evolutionApiKey;
+    this.instanceName = instanceName;
+    this.pollIntervalMs = pollIntervalMs;
+    this.connectionPollIntervalMs = connectionPollIntervalMs;
+    this.maxExpiryLagMs = maxExpiryLagMs;
+    this.requestTimeoutMs = requestTimeoutMs;
+    this.isConnected = false;
+    this.phoneNumber = null;
+    this.queueBusy = false;
+    this.connectionBusy = false;
+  }
+
+  async evolutionRequest(path, options = {}) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.requestTimeoutMs);
+
+    try {
+      const response = await fetch(`${this.evolutionUrl}${path}`, {
+        ...options,
+        signal: controller.signal,
+        headers: {
+          apikey: this.evolutionApiKey,
+          'Content-Type': 'application/json',
+          ...(options.headers || {}),
+        },
+      });
+
+      const raw = await response.text();
+      let payload = null;
+      if (raw) {
+        try {
+          payload = JSON.parse(raw);
+        } catch {
+          payload = raw;
+        }
+      }
+
+      if (!response.ok) {
+        const detail = typeof payload === 'string' ? payload : JSON.stringify(payload);
+        throw new Error(`Evolution API ${response.status}: ${detail || response.statusText}`);
+      }
+
+      return payload;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  async setWAStatus(status, extra = {}) {
     const payload = {
       id: 1,
       status,
+      qr_code_base64: extra.qr_code_base64 ?? null,
+      phone_number: extra.phone_number ?? (status === 'connected' ? this.phoneNumber : null),
+      error_message: extra.error_message ?? null,
       updated_at: new Date().toISOString(),
-      ...extra
     };
-    const { error } = await supabase
+
+    const { error } = await this.supabase
       .from('whatsapp_connection_status')
       .upsert(payload);
 
     if (error) {
-      console.warn('[Worker WhatsApp] Erro ao salvar status no Supabase:', error.message);
-    } else {
-      console.log(`[Worker WhatsApp] Status publicado no Supabase: ${status}`);
+      throw new Error(`Falha ao publicar status no Supabase: ${error.message}`);
     }
-  } catch (err) {
-    console.warn('[Worker WhatsApp] Exceção ao atualizar status no Supabase:', err.message);
   }
-}
 
-async function connectToWhatsApp() {
-  const { state, saveCreds } = await useMultiFileAuthState(AUTH_FOLDER);
-  const versionInfo = await fetchLatestBaileysVersion().catch(() => ({ version: undefined }));
+  async fetchInstances() {
+    const query = new URLSearchParams({ instanceName: this.instanceName });
+    const payload = await this.evolutionRequest(`/instance/fetchInstances?${query}`);
+    return getInstanceList(payload);
+  }
 
-  sock = makeWASocket({
-    version: versionInfo?.version,
-    logger,
-    auth: {
-      creds: state.creds,
-      keys: makeCacheableSignalKeyStore(state.keys, logger),
-    },
-    printQRInTerminal: true,
-    browser: ['EvelynEstheticCenter', 'Chrome', '1.0.0'],
-  });
+  async ensureInstance() {
+    const instances = await this.fetchInstances();
+    const existing = instances.find((item) =>
+      item?.name === this.instanceName ||
+      item?.instanceName === this.instanceName ||
+      item?.instance?.instanceName === this.instanceName
+    );
 
-  sock.ev.on('creds.update', saveCreds);
+    if (existing) {
+      console.log(`[Worker Evolution] Instância "${this.instanceName}" encontrada.`);
+      return existing;
+    }
 
-  sock.ev.on('connection.update', async (update) => {
-    const { connection, lastDisconnect, qr } = update;
+    console.log(`[Worker Evolution] Criando instância "${this.instanceName}"...`);
+    const created = await this.evolutionRequest('/instance/create', {
+      method: 'POST',
+      body: JSON.stringify({
+        instanceName: this.instanceName,
+        integration: 'WHATSAPP-BAILEYS',
+        qrcode: true,
+        rejectCall: false,
+        groupsIgnore: true,
+        alwaysOnline: false,
+        readMessages: false,
+        readStatus: false,
+        syncFullHistory: false,
+      }),
+    });
 
+    const qr = extractQrCode(created);
     if (qr) {
-      console.log('[Worker WhatsApp] Novo QR Code gerado.');
+      await this.setWAStatus('qr_ready', { qr_code_base64: qr });
+    }
+
+    return created;
+  }
+
+  async waitForEvolution() {
+    let attempt = 0;
+
+    while (true) {
+      attempt += 1;
       try {
-        const qrBase64 = await qrcode.toDataURL(qr);
-        await setWAStatus('qr_ready', { qr_code_base64: qrBase64, error_message: null });
-        console.log('[Worker WhatsApp] QR Code (Base64) enviado com sucesso para o Supabase.');
-      } catch (qrErr) {
-        console.error('[Worker WhatsApp] Erro ao converter QR para Base64:', qrErr.message);
+        await this.fetchInstances();
+        console.log('[Worker Evolution] Evolution API pronta.');
+        return;
+      } catch (error) {
+        if (attempt === 1 || attempt % 6 === 0) {
+          console.warn(`[Worker Evolution] Aguardando Evolution API: ${errorText(error)}`);
+        }
+        await sleep(5000);
       }
     }
+  }
 
-    if (connection === 'connecting') {
-      await setWAStatus('connecting');
-    }
+  async syncConnection() {
+    if (this.connectionBusy) return;
+    this.connectionBusy = true;
 
-    if (connection === 'close') {
-      isConnected = false;
-      const code = lastDisconnect?.error?.output?.statusCode;
-      const shouldReconnect = (code !== DisconnectReason.loggedOut);
-      console.log(`[Worker WhatsApp] Conexão fechada. Motivo: ${lastDisconnect?.error?.message}. Reconectando: ${shouldReconnect}`);
-      await setWAStatus('disconnected', {
-        qr_code_base64: null,
-        error_message: lastDisconnect?.error?.message || null
-      });
+    try {
+      const statePayload = await this.evolutionRequest(`/instance/connectionState/${encodeURIComponent(this.instanceName)}`);
+      const state = statePayload?.instance?.state || statePayload?.state;
 
-      if (shouldReconnect) {
-        setTimeout(connectToWhatsApp, 5000);
+      if (state === 'open') {
+        const instances = await this.fetchInstances();
+        const instance = instances.find((item) =>
+          item?.name === this.instanceName || item?.instanceName === this.instanceName
+        ) || instances[0];
+
+        this.phoneNumber = phoneFromInstance(instance) || this.phoneNumber;
+        this.isConnected = true;
+        await this.setWAStatus('connected', { phone_number: this.phoneNumber });
+        return;
       }
-    } else if (connection === 'open') {
-      isConnected = true;
-      const phone = sock.user?.id?.split(':')[0] || null;
-      console.log(`[Worker WhatsApp] Conectado ao WhatsApp com sucesso! Número: ${phone}`);
-      await setWAStatus('connected', {
-        qr_code_base64: null,
-        phone_number: phone,
-        error_message: null
-      });
+
+      this.isConnected = false;
+      const connectPayload = await this.evolutionRequest(`/instance/connect/${encodeURIComponent(this.instanceName)}`);
+      const qr = extractQrCode(connectPayload);
+
+      if (qr) {
+        await this.setWAStatus('qr_ready', { qr_code_base64: qr });
+      } else {
+        await this.setWAStatus(mapEvolutionState(state));
+      }
+    } catch (error) {
+      this.isConnected = false;
+      console.error('[Worker Evolution] Falha ao sincronizar conexão:', errorText(error));
+      try {
+        await this.setWAStatus('error', { error_message: errorText(error) });
+      } catch (statusError) {
+        console.error('[Worker Evolution] Falha ao publicar o erro:', errorText(statusError));
+      }
+    } finally {
+      this.connectionBusy = false;
     }
-  });
-}
-
-function formatJid(phone) {
-  if (!phone) return null;
-  let clean = String(phone).replace(/\D/g, '');
-  if (!clean.startsWith('55') && (clean.length === 10 || clean.length === 11)) {
-    clean = '55' + clean;
-  }
-  return `${clean}@s.whatsapp.net`;
-}
-
-async function processQueue() {
-  if (!isConnected || !sock) {
-    return;
   }
 
-  try {
-    const now = new Date();
-    const { data: queue, error } = await supabase
+  async updateQueueItem(id, values) {
+    const { error } = await this.supabase
       .from('marketing_queue')
-      .select('*')
-      .eq('status', 'approved')
-      .lte('scheduled_at', now.toISOString())
-      .order('scheduled_at', { ascending: true })
-      .limit(20);
+      .update({ ...values, updated_at: new Date().toISOString() })
+      .eq('id', id)
+      .eq('status', 'approved');
 
-    if (error) {
-      console.error('[Worker WhatsApp] Erro ao buscar fila:', error.message);
-      return;
-    }
+    if (error) throw new Error(error.message);
+  }
 
-    if (!queue || queue.length === 0) {
-      return;
-    }
+  async processQueue() {
+    if (!this.isConnected || this.queueBusy) return;
+    this.queueBusy = true;
 
-    console.log(`[Worker WhatsApp] Encontradas ${queue.length} mensagens para processar.`);
+    try {
+      const now = new Date();
+      const { data: queue, error } = await this.supabase
+        .from('marketing_queue')
+        .select('*')
+        .eq('status', 'approved')
+        .lte('scheduled_at', now.toISOString())
+        .order('scheduled_at', { ascending: true })
+        .limit(20);
 
-    for (const item of queue) {
-      const scheduledTime = new Date(item.scheduled_at).getTime();
-      const expiresTime = item.expires_at ? new Date(item.expires_at).getTime() : null;
-      const nowTime = Date.now();
+      if (error) throw new Error(error.message);
+      if (!queue?.length) return;
 
-      // Regra de Vencimento
-      if ((expiresTime && nowTime > expiresTime) || (nowTime - scheduledTime > MAX_EXPIRY_LAG_MS)) {
-        console.log(`[Worker WhatsApp] Mensagem ID ${item.id} expirada. Alterando status.`);
-        await supabase
-          .from('marketing_queue')
-          .update({ status: 'expired', updated_at: new Date().toISOString() })
-          .eq('id', item.id);
-        continue;
-      }
+      console.log(`[Worker Evolution] ${queue.length} mensagem(ns) pronta(s) para envio.`);
 
-      const jid = formatJid(item.client_phone);
-      if (!jid) {
-        console.warn(`[Worker WhatsApp] Telefone inválido para mensagem ID ${item.id}: ${item.client_phone}`);
-        await supabase
-          .from('marketing_queue')
-          .update({ status: 'failed', updated_at: new Date().toISOString() })
-          .eq('id', item.id);
-        continue;
-      }
+      for (const item of queue) {
+        const scheduledTime = new Date(item.scheduled_at).getTime();
+        const expiresTime = item.expires_at ? new Date(item.expires_at).getTime() : null;
+        const nowTime = Date.now();
 
-      try {
-        console.log(`[Worker WhatsApp] Enviando mensagem ID ${item.id} para ${item.client_name} (${item.client_phone})...`);
-        await sock.sendMessage(jid, { text: item.message_text });
+        if ((expiresTime && nowTime > expiresTime) || (nowTime - scheduledTime > this.maxExpiryLagMs)) {
+          await this.updateQueueItem(item.id, { status: 'expired' });
+          continue;
+        }
 
-        await supabase
-          .from('marketing_queue')
-          .update({
+        const number = normalizePhone(item.client_phone);
+        if (!number) {
+          await this.updateQueueItem(item.id, {
+            status: 'failed',
+            error_message: `Telefone inválido: ${item.client_phone || 'não informado'}`,
+          });
+          continue;
+        }
+
+        try {
+          await this.evolutionRequest(`/message/sendText/${encodeURIComponent(this.instanceName)}`, {
+            method: 'POST',
+            body: JSON.stringify({ number, text: item.message_text, delay: 500 }),
+          });
+
+          await this.updateQueueItem(item.id, {
             status: 'sent',
             sent_at: new Date().toISOString(),
-            updated_at: new Date().toISOString()
-          })
-          .eq('id', item.id);
-
-        console.log(`[Worker WhatsApp] Mensagem ID ${item.id} enviada com sucesso!`);
-      } catch (sendErr) {
-        console.error(`[Worker WhatsApp] Falha ao enviar mensagem ID ${item.id}:`, sendErr.message);
-        await supabase
-          .from('marketing_queue')
-          .update({
-            status: 'failed',
-            error_message: sendErr.message,
-            updated_at: new Date().toISOString()
-          })
-          .eq('id', item.id);
+            error_message: null,
+          });
+          console.log(`[Worker Evolution] Mensagem ${item.id} enviada para ${number}.`);
+        } catch (sendError) {
+          const message = errorText(sendError);
+          console.error(`[Worker Evolution] Falha na mensagem ${item.id}: ${message}`);
+          await this.updateQueueItem(item.id, { status: 'failed', error_message: message });
+        }
       }
+    } catch (error) {
+      console.error('[Worker Evolution] Erro ao processar a fila:', errorText(error));
+    } finally {
+      this.queueBusy = false;
     }
-  } catch (err) {
-    console.error('[Worker WhatsApp] Erro no processamento da fila:', err.message);
+  }
+
+  async start() {
+    console.log('[Worker Evolution] Iniciando integração PAIEMAE...');
+    await this.setWAStatus('connecting');
+    await this.waitForEvolution();
+    await this.ensureInstance();
+    await this.syncConnection();
+
+    setInterval(() => this.syncConnection(), this.connectionPollIntervalMs);
+    setInterval(() => this.processQueue(), this.pollIntervalMs);
+  }
+
+  async shutdown(signal) {
+    console.log(`[Worker Evolution] ${signal} recebido. Encerrando...`);
+    try {
+      await this.setWAStatus('disconnected');
+    } finally {
+      process.exit(0);
+    }
   }
 }
 
-async function start() {
-  console.log('[Worker WhatsApp] Iniciando serviço...');
-  await setWAStatus('connecting');
-  await connectToWhatsApp();
+export async function startFromEnvironment() {
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const supabaseKey = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_KEY;
+  const evolutionUrl = process.env.EVOLUTION_API_URL || 'http://evolution-api:8080';
+  const evolutionApiKey = process.env.EVOLUTION_API_KEY || process.env.AUTHENTICATION_API_KEY;
+  const instanceName = process.env.EVOLUTION_INSTANCE_NAME || 'paiemae';
 
-  setInterval(processQueue, POLL_INTERVAL_MS);
+  const missing = [
+    ['SUPABASE_URL', supabaseUrl],
+    ['SUPABASE_SECRET_KEY', supabaseKey],
+    ['EVOLUTION_API_KEY', evolutionApiKey],
+  ].filter(([, value]) => !value).map(([name]) => name);
 
-  // Heartbeat: sinal de vida a cada 30s. Se a janela verde fechar, o
-  // updated_at fica velho e o site passa a mostrar "Desconectado" (vermelho).
-  setInterval(() => { setWAStatus(lastStatus || (isConnected ? 'connected' : 'connecting')); }, 30000);
+  if (missing.length) {
+    throw new Error(`Variáveis obrigatórias ausentes: ${missing.join(', ')}`);
+  }
+
+  const supabase = createClient(supabaseUrl, supabaseKey, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+
+  const worker = new EvolutionWorker({
+    supabase,
+    evolutionUrl,
+    evolutionApiKey,
+    instanceName,
+    pollIntervalMs: Number.parseInt(process.env.POLL_INTERVAL_MS || '30000', 10),
+    connectionPollIntervalMs: Number.parseInt(process.env.CONNECTION_POLL_INTERVAL_MS || '15000', 10),
+    maxExpiryLagMs: Number.parseInt(process.env.MAX_EXPIRY_LAG_MS || '3600000', 10),
+    requestTimeoutMs: Number.parseInt(process.env.EVOLUTION_REQUEST_TIMEOUT_MS || '15000', 10),
+  });
+
+  process.on('SIGINT', () => worker.shutdown('SIGINT'));
+  process.on('SIGTERM', () => worker.shutdown('SIGTERM'));
+
+  await worker.start();
+  return worker;
 }
 
-// Ctrl+C publica disconnected antes de sair.
-// Fechar no X da janela não dispara sinal — o heartbeat cobre esse caso.
-function gracefulShutdown(sig) {
-  console.log(`[Worker WhatsApp] ${sig} recebido — publicando status disconnected...`);
-  setWAStatus('disconnected').finally(() => process.exit(0));
+const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+if (isMain) {
+  startFromEnvironment().catch((error) => {
+    console.error('[Worker Evolution] Falha fatal:', errorText(error));
+    process.exit(1);
+  });
 }
-process.on('SIGINT', () => gracefulShutdown('SIGINT'));
-process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
-
-start();

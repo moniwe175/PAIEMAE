@@ -1,0 +1,153 @@
+name: paiemae-whatsapp
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: paiemae_evolution_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DATABASE}
+      POSTGRES_USER: ${POSTGRES_USERNAME}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      TZ: ${TZ:-America/Sao_Paulo}
+    command:
+      - postgres
+      - -c
+      - max_connections=50
+      - -c
+      - shared_buffers=64MB
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - evolution_internal
+
+  redis:
+    image: redis:7-alpine
+    container_name: paiemae_evolution_redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - redis_data:/data
+    networks:
+      - evolution_internal
+
+  evolution-api:
+    image: evoapicloud/evolution-api:v2.3.7
+    container_name: paiemae_evolution_api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      SERVER_NAME: paiemae-evolution
+      SERVER_TYPE: http
+      SERVER_PORT: 8080
+      SERVER_URL: http://127.0.0.1:8080
+      SERVER_DISABLE_DOCS: "true"
+      SERVER_DISABLE_MANAGER: "true"
+      CORS_ORIGIN: http://127.0.0.1
+      CORS_METHODS: POST,GET,PUT,DELETE
+      CORS_CREDENTIALS: "false"
+
+      DATABASE_PROVIDER: postgresql
+      DATABASE_CONNECTION_URI: postgresql://${POSTGRES_USERNAME}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DATABASE}?schema=public
+      DATABASE_CONNECTION_CLIENT_NAME: paiemae
+      DATABASE_SAVE_DATA_INSTANCE: "true"
+      DATABASE_SAVE_DATA_NEW_MESSAGE: "false"
+      DATABASE_SAVE_MESSAGE_UPDATE: "false"
+      DATABASE_SAVE_DATA_CONTACTS: "false"
+      DATABASE_SAVE_DATA_CHATS: "false"
+      DATABASE_SAVE_DATA_HISTORIC: "false"
+      DATABASE_SAVE_DATA_LABELS: "false"
+      DATABASE_SAVE_IS_ON_WHATSAPP: "false"
+      DATABASE_DELETE_MESSAGE: "false"
+
+      CACHE_REDIS_ENABLED: "true"
+      CACHE_REDIS_URI: redis://redis:6379
+      CACHE_REDIS_PREFIX_KEY: paiemae-evolution
+      CACHE_REDIS_TTL: 604800
+      CACHE_REDIS_SAVE_INSTANCES: "true"
+      CACHE_LOCAL_ENABLED: "false"
+
+      AUTHENTICATION_API_KEY: ${AUTHENTICATION_API_KEY}
+      AUTHENTICATION_EXPOSE_IN_FETCH_INSTANCES: "false"
+      LOG_LEVEL: ERROR,WARN,INFO
+      LOG_COLOR: "true"
+      LOG_BAILEYS: error
+      DEL_INSTANCE: "false"
+      DEL_TEMP_INSTANCES: "false"
+      LANGUAGE: pt-BR
+
+      WEBHOOK_GLOBAL_ENABLED: "false"
+      WEBSOCKET_ENABLED: "false"
+      WEBSOCKET_GLOBAL_EVENTS: "false"
+      RABBITMQ_ENABLED: "false"
+      NATS_ENABLED: "false"
+      SQS_ENABLED: "false"
+      PUSHER_ENABLED: "false"
+
+      CONFIG_SESSION_PHONE_CLIENT: PAIEMAE
+      CONFIG_SESSION_PHONE_NAME: Chrome
+      QRCODE_LIMIT: 30
+      QRCODE_COLOR: "#198754"
+
+      TYPEBOT_ENABLED: "false"
+      CHATWOOT_ENABLED: "false"
+      OPENAI_ENABLED: "false"
+      DIFY_ENABLED: "false"
+      N8N_ENABLED: "false"
+      EVOAI_ENABLED: "false"
+      FLOWISE_ENABLED: "false"
+      S3_ENABLED: "false"
+      PROMETHEUS_METRICS: "false"
+      TELEMETRY_ENABLED: "false"
+      TZ: ${TZ:-America/Sao_Paulo}
+    volumes:
+      - evolution_instances:/evolution/instances
+    networks:
+      - evolution_internal
+
+  worker:
+    build:
+      context: ../../worker_whatsapp
+    container_name: paiemae_whatsapp_worker
+    restart: unless-stopped
+    depends_on:
+      evolution-api:
+        condition: service_started
+    environment:
+      SUPABASE_URL: ${SUPABASE_URL}
+      SUPABASE_SECRET_KEY: ${SUPABASE_SECRET_KEY}
+      EVOLUTION_API_URL: http://evolution-api:8080
+      EVOLUTION_API_KEY: ${AUTHENTICATION_API_KEY}
+      EVOLUTION_INSTANCE_NAME: ${EVOLUTION_INSTANCE_NAME:-paiemae}
+      POLL_INTERVAL_MS: ${POLL_INTERVAL_MS:-30000}
+      CONNECTION_POLL_INTERVAL_MS: ${CONNECTION_POLL_INTERVAL_MS:-15000}
+      MAX_EXPIRY_LAG_MS: ${MAX_EXPIRY_LAG_MS:-3600000}
+      EVOLUTION_REQUEST_TIMEOUT_MS: ${EVOLUTION_REQUEST_TIMEOUT_MS:-15000}
+      TZ: ${TZ:-America/Sao_Paulo}
+    networks:
+      - evolution_internal
+
+volumes:
+  postgres_data:
+  redis_data:
+  evolution_instances:
+
+networks:
+  evolution_internal:
+    driver: bridge

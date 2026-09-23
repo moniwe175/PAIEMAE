@@ -102,7 +102,7 @@ const ETAPAS_FLUXO = [
   { icone: Server,   titulo: '2. Motor (Vercel)', desc: 'A função api/marketing-engine.js roda as ferramentas: lê appointments/clients/servicos, busca o template em message_templates, renderiza as {{tags}} e checa idempotência (já disparou nas últimas Xh? então pula).' },
   { icone: Database, titulo: '3. Fila (marketing_queue)', desc: 'Cada disparo vira uma linha na fila: Grupo A entra approved, Grupo B entra pending. Tudo auditado em marketing_log.' },
   { icone: Eye,      titulo: '4. Aprovação (Grupo B)', desc: 'As mensagens pending aparecem em tempo real na aba Motor → Fila. A recepcionista lê, personaliza se quiser e clica Aprovar (→ approved) ou Descartar (→ cancelled).' },
-  { icone: Smartphone, titulo: '5. Worker WhatsApp (Baileys)', desc: 'Processo Node no computador da clínica: a cada 30s busca approved com scheduled_at vencido, aplica a Regra de Vencimento (expires_at) e envia. Sucesso → sent; erro → failed.' },
+  { icone: Smartphone, titulo: '5. Worker WhatsApp (Evolution API)', desc: 'Serviço Docker na VPS: a cada 30s busca approved com scheduled_at vencido, aplica a Regra de Vencimento (expires_at) e envia pela Evolution API. Sucesso → sent; erro → failed.' },
   { icone: MessageSquare, titulo: '6. Cliente recebe', desc: 'A mensagem chega no WhatsApp da paciente. O histórico completo fica na aba Motor → Histórico (enviados hoje, no mês, falhas).' },
 ];
 
@@ -279,7 +279,7 @@ function AbaFluxo() {
         <div><strong style={{ color: 'var(--text-dark)' }}>:00 e :30</strong> — Ferramentas 1–11 (Grupo A, automáticas) via <code style={{ fontFamily: 'monospace', background: 'var(--bg-main)', padding: '1px 5px', borderRadius: 4 }}>?half=1</code></div>
         <div><strong style={{ color: 'var(--text-dark)' }}>:15 e :45</strong> — Ferramentas 12–19 (Grupo B, revisão humana) via <code style={{ fontFamily: 'monospace', background: 'var(--bg-main)', padding: '1px 5px', borderRadius: 4 }}>?half=2</code></div>
         <div style={{ marginTop: 6, color: 'var(--text-muted)' }}>
-          Quem agenda é o <strong>pg_cron</strong> dentro do próprio Supabase (arquivo <code style={{ fontFamily: 'monospace' }}>marketing_engine_cloud_cron.sql</code>) — não precisa de nenhum computador ligado para o motor gerar mensagens. Só o envio final pelo WhatsApp precisa do worker rodando na clínica.
+          Quem agenda é o <strong>pg_cron</strong> dentro do próprio Supabase (arquivo <code style={{ fontFamily: 'monospace' }}>marketing_engine_cloud_cron.sql</code>) — não precisa de nenhum computador da clínica ligado. O envio final fica disponível continuamente pelo worker na VPS.
         </div>
       </div>
     </div>
