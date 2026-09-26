@@ -18,7 +18,8 @@ import {
   ClipboardCheck,
   Target,
   Shield,
-  BookOpen
+  BookOpen,
+  UserPlus
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { fetchQueuePendingCount } from '../../services/supabaseService';
@@ -34,6 +35,7 @@ const menuItems = [
   { key: 'estoque', name: 'Estoque', path: '/inventory', icon: Package },
   { key: 'relatorios', name: 'Relatórios', path: '/reports', icon: BarChart3 },
   { key: 'estrategia', name: 'Estratégia', path: '/estrategia', icon: Target },
+  { key: 'crm', name: 'Interessados', path: '/crm', icon: UserPlus },
   { key: 'marketing', name: 'Marketing', path: '/marketing', icon: Megaphone },
   { key: 'motor', name: 'Motor', path: '/motor-marketing', icon: Zap, badgeKey: 'pending' },
   { key: 'marketing', name: 'Guia Marketing', path: '/guia-marketing', icon: BookOpen },

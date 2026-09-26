@@ -1311,3 +1311,71 @@ export async function updateAccessRequestStatus(id, status) {
   if (error) return handleError(error);
   return { data, error: null };
 }
+
+// ─── CRM: Interessados (crm_leads) ────────────────────────────
+
+export async function fetchCrmLeads() {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured', []);
+  const { data, error } = await supabase
+    .from('crm_leads')
+    .select('*')
+    .order('created_at', { ascending: false });
+  if (error) return handleError(error, []);
+  return { data: data || [], error: null };
+}
+
+export async function insertCrmLead(lead) {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured');
+  const userId = lead.user_id || await getUserId();
+  const { data, error } = await supabase
+    .from('crm_leads')
+    .insert([{ ...lead, user_id: userId }])
+    .select()
+    .single();
+  if (error) return handleError(error);
+  return { data, error: null };
+}
+
+export async function updateCrmLead(id, updates) {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured');
+  const { data, error } = await supabase
+    .from('crm_leads')
+    .update(updates)
+    .eq('id', id)
+    .select()
+    .single();
+  if (error) return handleError(error);
+  return { data, error: null };
+}
+
+export async function deleteCrmLead(id) {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured');
+  const { error } = await supabase.from('crm_leads').delete().eq('id', id);
+  if (error) return handleError(error);
+  return { data: true, error: null };
+}
+
+// ─── CRM: Histórico de Interações (crm_interactions) ──────────
+
+export async function fetchCrmInteractions(leadId) {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured', []);
+  const { data, error } = await supabase
+    .from('crm_interactions')
+    .select('*')
+    .eq('lead_id', leadId)
+    .order('created_at', { ascending: true });
+  if (error) return handleError(error, []);
+  return { data: data || [], error: null };
+}
+
+export async function insertCrmInteraction(interaction) {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured');
+  const userId = interaction.user_id || await getUserId();
+  const { data, error } = await supabase
+    .from('crm_interactions')
+    .insert([{ ...interaction, user_id: userId, autor_id: userId }])
+    .select()
+    .single();
+  if (error) return handleError(error);
+  return { data, error: null };
+}

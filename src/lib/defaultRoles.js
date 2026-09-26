@@ -10,7 +10,8 @@ export const INITIAL_ROLES = [
       agenda: { ver: true, edit: true },
       pacientes: { ver: true, edit: true },
       anamnese: { ver: true, edit: false },
-      servicos: { ver: true, edit: false }
+      servicos: { ver: true, edit: false },
+      crm: { ver: true, edit: true }
     }
   },
   {
@@ -45,7 +46,8 @@ export const INITIAL_ROLES = [
       servicos: { ver: true, edit: true },
       estoque: { ver: true, edit: true },
       relatorios: { ver: true, edit: true },
-      marketing: { ver: true, edit: true }
+      marketing: { ver: true, edit: true },
+      crm: { ver: true, edit: true }
     }
   }
 ];

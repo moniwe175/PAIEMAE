@@ -19,6 +19,7 @@ const MODULE_LIST = [
   { key: 'estoque', label: 'Estoque' },
   { key: 'relatorios', label: 'Relatórios' },
   { key: 'estrategia', label: 'Estratégia' },
+  { key: 'crm', label: 'Interessados (CRM)' },
   { key: 'marketing', label: 'Marketing' },
   { key: 'motor', label: 'Motor' },
   { key: 'comissoes', label: 'Comissões' },
