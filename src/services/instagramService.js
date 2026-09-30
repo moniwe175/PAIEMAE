@@ -51,6 +51,19 @@ export async function getInstagramMedia() {
   }
 }
 
+export async function getInstagramInsights(days = 30, mediaId = null) {
+  try {
+    const params = new URLSearchParams({ action: 'insights', days: String(days) });
+    if (mediaId) params.set('media_id', mediaId);
+    const res = await apiFetch(`${API_BASE}?${params}`);
+    const { data, error } = await handleResponse(res);
+    if (error) return { ok: false, error };
+    return data;
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+}
+
 // ─── 4. Regras por Publicação ────────────────────────────────────────────────
 export async function getInstagramRules() {
   try {

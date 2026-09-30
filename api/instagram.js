@@ -164,6 +164,94 @@ async function fetchAccountMedia(accessToken, accountId) {
   }
 }
 
+// Insights são consultados sob demanda. A Meta pode omitir métricas por tipo de
+// mídia ou por falta de dados; ausência nunca deve ser apresentada como zero.
+function insightNumber(value) {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim() !== '' && Number.isFinite(Number(value))) return Number(value);
+  return null;
+}
+
+async function requestMetaInsight(accessToken, objectId, params) {
+  const url = new URL(`${META_BASE_URL}/${encodeURIComponent(objectId)}/insights`);
+  Object.entries(params).forEach(([key, value]) => url.searchParams.set(key, value));
+  const response = await fetch(url, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+    signal: AbortSignal.timeout(12000),
+  });
+  const payload = await response.json();
+  if (!response.ok || payload.error) {
+    const error = new Error(payload.error?.message || 'Não foi possível consultar os Insights na Meta.');
+    error.code = payload.error?.code;
+    throw error;
+  }
+  return payload.data || [];
+}
+
+export function insightErrorMessage(error) {
+  if (error.code === 190) return 'Token da Meta expirado. Atualize META_ACCESS_TOKEN no backend.';
+  if (error.code === 10 || error.code === 200) {
+    return 'A conta ainda não autorizou instagram_manage_insights. Adicione a permissão no app da Meta e gere um novo token.';
+  }
+  return error.message || 'Falha ao consultar Insights do Instagram.';
+}
+
+export async function fetchInstagramInsights(accessToken, accountId, days, mediaId) {
+  const until = new Date();
+  const since = new Date(until.getTime() - days * 86400000);
+  const metrics = await requestMetaInsight(accessToken, accountId, {
+    metric: 'reach',
+    period: 'day',
+    metric_type: 'time_series',
+    since: since.toISOString().slice(0, 10),
+    until: until.toISOString().slice(0, 10),
+  });
+  const reach = metrics.find(item => item.name === 'reach');
+  const series = (reach?.values || []).map(item => ({
+    date: item.end_time || '',
+    value: insightNumber(item.value),
+  })).filter(item => item.date && item.value !== null);
+
+  const accountMetrics = await Promise.allSettled(['views', 'total_interactions'].map(async metric => {
+    const data = await requestMetaInsight(accessToken, accountId, {
+      metric,
+      period: 'day',
+      metric_type: 'total_value',
+      since: since.toISOString().slice(0, 10),
+      until: until.toISOString().slice(0, 10),
+    });
+    const result = data.find(item => item.name === metric);
+    return insightNumber(result?.total_value?.value);
+  }));
+  const totals = Object.fromEntries(['views', 'total_interactions'].map((metric, index) => [
+    metric,
+    accountMetrics[index].status === 'fulfilled' ? accountMetrics[index].value : null,
+  ]));
+
+  let media = null;
+  if (mediaId) {
+    // Não deixa o navegador pedir métricas de uma publicação fora desta conta.
+    const owned = await fetchAccountMedia(accessToken, accountId);
+    if (!owned.ok) throw new Error(owned.error);
+    if (!owned.media.some(item => item.id === mediaId)) throw new Error('Publicação não encontrada na conta conectada.');
+    const values = await Promise.allSettled(['reach', 'views', 'saved', 'shares'].map(async metric => {
+      const data = await requestMetaInsight(accessToken, mediaId, { metric });
+      const result = data.find(item => item.name === metric);
+      return insightNumber(result?.total_value?.value ?? result?.values?.at(-1)?.value);
+    }));
+    media = { id: mediaId };
+    ['reach', 'views', 'saved', 'shares'].forEach((metric, index) => {
+      media[metric] = values[index].status === 'fulfilled' ? values[index].value : null;
+    });
+    if (values.every(item => item.status === 'rejected')) {
+      const first = values[0].reason;
+      if (first.code === 10 || first.code === 200 || first.code === 190) throw first;
+    }
+  }
+
+  return { ok: true, period_days: days, reach: series, totals, media, updated_at: new Date().toISOString() };
+}
+
 // ─── Disparo de Resposta Privada ao Comentário (Meta Direct API) ─────────────
 async function sendPrivateReply(accessToken, accountId, commentId, messageText) {
   if (!accessToken || !accountId) {
@@ -686,6 +774,25 @@ export default async function handler(req, res) {
         configured: true,
         media: mediaResult.media,
       });
+    }
+
+    // GET /api/instagram?action=insights&days=30[&media_id=...]
+    if (req.method === 'GET' && action === 'insights') {
+      const config = await getMetaConfig(db);
+      if (!config?.accessToken || !config?.accountId) {
+        return res.status(200).json({ ok: false, configured: false, error: 'Conecte a conta do Instagram para consultar Insights.' });
+      }
+      const days = Number(req.query?.days || urlObj.searchParams.get('days') || 30);
+      const mediaId = String(req.query?.media_id || urlObj.searchParams.get('media_id') || '');
+      if (![7, 30].includes(days) || (mediaId && !/^\d{1,30}$/.test(mediaId))) {
+        return res.status(400).json({ ok: false, error: 'Período ou publicação inválidos.' });
+      }
+      try {
+        const result = await fetchInstagramInsights(config.accessToken, config.accountId, days, mediaId);
+        return res.status(200).json(result);
+      } catch (error) {
+        return res.status(200).json({ ok: false, configured: true, error: insightErrorMessage(error) });
+      }
     }
 
     // 4. GET /api/instagram?action=rules

@@ -16,6 +16,7 @@ import InstagramRuleEditor from '../components/marketing/InstagramRuleEditor';
 import InstagramHistoryTable from '../components/marketing/InstagramHistoryTable';
 import InstagramTestModal from '../components/marketing/InstagramTestModal';
 import InstagramConfigModal from '../components/marketing/InstagramConfigModal';
+import InstagramInsightsPanel from '../components/marketing/InstagramInsightsPanel';
 import {
   getInstagramStatus,
   getInstagramMedia,
@@ -268,7 +269,7 @@ function CampanhaDetail({ campanha, onClose, onEdit }) {
 // ─── Main Component ────────────────────────────────────────────
 
 export default function Marketing() {
-  const [subTab, setSubTab] = useState('campanhas'); // 'campanhas' | 'instagram'
+  const [subTab, setSubTab] = useState('campanhas'); // 'campanhas' | 'instagram' | 'insights'
 
   // ── Campanhas State ──
   const [campanhas, setCampanhas] = useState([]);
@@ -348,9 +349,11 @@ export default function Marketing() {
 
   // Carrega subsistema Instagram ao entrar na sub-aba
   useEffect(() => {
-    if (subTab === 'instagram') {
+    if (subTab === 'instagram' || subTab === 'insights') {
       loadIgStatus();
       loadIgMedia();
+    }
+    if (subTab === 'instagram') {
       loadIgRules();
       loadIgInteractions();
     }
@@ -524,7 +527,7 @@ export default function Marketing() {
           <p className="page-subtitle">
             {subTab === 'campanhas'
               ? `${campanhas.length} campanhas · ${ativas.length} ativas`
-              : `Automação Oficial do Instagram · ${activeIgRulesCount} regras ativas`}
+              : subTab === 'insights' ? 'Desempenho orgânico do Instagram' : `Automação Oficial do Instagram · ${activeIgRulesCount} regras ativas`}
           </p>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
@@ -537,7 +540,7 @@ export default function Marketing() {
                 <Plus />Nova Campanha
               </button>
             </>
-          ) : (
+          ) : subTab === 'instagram' ? (
             <>
               <button className="btn btn-ghost" onClick={() => { loadIgStatus(); loadIgMedia(); loadIgRules(); loadIgInteractions(); }}>
                 <RefreshCw style={{ width: 14, height: 14 }} />Atualizar
@@ -551,7 +554,7 @@ export default function Marketing() {
                 <Sparkles style={{ width: 14, height: 14 }} />Simular Comentário
               </button>
             </>
-          )}
+          ) : null}
         </div>
       </div>
 
@@ -575,6 +578,13 @@ export default function Marketing() {
               {activeIgRulesCount} {activeIgRulesCount === 1 ? 'regra' : 'regras'}
             </span>
           )}
+        </button>
+        <button
+          className={`tab-item${subTab === 'insights' ? ' active' : ''}`}
+          onClick={() => setSubTab('insights')}
+          style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700 }}
+        >
+          <TrendingUp style={{ width: 14, height: 14, color: '#C02662' }} /> Insights Instagram
         </button>
       </div>
 
@@ -806,6 +816,7 @@ export default function Marketing() {
           />
         </div>
       )}
+      {subTab === 'insights' && <InstagramInsightsPanel statusData={igStatus} posts={igPosts} />}
     </div>
   );
 }
