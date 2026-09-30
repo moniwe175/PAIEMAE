@@ -1,5 +1,11 @@
 {
+  "functions": {
+    "api/instagram.js": { "maxDuration": 30 },
+    "api/instagram-webhook.js": { "maxDuration": 10 }
+  },
   "rewrites": [
-    { "source": "/(.*)", "destination": "/index.html" }
+    { "source": "/api/instagram-webhook", "destination": "/api/instagram-webhook" },
+    { "source": "/api/instagram/:path*",   "destination": "/api/instagram" },
+    { "source": "/(.*)",                   "destination": "/index.html" }
   ]
 }

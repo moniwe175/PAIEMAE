@@ -234,7 +234,9 @@ export async function upsertSheetTransaction(st) {
       if (existingList && existingList.length > 0) {
         payload.id = existingList[0].id;
       }
-    } catch (_) {}
+    } catch {
+      // Ignora erro de busca
+    }
   }
 
   try {
@@ -670,7 +672,9 @@ function isUuid(str) {
 function generateUuidFromSeed(seedStr) {
   if (isUuid(seedStr)) return seedStr;
   if (typeof crypto !== 'undefined' && crypto.randomUUID) {
-    try { return crypto.randomUUID(); } catch (e) {}
+    try { return crypto.randomUUID(); } catch {
+      // fallback
+    }
   }
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
     const r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
@@ -882,6 +886,81 @@ export async function fetchLastClosedCashierBalance() {
 
 // ─── Campaigns (Marketing) ─────────────────────────────────
 
+export function mapCampaignFromDb(c) {
+  if (!c) return null;
+  let extra = {};
+  if (c.notes) {
+    try {
+      extra = typeof c.notes === 'string' ? JSON.parse(c.notes) : c.notes;
+    } catch {
+      extra = { raw_notes: c.notes };
+    }
+  }
+
+  const rawStatus = (c.status || '').toLowerCase();
+  const status =
+    rawStatus === 'ativa' || rawStatus === 'ativo' ? 'ativo' :
+    rawStatus === 'pausada' || rawStatus === 'pausado' ? 'pausado' :
+    rawStatus === 'concluida' || rawStatus === 'concluido' ? 'concluido' :
+    'rascunho';
+
+  return {
+    id: Number(c.id),
+    nome: c.name || '',
+    canal: c.type || 'WhatsApp',
+    status,
+    mensagem: c.message || '',
+    publico_alvo: c.target || '',
+    data_inicio: extra.data_inicio || (c.scheduled_at ? c.scheduled_at.slice(0, 10) : ''),
+    data_fim: extra.data_fim || '',
+    orcamento: Number(extra.orcamento || 0),
+    enviados: Number(c.sent_count || extra.enviados || 0),
+    abertos: Number(extra.abertos || 0),
+    cliques: Number(extra.cliques || 0),
+    conversoes: Number(extra.conversoes || 0),
+    created_at: c.created_at,
+  };
+}
+
+export function mapCampaignToDb(form) {
+  const rawStatus = (form.status || '').toLowerCase();
+  const status =
+    rawStatus === 'ativo' ? 'ativa' :
+    rawStatus === 'pausado' ? 'pausada' :
+    rawStatus === 'concluido' ? 'concluida' :
+    rawStatus || 'rascunho';
+
+  const notesObj = {
+    orcamento: Number(form.orcamento || 0),
+    data_inicio: form.data_inicio || '',
+    data_fim: form.data_fim || '',
+    abertos: Number(form.abertos || 0),
+    cliques: Number(form.cliques || 0),
+    conversoes: Number(form.conversoes || 0),
+    enviados: Number(form.enviados || 0),
+  };
+
+  const payload = {
+    name: form.nome || form.name || 'Nova Campanha',
+    type: form.canal || form.type || 'WhatsApp',
+    status,
+    message: form.mensagem || form.message || '',
+    target: form.publico_alvo || form.target || '',
+    sent_count: Number(form.enviados || form.sent_count || 0),
+    notes: JSON.stringify(notesObj),
+  };
+
+  if (form.data_inicio && !isNaN(Date.parse(form.data_inicio))) {
+    try {
+      payload.scheduled_at = new Date(form.data_inicio).toISOString();
+    } catch {
+      // Ignora se inválido
+    }
+  }
+
+  return payload;
+}
+
 export async function fetchCampaigns() {
   if (!isSupabaseConfigured()) return handleError('Supabase not configured', []);
   const { data, error } = await supabase
@@ -889,27 +968,49 @@ export async function fetchCampaigns() {
     .select('*')
     .order('created_at', { ascending: false });
   if (error) return handleError(error, []);
-  return { data: data || [], error: null };
+  return { data: (data || []).map(mapCampaignFromDb), error: null };
 }
 
 export async function insertCampaign(campaign) {
   if (!isSupabaseConfigured()) return handleError('Supabase not configured');
-  const userId = campaign.user_id || await getUserId();
-  const { data, error } = await supabase.from('campaigns').insert([{ ...campaign, user_id: userId }]).select().single();
+  const payload = mapCampaignToDb(campaign);
+  const { data, error } = await supabase
+    .from('campaigns')
+    .insert([payload])
+    .select()
+    .single();
+
   if (error) return handleError(error);
-  return { data, error: null };
+  return { data: mapCampaignFromDb(data), error: null };
 }
 
 export async function updateCampaign(id, updates) {
   if (!isSupabaseConfigured()) return handleError('Supabase not configured');
-  const { data, error } = await supabase.from('campaigns').update(updates).eq('id', id).select().single();
+  const numId = typeof id === 'string' ? parseInt(id, 10) : id;
+
+  let body = {};
+  if (updates.status !== undefined && Object.keys(updates).length <= 2) {
+    const s = updates.status.toLowerCase();
+    body.status = s === 'ativo' ? 'ativa' : s === 'pausado' ? 'pausada' : s === 'concluido' ? 'concluida' : s;
+  } else {
+    body = mapCampaignToDb(updates);
+  }
+
+  const { data, error } = await supabase
+    .from('campaigns')
+    .update(body)
+    .eq('id', numId)
+    .select()
+    .single();
+
   if (error) return handleError(error);
-  return { data, error: null };
+  return { data: mapCampaignFromDb(data), error: null };
 }
 
 export async function deleteCampaign(id) {
   if (!isSupabaseConfigured()) return handleError('Supabase not configured');
-  const { error } = await supabase.from('campaigns').delete().eq('id', id);
+  const numId = typeof id === 'string' ? parseInt(id, 10) : id;
+  const { error } = await supabase.from('campaigns').delete().eq('id', numId);
   if (error) return handleError(error);
   return { data: true, error: null };
 }

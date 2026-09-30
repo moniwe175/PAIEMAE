@@ -955,14 +955,23 @@ function LeadRow({ lead, onClick, overdue, dueToday }) {
   return (
     <tr onClick={onClick} style={{ cursor: 'pointer' }} tabIndex={0} onKeyDown={e => e.key === 'Enter' && onClick()}>
       <td>
-        <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--text-dark)' }}>{lead.nome}</div>
+        <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--text-dark)', display: 'flex', alignItems: 'center', gap: 6 }}>
+          {lead.nome}
+          {lead.origem === 'Instagram' && (
+            <span style={{ fontSize: 10, background: 'rgba(225, 48, 108, 0.12)', color: '#E1306C', padding: '1px 5px', borderRadius: 4, fontWeight: 700 }}>
+              Instagram
+            </span>
+          )}
+        </div>
         {lead.telefone && (
           <div style={{ fontSize: 11, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 4, marginTop: 2 }}>
             <Phone style={{ width: 10, height: 10 }} />{lead.telefone}
           </div>
         )}
         {lead.instagram && !lead.telefone && (
-          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>{lead.instagram}</div>
+          <div style={{ fontSize: 11, color: '#E1306C', marginTop: 2, fontWeight: 600 }}>
+            {lead.instagram.startsWith('@') ? lead.instagram : `@${lead.instagram}`}
+          </div>
         )}
       </td>
       <td style={{ fontSize: 12, color: 'var(--text-medium)' }}>{lead.servico_interesse || '—'}</td>

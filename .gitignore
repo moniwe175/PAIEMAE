@@ -40,3 +40,5 @@ __pycache__/
 *.pyo
 config/tokens/
 .vercel
+zip/
+*.zip
