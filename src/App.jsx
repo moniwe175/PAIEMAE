@@ -31,6 +31,9 @@ import ClientBooking from './pages/ClientBooking';
 import Anamnese from './pages/Anamnese';
 import Estrategia from './pages/Estrategia';
 import CrmInteressados from './pages/CrmInteressados';
+import Privacidade from './pages/Privacidade';
+import TermosUso from './pages/TermosUso';
+import ExclusaoDados from './pages/ExclusaoDados';
 
 // Lazy-loaded pages (separate chunks, no main-bundle init impact)
 const GerenciarAcessos = lazy(() => import('./pages/GerenciarAcessos'));
@@ -94,6 +97,9 @@ function App() {
               {/* Public Routes */}
               <Route path="/login" element={<Login />} />
               <Route path="/client-booking" element={<ClientBooking />} />
+              <Route path="/privacidade" element={<Privacidade />} />
+              <Route path="/termos" element={<TermosUso />} />
+              <Route path="/exclusao-dados" element={<ExclusaoDados />} />
 
               {/* Protected ERP Routes */}
               <Route
