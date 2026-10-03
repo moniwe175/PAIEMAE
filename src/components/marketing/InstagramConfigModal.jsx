@@ -1,18 +1,41 @@
 /* eslint-disable react/prop-types */
-import { Copy, XCircle, RefreshCw } from 'lucide-react';
+import { useState } from 'react';
+import { Copy, XCircle, RefreshCw, Activity, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { getInstagramDiagnostics } from '../../services/instagramService';
 
 export default function InstagramConfigModal({ onClose, onSaved }) {
   const webhookUrl = `${window.location.origin}/api/instagram-webhook`;
+  const [loadingDiag, setLoadingDiag] = useState(false);
+  const [diagData, setDiagData] = useState(null);
+  const [diagError, setDiagError] = useState(null);
+
+  const handleRunDiag = async () => {
+    setLoadingDiag(true);
+    setDiagError(null);
+    try {
+      const res = await getInstagramDiagnostics();
+      if (!res.ok) {
+        setDiagError(res.error || 'Falha ao executar diagnóstico.');
+      } else {
+        setDiagData(res.diagnostics);
+      }
+    } catch (err) {
+      setDiagError(err.message);
+    } finally {
+      setLoadingDiag(false);
+    }
+  };
+
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" role="dialog" aria-modal="true" aria-label="Configurar Meta"
-        onClick={(event) => event.stopPropagation()} style={{ maxWidth: 580 }}>
+        onClick={(event) => event.stopPropagation()} style={{ maxWidth: 640, maxHeight: '90vh', overflowY: 'auto' }}>
         <div className="modal-header">
           <span className="modal-title">Conectar Instagram à Meta</span>
           <button className="modal-close" onClick={onClose} aria-label="Fechar"><XCircle /></button>
         </div>
         <p>Configure no ambiente do backend hospedado as variáveis <code>META_ACCESS_TOKEN</code>,
-          <code> INSTAGRAM_ACCOUNT_ID</code>, <code> META_APP_SECRET</code> e
+          <code> INSTAGRAM_ACCOUNT_ID</code>, <code> META_APP_SECRET</code>, <code> META_APP_ID</code> e
           <code> META_VERIFY_TOKEN</code>. Depois, publique a versão do backend.</p>
         <p>Cadastre no painel da Meta a URL de callback abaixo e o mesmo valor de
           <code> META_VERIFY_TOKEN</code>. Assine o evento <code>comments</code> do objeto Instagram.</p>
@@ -21,9 +44,64 @@ export default function InstagramConfigModal({ onClose, onSaved }) {
           <button className="btn btn-ghost" aria-label="Copiar URL"
             onClick={() => navigator.clipboard?.writeText(webhookUrl)}><Copy /></button>
         </div>
-        <p>As credenciais não são digitadas no ERP. Após configurar, use “Verificar conexão” para
-          consultar a conta na API oficial da Meta.</p>
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+
+        <div style={{ marginTop: 16, marginBottom: 16, padding: 12, borderRadius: 8, background: '#f8fafc', border: '1px solid #e2e8f0' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+            <span style={{ fontWeight: 600, fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Activity style={{ width: 16, height: 16, color: '#3b82f6' }} /> Diagnóstico Técnico do Token
+            </span>
+            <button className="btn btn-secondary btn-sm" onClick={handleRunDiag} disabled={loadingDiag}>
+              {loadingDiag ? 'Consultando Meta...' : 'Executar Diagnóstico'}
+            </button>
+          </div>
+
+          {diagError && (
+            <div style={{ color: '#ef4444', fontSize: 12, padding: 8, background: '#fee2e2', borderRadius: 4 }}>
+              <AlertTriangle style={{ width: 14, height: 14, display: 'inline', marginRight: 4 }} />
+              {diagError}
+            </div>
+          )}
+
+          {diagData && (
+            <div style={{ fontSize: 12, marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <div>
+                <strong>Endpoint Contratado:</strong> <code>{diagData.endpoint_contract}</code>
+              </div>
+              <div>
+                <strong>Identidade /me:</strong> {diagData.me_identity?.name || 'N/A'} (ID: {diagData.me_identity?.id || 'N/A'}, Tipo: {diagData.me_identity?.type_detected})
+              </div>
+              <div>
+                <strong>Validação do Token (/debug_token):</strong> {diagData.debug_token?.is_valid ? (
+                  <span style={{ color: '#16a34a' }}><CheckCircle2 style={{ width: 12, height: 12, display: 'inline' }} /> Válido (Tipo: {diagData.debug_token.type})</span>
+                ) : (
+                  <span style={{ color: '#dc2626' }}>{diagData.debug_token?.error?.message || 'Não validado'}</span>
+                )}
+              </div>
+              {diagData.debug_token?.scopes && (
+                <div>
+                  <strong>Permissões (Scopes):</strong> {diagData.debug_token.scopes.join(', ') || 'Nenhum'}
+                </div>
+              )}
+              <div>
+                <strong>Comparação de IDs:</strong> {diagData.linked_accounts?.comparison?.detail}
+              </div>
+              {diagData.test_private_reply_result && (
+                <div style={{ marginTop: 6, padding: 6, background: '#f1f5f9', borderRadius: 4 }}>
+                  <strong>Resultado Envio Meta:</strong> Status {diagData.test_private_reply_result.http_status}
+                  <pre style={{ margin: '4px 0 0', fontSize: 11, maxHeight: 120, overflowY: 'auto' }}>
+                    {JSON.stringify(diagData.test_private_reply_result.raw_meta_response || diagData.test_private_reply_result, null, 2)}
+                  </pre>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        <p style={{ fontSize: 12, color: '#64748b' }}>
+          As credenciais não são digitadas no ERP. Elas são lidas diretamente das variáveis do backend da Vercel.
+        </p>
+
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
           <button className="btn btn-ghost" onClick={onClose}>Fechar</button>
           <button className="btn btn-primary" onClick={() => { onSaved?.(); onClose(); }}>
             <RefreshCw style={{ width: 14, height: 14 }} /> Verificar conexão
@@ -33,3 +111,4 @@ export default function InstagramConfigModal({ onClose, onSaved }) {
     </div>
   );
 }
+

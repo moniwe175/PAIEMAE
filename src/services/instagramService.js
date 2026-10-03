@@ -184,3 +184,17 @@ export async function forwardInstagramToCrm({
     return { ok: false, error: err.message };
   }
 }
+
+// ─── 8. Diagnóstico Oficial de Token e IDs da Meta ───────────────────────────
+export async function getInstagramDiagnostics(commentId = null) {
+  try {
+    const params = new URLSearchParams({ action: 'diagnose' });
+    if (commentId) params.set('comment_id', commentId);
+    const res = await apiFetch(`${API_BASE}?${params}`);
+    const { data, error } = await handleResponse(res);
+    if (error) return { ok: false, error };
+    return data;
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+}
