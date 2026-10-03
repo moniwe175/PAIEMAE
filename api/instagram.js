@@ -70,6 +70,7 @@ async function getMetaConfig(db) {
     return {
       accessToken: process.env.META_ACCESS_TOKEN.trim(),
       accountId: process.env.INSTAGRAM_ACCOUNT_ID.trim(),
+      pageId: process.env.META_PAGE_ID ? process.env.META_PAGE_ID.trim() : null,
       source: 'environment',
     };
   }
@@ -258,123 +259,92 @@ export async function fetchInstagramInsights(accessToken, accountId, days, media
   return { ok: true, period_days: days, reach: series, totals, media, updated_at: new Date().toISOString() };
 }
 
-// ─── Disparo de Resposta Privada ao Comentário (A/B Testing Controlado) ───────────
-// Tentativa A (Oficial fbsamples): POST /{accountId}/messages com recipient.comment_id
-// Tentativa B (Fallback A/B Isolado): POST /{commentId}/private_replies com recipient_id = userId (IGSID)
-async function sendPrivateReply(accessToken, accountId, commentId, messageText, userId = '') {
+// ─── Disparo de Resposta Privada ao Comentário (Via ID da Página do Facebook) ───────────
+// Endpoint : POST https://graph.facebook.com/v26.0/{META_PAGE_ID}/messages
+// Body     : { recipient: { comment_id }, message: { text } }
+// Auth     : Bearer {page-access-token} no header Authorization
+async function sendPrivateReply(accessToken, pageId, commentId, messageText) {
   if (!accessToken) {
     return { ok: false, error: 'Token Meta ausente para envio de resposta privada.' };
   }
-  if (!accountId) {
-    return { ok: false, error: 'ID da conta Instagram ausente (INSTAGRAM_ACCOUNT_ID).' };
+  if (!pageId) {
+    return {
+      ok: false,
+      error: 'ID da Página ausente (META_PAGE_ID). Configure META_PAGE_ID nas variáveis de ambiente da Vercel para permitir o envio do Direct.',
+    };
   }
   if (!commentId) {
     return { ok: false, error: 'ID do comentário ausente; não é possível enviar resposta privada.' };
   }
 
-  // 1. TENTATIVA A: POST /{accountId}/messages com recipient.comment_id
-  const urlA = `${META_BASE_URL}/${accountId}/messages`;
-  let resA = null;
-  let dataA = null;
-
-  try {
-    const bodyA = {
-      recipient: { comment_id: commentId },
-      message:   { text: messageText },
-    };
-
-    resA = await fetch(urlA, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${accessToken}`,
-      },
-      body: JSON.stringify(bodyA),
-    });
-
-    dataA = await resA.json();
-
-    console.log('[Instagram/sendPrivateReply:Tentativa_A] status=%d payload=%s',
-      resA.status, JSON.stringify(dataA).slice(0, 500));
-
-    if (resA.ok && !dataA.error) {
-      return {
-        ok: true,
-        endpoint_used: 'POST /{accountId}/messages (Tentativa A)',
-        recipient_id: dataA.recipient_id,
-        message_id:   dataA.message_id,
-      };
-    }
-  } catch (errA) {
-    console.warn('[Instagram/sendPrivateReply:Tentativa_A] Erro de rede:', errA.message);
-    dataA = { error: { message: errA.message, type: 'NetworkError' } };
-  }
-
-  // 2. TENTATIVA B (Teste A/B controlado e isolado): POST /{commentId}/private_replies com recipient_id = userId
-  console.warn('[Instagram/sendPrivateReply] Tentativa A retornou erro (%s: %s). Executando Teste B controlado: POST /{commentId}/private_replies com recipient_id=%s...',
-    dataA?.error?.code, dataA?.error?.message, userId || '(vazio)');
-
-  const urlB = `${META_BASE_URL}/${commentId}/private_replies`;
-  let resB = null;
-  let dataB = null;
-
-  try {
-    const bodyB = {
-      message: messageText,
-    };
-    if (userId) {
-      bodyB.recipient_id = userId;
-    }
-
-    resB = await fetch(urlB, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${accessToken}`,
-      },
-      body: JSON.stringify(bodyB),
-    });
-
-    dataB = await resB.json();
-
-    console.log('[Instagram/sendPrivateReply:Tentativa_B] status=%d payload=%s',
-      resB.status, JSON.stringify(dataB).slice(0, 500));
-
-    if (resB.ok && !dataB.error) {
-      return {
-        ok: true,
-        endpoint_used: 'POST /{commentId}/private_replies (Tentativa B)',
-        recipient_id: dataB.recipient_id || userId || commentId,
-        message_id:   dataB.id || dataB.message_id || 'sent',
-      };
-    }
-  } catch (errB) {
-    console.warn('[Instagram/sendPrivateReply:Tentativa_B] Erro de rede:', errB.message);
-    dataB = { error: { message: errB.message, type: 'NetworkError' } };
-  }
-
-  // Se ambos falharem, relata com clareza o diagnóstico de ambos os endpoints
-  const errA = dataA?.error || {};
-  const errB = dataB?.error || {};
-
-  const friendly = `Falha em ambos os endpoints: [A /{accountId}/messages]: (#${errA.code || '?'}) ${errA.message} | [B /{commentId}/private_replies]: (#${errB.code || '?'}) ${errB.message}`;
-
-  return {
-    ok: false,
-    error: friendly,
-    diagnostic: {
-      attempt_a: {
-        endpoint: urlA,
-        status: resA?.status,
-        error: errA,
-      },
-      attempt_b: {
-        endpoint: urlB,
-        status: resB?.status,
-        error: errB,
-      },
-    },
+  const url = `${META_BASE_URL}/${pageId}/messages`;
+  const body = {
+    recipient: { comment_id: commentId },
+    message:   { text: messageText },
   };
+
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify(body),
+    });
+
+    const data = await res.json();
+
+    console.log('[Instagram/sendPrivateReply] status=%d payload=%s',
+      res.status, JSON.stringify(data).slice(0, 500));
+
+    if (!res.ok || data.error) {
+      const err = data.error || {};
+      const diagnostic = {
+        code:          err.code,
+        error_subcode: err.error_subcode,
+        fbtrace_id:    err.fbtrace_id,
+        type:          err.type,
+        raw_message:   err.message,
+      };
+
+      let friendly = err.message || 'Falha ao enviar resposta privada.';
+      if (err.code === 3) {
+        friendly = `(#3) App sem capacidade. Verifique permissões do app ou se META_PAGE_ID está correto. fbtrace_id: ${err.fbtrace_id || 'N/A'}`;
+      } else if (err.code === 10) {
+        friendly = `(#10) Permissão insuficiente: instagram_manage_messages ausente no token de Página. fbtrace_id: ${err.fbtrace_id || 'N/A'}`;
+      } else if (err.code === 100 && err.error_subcode === 2018028) {
+        friendly = '(#100/2018028) Janela expirada: mais de 7 dias desde o comentário, ou resposta já enviada.';
+      } else if (err.code === 100) {
+        friendly = `(#100) Parâmetro inválido: ${err.message}`;
+      } else if (err.code === 190) {
+        friendly = `(#190) Token inválido ou expirado. Gere um novo token de Página. fbtrace_id: ${err.fbtrace_id || 'N/A'}`;
+      } else if (err.code === 200 || err.code === 230) {
+        friendly = `(#${err.code}) Permissões de Página insuficientes para envio de mensagens.`;
+      }
+
+      return { ok: false, error: friendly, diagnostic };
+    }
+
+    if (!data.message_id && !data.id) {
+      return {
+        ok: false,
+        error: 'Resposta da Meta não retornou message_id válido.',
+        raw: data,
+      };
+    }
+
+    return {
+      ok: true,
+      recipient_id: data.recipient_id || null,
+      message_id:   data.message_id || data.id,
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      error: `Erro de rede ao enviar resposta privada: ${err.message}`,
+    };
+  }
 }
 
 // ─── Diagnóstico Oficial da Conexão Meta e Token (Apenas Leitura) ─────────────
@@ -391,6 +361,7 @@ async function runDiagnostics(db) {
       env_present: {
         META_ACCESS_TOKEN: !!process.env.META_ACCESS_TOKEN,
         INSTAGRAM_ACCOUNT_ID: !!process.env.INSTAGRAM_ACCOUNT_ID,
+        META_PAGE_ID: !!process.env.META_PAGE_ID,
         META_APP_SECRET: !!process.env.META_APP_SECRET,
         META_VERIFY_TOKEN: !!process.env.META_VERIFY_TOKEN,
         META_APP_ID: !!process.env.META_APP_ID,
@@ -398,17 +369,19 @@ async function runDiagnostics(db) {
     };
   }
 
-  const { accessToken, accountId } = config;
+  const { accessToken, accountId, pageId } = config;
   const appId = process.env.META_APP_ID ? process.env.META_APP_ID.trim() : null;
   const appSecret = process.env.META_APP_SECRET ? process.env.META_APP_SECRET.trim() : null;
 
   const results = {
     timestamp: new Date().toISOString(),
-    endpoint_contract: `POST ${META_BASE_URL}/${accountId}/messages { recipient: { comment_id } }`,
+    endpoint_contract: `POST ${META_BASE_URL}/${pageId || '{META_PAGE_ID}'}/messages { recipient: { comment_id } }`,
     configured_account_id: accountId,
+    configured_page_id: pageId || '(não configurado no backend)',
     env_status: {
       has_access_token: !!accessToken,
       token_length: accessToken.length,
+      has_page_id: !!pageId,
       has_app_secret: !!appSecret,
       has_app_id: !!appId,
       app_id_configured: appId || '(não configurado no backend)',
@@ -887,10 +860,9 @@ export async function processCommentEvent(db, {
     steps.push({ step: 'meta_send', message: 'Chamando Meta Graph API para envio real da resposta privada...' });
     metaResponse = await sendPrivateReply(
       metaConfig.accessToken,
-      metaConfig.accountId,
+      metaConfig.pageId || process.env.META_PAGE_ID,
       commentId,
-      resposta,
-      userId
+      resposta
     );
 
     if (metaResponse.ok) {

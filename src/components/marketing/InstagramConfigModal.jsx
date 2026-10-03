@@ -35,7 +35,7 @@ export default function InstagramConfigModal({ onClose, onSaved }) {
           <button className="modal-close" onClick={onClose} aria-label="Fechar"><XCircle /></button>
         </div>
         <p>Configure no ambiente do backend hospedado as variáveis <code>META_ACCESS_TOKEN</code>,
-          <code> INSTAGRAM_ACCOUNT_ID</code>, <code> META_APP_SECRET</code>, <code> META_APP_ID</code> e
+          <code> INSTAGRAM_ACCOUNT_ID</code>, <code> META_PAGE_ID</code>, <code> META_APP_SECRET</code>, <code> META_APP_ID</code> e
           <code> META_VERIFY_TOKEN</code>. Depois, publique a versão do backend.</p>
         <p>Cadastre no painel da Meta a URL de callback abaixo e o mesmo valor de
           <code> META_VERIFY_TOKEN</code>. Assine o evento <code>comments</code> do objeto Instagram.</p>
