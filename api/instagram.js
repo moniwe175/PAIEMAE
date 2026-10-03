@@ -29,13 +29,6 @@ function getDb() {
 
 // A service key ignora RLS; conferir a sessão e o cargo antes de qualquer uso.
 async function authorize(req, db, action) {
-  const urlObj = new URL(req.url, 'http://localhost');
-  const queryVerify = req.query?.verify_token || urlObj.searchParams.get('verify_token');
-  const headerVerify = req.headers?.['x-verify-token'];
-  if (action === 'diagnose' && process.env.META_VERIFY_TOKEN && (queryVerify === process.env.META_VERIFY_TOKEN || headerVerify === process.env.META_VERIFY_TOKEN)) {
-    return { user: { id: 'system_diag', role: 'admin' } };
-  }
-
   const header = req.headers?.authorization || '';
   const token = /^Bearer (\S+)$/i.exec(header)?.[1];
   if (!token) return { status: 401, error: 'Faça login para acessar o Marketing.' };
@@ -44,6 +37,12 @@ async function authorize(req, db, action) {
   const { data: profile, error: profileError } = await db.from('profiles')
     .select('role,cargo,permissions').eq('id', user.id).maybeSingle();
   if (profileError || !profile) return { status: 403, error: 'Perfil sem acesso.' };
+
+  // Diagnóstico técnico é restrito estritamente a administradores
+  if (action === 'diagnose' && profile.role !== 'admin') {
+    return { status: 403, error: 'Apenas administradores podem executar o diagnóstico.' };
+  }
+
   if (profile.role === 'admin') return { user };
   let permissions = profile.permissions || {};
   if (profile.cargo) {
@@ -340,8 +339,12 @@ async function sendPrivateReply(accessToken, accountId, commentId, messageText, 
   }
 }
 
-// ─── Diagnóstico Oficial da Conexão Meta e Token ──────────────────────────────
-async function runDiagnostics(db, { commentId = null } = {}) {
+// ─── Diagnóstico Oficial da Conexão Meta e Token (Apenas Leitura) ─────────────
+async function runDiagnostics(db) {
+  const EXPECTED_APP_ID = '2504035933430354';
+  const EXPECTED_PAGE_ID = '1640332469521785';
+  const EXPECTED_INSTAGRAM_ID = '17841403407235131';
+
   const config = await getMetaConfig(db);
   if (!config?.accessToken || !config?.accountId) {
     return {
@@ -375,11 +378,11 @@ async function runDiagnostics(db, { commentId = null } = {}) {
     debug_token: null,
     me_identity: null,
     linked_accounts: null,
-    test_private_reply_result: null,
+    comparisons: null,
     last_database_interaction: null,
   };
 
-  // 1. Resultado de /debug_token: app_id, type, is_valid, scopes, granular_scopes e validade
+  // 1. /debug_token: app_id, type, is_valid, scopes, granular_scopes e validade
   try {
     const debugAuthToken = (appId && appSecret) ? `${appId}|${appSecret}` : accessToken;
     const debugUrl = `${META_BASE_URL}/debug_token?input_token=${encodeURIComponent(accessToken)}&access_token=${encodeURIComponent(debugAuthToken)}`;
@@ -389,139 +392,165 @@ async function runDiagnostics(db, { commentId = null } = {}) {
       const d = debugJson.data;
       results.debug_token = {
         ok: true,
-        app_id: d.app_id,
-        type: d.type,
-        application: d.application,
-        is_valid: d.is_valid,
-        scopes: d.scopes || [],
-        granular_scopes: d.granular_scopes || [],
+        app_id: d.app_id || null,
+        type: d.type || 'UNKNOWN',
+        application: d.application || null,
+        is_valid: !!d.is_valid,
+        scopes: Array.isArray(d.scopes) ? d.scopes : [],
+        granular_scopes: Array.isArray(d.granular_scopes) ? d.granular_scopes : [],
         expires_at: d.expires_at ? new Date(d.expires_at * 1000).toISOString() : 'Never / Long-lived',
         data_access_expires_at: d.data_access_expires_at ? new Date(d.data_access_expires_at * 1000).toISOString() : null,
-        user_id: d.user_id,
-        raw: d,
+        user_id: d.user_id || null,
       };
     } else {
       results.debug_token = {
         ok: false,
         error: debugJson.error || debugJson,
-        note: !appId || !appSecret ? 'Dica: Adicionar META_APP_ID no backend da Vercel permite que o /debug_token use o App Token oficial.' : null,
+        note: !appId || !appSecret ? 'Adicione META_APP_ID e META_APP_SECRET na Vercel para inspecionar via App Access Token.' : null,
       };
     }
   } catch (err) {
     results.debug_token = { ok: false, error: err.message };
   }
 
-  // 2. Resultado de /me?fields=id,name: identidade à qual o token pertence
+  // 2. /me?fields=id,name: identidade à qual o token pertence (tipo vem do /debug_token)
   try {
-    const meUrl = `${META_BASE_URL}/me?fields=id,name,category`;
+    const meUrl = `${META_BASE_URL}/me?fields=id,name`;
     const meRes = await fetch(meUrl, { headers: { Authorization: `Bearer ${accessToken}` } });
     const meJson = await meRes.json();
     results.me_identity = {
-      http_status: meRes.status,
       id: meJson.id || null,
       name: meJson.name || null,
-      category: meJson.category || null,
-      type_detected: meJson.category ? 'PAGE' : (meJson.id ? 'USER' : 'UNKNOWN'),
-      raw: meJson,
+      token_type_from_debug: results.debug_token?.type || 'UNKNOWN',
     };
   } catch (err) {
     results.me_identity = { ok: false, error: err.message };
   }
 
-  // 3. Página e Instagram vinculados, comparados com os IDs esperados
-  try {
-    // 3a. Consultar se /me é uma Página e tem instagram_business_account
-    const pageWithIgUrl = `${META_BASE_URL}/me?fields=id,name,instagram_business_account{id,username,name}`;
-    const pageWithIgRes = await fetch(pageWithIgUrl, { headers: { Authorization: `Bearer ${accessToken}` } });
-    const pageWithIgJson = await pageWithIgRes.json();
+  // 3. Consulta de contas e vínculo de Página e Instagram (sem access_token e sem credenciais)
+  let sanitizedAccounts = null;
+  let expectedPageQuery = null;
+  let expectedIgDirect = null;
 
-    // 3b. Se o token for de Usuário, consultar /me/accounts para listar páginas e contas IG
-    let accountsJson = null;
+  try {
+    // 3a. /me/accounts: campos estritamente id, name, instagram_business_account (sem access_token)
     try {
-      const accountsRes = await fetch(`${META_BASE_URL}/me/accounts?fields=id,name,access_token,instagram_business_account{id,username,name}`, {
+      const accountsRes = await fetch(`${META_BASE_URL}/me/accounts?fields=id,name,instagram_business_account{id,username}`, {
         headers: { Authorization: `Bearer ${accessToken}` },
       });
-      accountsJson = await accountsRes.json();
+      const accountsJson = await accountsRes.json();
+      if (Array.isArray(accountsJson?.data)) {
+        sanitizedAccounts = accountsJson.data.map((acc) => ({
+          id: acc.id,
+          name: acc.name,
+          instagram_business_account: acc.instagram_business_account ? {
+            id: acc.instagram_business_account.id,
+            username: acc.instagram_business_account.username || null,
+          } : null,
+        }));
+      }
     } catch (_) {}
 
-    // 3c. Consultar a conta do Instagram configurada diretamente
-    let igDirectJson = null;
+    // 3b. Consulta direta à Página esperada (1640332469521785) para verificar o vínculo oficial com o Instagram
     try {
-      const igRes = await fetch(`${META_BASE_URL}/${accountId}?fields=id,username,name`, {
+      const pageRes = await fetch(`${META_BASE_URL}/${EXPECTED_PAGE_ID}?fields=id,name,instagram_business_account{id,username}`, {
         headers: { Authorization: `Bearer ${accessToken}` },
       });
-      igDirectJson = await igRes.json();
+      expectedPageQuery = await pageRes.json();
     } catch (err) {
-      igDirectJson = { error: err.message };
+      expectedPageQuery = { error: err.message };
     }
 
-    const linkedIgId = pageWithIgJson?.instagram_business_account?.id || null;
-    const matchesConfigured = linkedIgId === accountId || igDirectJson?.id === accountId;
+    // 3c. Consulta direta à conta Instagram para metadados públicos informativos
+    try {
+      const igRes = await fetch(`${META_BASE_URL}/${EXPECTED_INSTAGRAM_ID}?fields=id,username,name`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      expectedIgDirect = await igRes.json();
+    } catch (err) {
+      expectedIgDirect = { error: err.message };
+    }
 
     results.linked_accounts = {
-      configured_account_id: accountId,
-      me_page_with_instagram: pageWithIgJson,
-      accounts_list: accountsJson?.data || accountsJson?.error || null,
-      direct_instagram_query: igDirectJson,
-      comparison: {
-        matches_configured: matchesConfigured,
-        linked_ig_id: linkedIgId,
-        configured_id: accountId,
-        detail: linkedIgId === accountId
-          ? 'O ID da conta Instagram coincide exatamente com o instagram_business_account vinculado à Página.'
-          : (igDirectJson?.id === accountId
-            ? 'O ID da conta Instagram responde na Meta Graph API diretamente com o token configurado.'
-            : 'ATENÇÃO: O ID configurado INSTAGRAM_ACCOUNT_ID difere do ID da conta Instagram vinculada.'),
-      },
+      accounts_managed: sanitizedAccounts,
+      expected_page_details: expectedPageQuery?.id ? {
+        id: expectedPageQuery.id,
+        name: expectedPageQuery.name,
+        instagram_business_account: expectedPageQuery.instagram_business_account || null,
+      } : (expectedPageQuery?.error ? { error: expectedPageQuery.error.message || expectedPageQuery.error } : null),
+      expected_instagram_details: expectedIgDirect?.id ? {
+        id: expectedIgDirect.id,
+        username: expectedIgDirect.username,
+        name: expectedIgDirect.name,
+      } : (expectedIgDirect?.error ? { error: expectedIgDirect.error.message || expectedIgDirect.error } : null),
     };
   } catch (err) {
     results.linked_accounts = { ok: false, error: err.message };
   }
 
-  // 4. Erro original completo da Meta
+  // 4. Comparações separadas: Aplicativo, Página e Instagram
+  const actualAppId = results.debug_token?.app_id || null;
+  const appMatches = actualAppId === EXPECTED_APP_ID;
+
+  const tokenType = results.debug_token?.type || 'UNKNOWN';
+  const isPageTokenForExpected = tokenType === 'PAGE' && results.me_identity?.id === EXPECTED_PAGE_ID;
+  const userManagesExpectedPage = Array.isArray(sanitizedAccounts) && sanitizedAccounts.some((acc) => acc.id === EXPECTED_PAGE_ID);
+  const pageMatches = isPageTokenForExpected || userManagesExpectedPage;
+
+  const pageLinkedIgId = expectedPageQuery?.instagram_business_account?.id || null;
+  const pageLinkedIgMatches = pageLinkedIgId === EXPECTED_INSTAGRAM_ID;
+  const configuredIgMatches = accountId === EXPECTED_INSTAGRAM_ID;
+
+  results.comparisons = {
+    app: {
+      expected: EXPECTED_APP_ID,
+      actual: actualAppId,
+      matches: appMatches,
+      status: appMatches ? 'OK' : 'DIVERGÊNCIA',
+      detail: appMatches
+        ? `O token pertence ao App esperado (${EXPECTED_APP_ID}).`
+        : `Token pertence ao App ${actualAppId || 'desconhecido'}, diferente de ${EXPECTED_APP_ID}.`,
+    },
+    page: {
+      expected: EXPECTED_PAGE_ID,
+      token_type: tokenType,
+      actual_identity_id: results.me_identity?.id || null,
+      matches: pageMatches,
+      status: pageMatches ? 'OK' : 'DIVERGÊNCIA',
+      detail: isPageTokenForExpected
+        ? `Token é da Página esperada (${EXPECTED_PAGE_ID}).`
+        : (userManagesExpectedPage
+          ? `Token de Usuário que administra a Página esperada (${EXPECTED_PAGE_ID}).`
+          : `A identidade do token não corresponde à Página esperada (${EXPECTED_PAGE_ID}).`),
+    },
+    instagram: {
+      expected: EXPECTED_INSTAGRAM_ID,
+      configured_in_backend: accountId,
+      configured_matches_expected: configuredIgMatches,
+      page_linked_instagram_id: pageLinkedIgId,
+      page_link_matches_expected: pageLinkedIgMatches,
+      status: (configuredIgMatches && pageLinkedIgMatches) ? 'OK' : 'ATENÇÃO',
+      rule_note: 'Uma consulta direta ao Instagram bem-sucedida não comprova o vínculo com a Página esperada.',
+      detail: pageLinkedIgMatches
+        ? `A Página ${EXPECTED_PAGE_ID} possui vínculo confirmado com o Instagram ${EXPECTED_INSTAGRAM_ID}.`
+        : (pageLinkedIgId
+          ? `A Página ${EXPECTED_PAGE_ID} está vinculada a outro Instagram (${pageLinkedIgId}), diferente de ${EXPECTED_INSTAGRAM_ID}.`
+          : `Não foi encontrado vínculo direto entre a Página ${EXPECTED_PAGE_ID} e uma conta Instagram profissional.`),
+    },
+  };
+
+  // 5. Histórico do último comentário registrado no banco (para inspecionar erro prévio sem disparar mensagens)
   try {
     const { data: lastInteraction } = await db
       .from('instagram_interactions')
-      .select('*')
+      .select('comment_id, media_id, usuario_instagram, comentario_texto, palavra_chave_detectada, status, resposta_enviada, erro_detalhes, created_at')
       .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle();
 
     results.last_database_interaction = lastInteraction || null;
-
-    const targetCommentId = commentId || lastInteraction?.comment_id;
-    if (targetCommentId) {
-      const testUrl = `${META_BASE_URL}/${accountId}/messages`;
-      const testBody = {
-        recipient: { comment_id: targetCommentId },
-        message: { text: '[Teste de Diagnóstico PAIEMAE]' },
-      };
-
-      const testRes = await fetch(testUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${accessToken}`,
-        },
-        body: JSON.stringify(testBody),
-      });
-
-      const testJson = await testRes.json();
-      results.test_private_reply_result = {
-        endpoint_called: testUrl,
-        comment_id_tested: targetCommentId,
-        http_status: testRes.status,
-        headers: Object.fromEntries(testRes.headers.entries()),
-        raw_meta_response: testJson,
-      };
-    } else {
-      results.test_private_reply_result = {
-        skipped: true,
-        reason: 'Nenhum comment_id informado e nenhum comentário registrado no banco para teste.',
-      };
-    }
   } catch (err) {
-    results.test_private_reply_result = { ok: false, error: err.message };
+    results.last_database_interaction = { error: err.message };
   }
 
   return { ok: true, diagnostics: results };
@@ -1017,10 +1046,9 @@ export default async function handler(req, res) {
       }
     }
 
-    // GET /api/instagram?action=diagnose[&comment_id=...]
+    // GET /api/instagram?action=diagnose (Apenas Leitura — Exclusivo Admin)
     if (req.method === 'GET' && action === 'diagnose') {
-      const commentId = req.query?.comment_id || urlObj.searchParams.get('comment_id') || null;
-      const diagResult = await runDiagnostics(db, { commentId });
+      const diagResult = await runDiagnostics(db);
       return res.status(200).json(diagResult);
     }
 

@@ -63,34 +63,58 @@ export default function InstagramConfigModal({ onClose, onSaved }) {
           )}
 
           {diagData && (
-            <div style={{ fontSize: 12, marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
-              <div>
-                <strong>Endpoint Contratado:</strong> <code>{diagData.endpoint_contract}</code>
+            <div style={{ fontSize: 12, marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div style={{ padding: 8, background: '#ffffff', borderRadius: 6, border: '1px solid #e2e8f0' }}>
+                <div style={{ fontWeight: 600, color: '#334155', marginBottom: 4 }}>1. Aplicativo Meta (App ID)</div>
+                <div><strong>App ID:</strong> <code>{diagData.debug_token?.app_id || 'N/A'}</code> ({diagData.debug_token?.application || 'Sem nome'})</div>
+                <div style={{ marginTop: 2, color: diagData.comparisons?.app?.matches ? '#16a34a' : '#dc2626' }}>
+                  {diagData.comparisons?.app?.matches ? <CheckCircle2 style={{ width: 12, height: 12, display: 'inline', marginRight: 4 }} /> : <AlertTriangle style={{ width: 12, height: 12, display: 'inline', marginRight: 4 }} />}
+                  {diagData.comparisons?.app?.detail}
+                </div>
               </div>
-              <div>
-                <strong>Identidade /me:</strong> {diagData.me_identity?.name || 'N/A'} (ID: {diagData.me_identity?.id || 'N/A'}, Tipo: {diagData.me_identity?.type_detected})
-              </div>
-              <div>
-                <strong>Validação do Token (/debug_token):</strong> {diagData.debug_token?.is_valid ? (
-                  <span style={{ color: '#16a34a' }}><CheckCircle2 style={{ width: 12, height: 12, display: 'inline' }} /> Válido (Tipo: {diagData.debug_token.type})</span>
-                ) : (
-                  <span style={{ color: '#dc2626' }}>{diagData.debug_token?.error?.message || 'Não validado'}</span>
+
+              <div style={{ padding: 8, background: '#ffffff', borderRadius: 6, border: '1px solid #e2e8f0' }}>
+                <div style={{ fontWeight: 600, color: '#334155', marginBottom: 4 }}>2. Identidade e Tipo do Token</div>
+                <div><strong>Tipo do Token:</strong> <span className="badge" style={{ fontWeight: 600 }}>{diagData.debug_token?.type || 'UNKNOWN'}</span> (extraído de /debug_token)</div>
+                <div><strong>Identidade (/me):</strong> {diagData.me_identity?.name || 'N/A'} (ID: <code>{diagData.me_identity?.id || 'N/A'}</code>)</div>
+                <div style={{ marginTop: 2, color: diagData.debug_token?.is_valid ? '#16a34a' : '#dc2626' }}>
+                  <strong>Validade:</strong> {diagData.debug_token?.is_valid ? 'Token Válido' : 'Token Inválido'} • Expira em: {diagData.debug_token?.expires_at || 'Nunca'}
+                </div>
+                {diagData.debug_token?.scopes && (
+                  <div style={{ marginTop: 4 }}>
+                    <strong>Permissões (Scopes):</strong> <code>{diagData.debug_token.scopes.join(', ') || 'Nenhuma'}</code>
+                  </div>
                 )}
               </div>
-              {diagData.debug_token?.scopes && (
-                <div>
-                  <strong>Permissões (Scopes):</strong> {diagData.debug_token.scopes.join(', ') || 'Nenhum'}
+
+              <div style={{ padding: 8, background: '#ffffff', borderRadius: 6, border: '1px solid #e2e8f0' }}>
+                <div style={{ fontWeight: 600, color: '#334155', marginBottom: 4 }}>3. Vínculo da Página do Facebook (1640332469521785)</div>
+                <div style={{ color: diagData.comparisons?.page?.matches ? '#16a34a' : '#dc2626' }}>
+                  {diagData.comparisons?.page?.matches ? <CheckCircle2 style={{ width: 12, height: 12, display: 'inline', marginRight: 4 }} /> : <AlertTriangle style={{ width: 12, height: 12, display: 'inline', marginRight: 4 }} />}
+                  {diagData.comparisons?.page?.detail}
                 </div>
-              )}
-              <div>
-                <strong>Comparação de IDs:</strong> {diagData.linked_accounts?.comparison?.detail}
               </div>
-              {diagData.test_private_reply_result && (
-                <div style={{ marginTop: 6, padding: 6, background: '#f1f5f9', borderRadius: 4 }}>
-                  <strong>Resultado Envio Meta:</strong> Status {diagData.test_private_reply_result.http_status}
-                  <pre style={{ margin: '4px 0 0', fontSize: 11, maxHeight: 120, overflowY: 'auto' }}>
-                    {JSON.stringify(diagData.test_private_reply_result.raw_meta_response || diagData.test_private_reply_result, null, 2)}
-                  </pre>
+
+              <div style={{ padding: 8, background: '#ffffff', borderRadius: 6, border: '1px solid #e2e8f0' }}>
+                <div style={{ fontWeight: 600, color: '#334155', marginBottom: 4 }}>4. Vínculo da Conta Instagram (17841403407235131)</div>
+                <div><strong>ID Configurado no Backend:</strong> <code>{diagData.configured_account_id}</code></div>
+                <div style={{ marginTop: 2, color: diagData.comparisons?.instagram?.status === 'OK' ? '#16a34a' : '#d97706' }}>
+                  {diagData.comparisons?.instagram?.status === 'OK' ? <CheckCircle2 style={{ width: 12, height: 12, display: 'inline', marginRight: 4 }} /> : <AlertTriangle style={{ width: 12, height: 12, display: 'inline', marginRight: 4 }} />}
+                  {diagData.comparisons?.instagram?.detail}
+                </div>
+                <div style={{ fontSize: 11, color: '#64748b', marginTop: 4, fontStyle: 'italic' }}>
+                  * {diagData.comparisons?.instagram?.rule_note}
+                </div>
+              </div>
+
+              {diagData.last_database_interaction && (
+                <div style={{ padding: 8, background: '#fff1f2', borderRadius: 6, border: '1px solid #fecdd3' }}>
+                  <div style={{ fontWeight: 600, color: '#9f1239', marginBottom: 4 }}>5. Último Erro de Envio Registrado nos Logs</div>
+                  <div><strong>Comentário:</strong> &quot;{diagData.last_database_interaction.comentario_texto}&quot; por @{diagData.last_database_interaction.usuario_instagram}</div>
+                  <div><strong>Status:</strong> {diagData.last_database_interaction.status} ({new Date(diagData.last_database_interaction.created_at).toLocaleString()})</div>
+                  <div style={{ marginTop: 4, color: '#b91c1c', fontWeight: 500 }}>
+                    <strong>Erro da Meta:</strong> {diagData.last_database_interaction.erro_detalhes || 'Nenhum erro registrado'}
+                  </div>
                 </div>
               )}
             </div>
