@@ -252,64 +252,78 @@ export async function fetchInstagramInsights(accessToken, accountId, days, media
   return { ok: true, period_days: days, reach: series, totals, media, updated_at: new Date().toISOString() };
 }
 
-// ─── Disparo de Resposta Privada ao Comentário (Instagram Private Replies API) ─
-// Documentação oficial: https://developers.facebook.com/docs/instagram-platform/private-replies
-// Endpoint: POST /{ig-comment-id}/private_replies
-// Parâmetros: recipient_id = IGSID do comentarista (from.id do webhook), message = texto
-// Permissão necessária: instagram_manage_comments
-async function sendPrivateReply(accessToken, accountId, commentId, messageText, userId) {
-  void accountId;
+// ─── Disparo de Resposta Privada ao Comentário (Instagram Messaging API) ───────────
+// Referência: https://developers.facebook.com/docs/messenger-platform/instagram/features/private-replies
+// Endpoint : POST /{ig-account-id}/messages
+// Body     : { recipient: { comment_id }, message: { text } }
+// Auth     : Bearer {page-access-token} no header Authorization
+// Permissão: instagram_manage_messages
+async function sendPrivateReply(accessToken, accountId, commentId, messageText, _userId) {
+  void _userId;
   if (!accessToken) {
     return { ok: false, error: 'Token Meta ausente para envio de resposta privada.' };
+  }
+  if (!accountId) {
+    return { ok: false, error: 'ID da conta Instagram ausente (INSTAGRAM_ACCOUNT_ID).' };
   }
   if (!commentId) {
     return { ok: false, error: 'ID do comentário ausente; não é possível enviar resposta privada.' };
   }
-  if (!userId) {
-    return { ok: false, error: 'IGSID do comentarista ausente (from.id do webhook). Sem recipient_id não é possível enviar Direct.' };
-  }
 
   try {
-    // URL: /{ig-comment-id}/private_replies
-    // recipient_id: IGSID do usuário que comentou (v.from.id no webhook) — NÃO é o comment_id
-    const url = `${META_BASE_URL}/${commentId}/private_replies`;
-    const params = new URLSearchParams({
-      recipient_id: userId,   // IGSID do comentarista, obtido de v.from.id no webhook
-      message: messageText,
-      access_token: accessToken,
-    });
+    const url = `${META_BASE_URL}/${accountId}/messages`;
+    const body = {
+      recipient: { comment_id: commentId },
+      message:   { text: messageText },
+    };
 
-    const res = await fetch(`${url}?${params.toString()}`, {
+    const res = await fetch(url, {
       method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify(body),
     });
 
     const data = await res.json();
 
+    // Log estruturado para diagnóstico nos logs da Vercel
+    console.log('[Instagram/sendPrivateReply] status=%d payload=%s',
+      res.status, JSON.stringify(data).slice(0, 500));
+
     if (!res.ok || data.error) {
       const err = data.error || {};
-      let friendly = err.message || 'Falha ao enviar resposta privada.';
+      const diagnostic = {
+        code:          err.code,
+        error_subcode: err.error_subcode,
+        fbtrace_id:    err.fbtrace_id,
+        type:          err.type,
+        raw_message:   err.message,
+      };
 
+      let friendly = err.message || 'Falha ao enviar resposta privada.';
       if (err.code === 3) {
-        friendly = 'App sem capacidade: verifique se instagram_manage_comments está aprovado no App Review.';
+        friendly = `(#3) App sem capacidade. Permissão instagram_manage_messages pode não estar aprovada ou o token não é de Página. fbtrace_id: ${err.fbtrace_id || 'N/A'}`;
       } else if (err.code === 10) {
-        friendly = 'Permissão insuficiente: instagram_manage_comments não concedida ao token.';
+        friendly = `(#10) Permissão insuficiente: instagram_manage_messages ausente no token. fbtrace_id: ${err.fbtrace_id || 'N/A'}`;
       } else if (err.code === 100 && err.error_subcode === 2018028) {
-        friendly = 'Janela expirada: mais de 7 dias desde o comentário, ou resposta já enviada.';
+        friendly = '(#100/2018028) Janela expirada: mais de 7 dias desde o comentário, ou resposta já enviada.';
       } else if (err.code === 100) {
-        friendly = `Parâmetro inválido na Private Replies API: ${err.message}`;
+        friendly = `(#100) Parâmetro inválido: ${err.message}`;
       } else if (err.code === 190) {
-        friendly = 'Token inválido ou expirado. Gere um novo token de Página de longa duração.';
+        friendly = `(#190) Token inválido ou expirado. Gere um novo token de Página. fbtrace_id: ${err.fbtrace_id || 'N/A'}`;
       } else if (err.code === 200 || err.code === 230) {
-        friendly = 'Permissões de Página insuficientes. O token precisa de instagram_manage_comments.';
+        friendly = `(#${err.code}) Permissões de Página insuficientes para instagram_manage_messages.`;
       }
 
-      return { ok: false, error: friendly, raw_error: err, code: err.code };
+      return { ok: false, error: friendly, diagnostic };
     }
 
     return {
       ok: true,
-      private_reply_id: data.id,
-      message_sent: true,
+      recipient_id: data.recipient_id,
+      message_id:   data.message_id,
     };
   } catch (err) {
     return {
