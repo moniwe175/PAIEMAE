@@ -255,22 +255,26 @@ export async function fetchInstagramInsights(accessToken, accountId, days, media
 // ─── Disparo de Resposta Privada ao Comentário (Instagram Private Replies API) ─
 // Documentação oficial: https://developers.facebook.com/docs/instagram-platform/private-replies
 // Endpoint: POST /{ig-comment-id}/private_replies
-// Permissão necessária: instagram_manage_comments  (NÃO é instagram_manage_messages)
-// O token deve ser de Página com acesso à conta profissional do Instagram.
-async function sendPrivateReply(accessToken, accountId, commentId, messageText) {
-  void accountId; // não usado neste endpoint; mantido na assinatura por compatibilidade
+// Parâmetros: recipient_id = IGSID do comentarista (from.id do webhook), message = texto
+// Permissão necessária: instagram_manage_comments
+async function sendPrivateReply(accessToken, accountId, commentId, messageText, userId) {
+  void accountId;
   if (!accessToken) {
     return { ok: false, error: 'Token Meta ausente para envio de resposta privada.' };
   }
   if (!commentId) {
     return { ok: false, error: 'ID do comentário ausente; não é possível enviar resposta privada.' };
   }
+  if (!userId) {
+    return { ok: false, error: 'IGSID do comentarista ausente (from.id do webhook). Sem recipient_id não é possível enviar Direct.' };
+  }
 
   try {
-    // Endpoint correto: /{ig-comment-id}/private_replies
+    // URL: /{ig-comment-id}/private_replies
+    // recipient_id: IGSID do usuário que comentou (v.from.id no webhook) — NÃO é o comment_id
     const url = `${META_BASE_URL}/${commentId}/private_replies`;
     const params = new URLSearchParams({
-      recipient_id: commentId,   // ID do comentário — quem vai receber a resposta privada
+      recipient_id: userId,   // IGSID do comentarista, obtido de v.from.id no webhook
       message: messageText,
       access_token: accessToken,
     });
@@ -285,32 +289,25 @@ async function sendPrivateReply(accessToken, accountId, commentId, messageText) 
       const err = data.error || {};
       let friendly = err.message || 'Falha ao enviar resposta privada.';
 
-      // Mapeamento dos erros mais comuns da Private Replies API
       if (err.code === 3) {
-        friendly = 'O aplicativo não tem capacidade para esta chamada. Verifique se instagram_manage_comments está aprovado no App Review e se o token de Página tem essa permissão.';
+        friendly = 'App sem capacidade: verifique se instagram_manage_comments está aprovado no App Review.';
       } else if (err.code === 10) {
         friendly = 'Permissão insuficiente: instagram_manage_comments não concedida ao token.';
       } else if (err.code === 100 && err.error_subcode === 2018028) {
-        friendly = 'Janela expirada: mais de 7 dias desde o comentário, ou resposta já enviada para este comentário.';
+        friendly = 'Janela expirada: mais de 7 dias desde o comentário, ou resposta já enviada.';
       } else if (err.code === 100) {
         friendly = `Parâmetro inválido na Private Replies API: ${err.message}`;
       } else if (err.code === 190) {
         friendly = 'Token inválido ou expirado. Gere um novo token de Página de longa duração.';
       } else if (err.code === 200 || err.code === 230) {
-        friendly = 'Permissões de Página insuficientes. O token de Página precisa de instagram_manage_comments.';
+        friendly = 'Permissões de Página insuficientes. O token precisa de instagram_manage_comments.';
       }
 
-      return {
-        ok: false,
-        error: friendly,
-        raw_error: err,
-        code: err.code,
-      };
+      return { ok: false, error: friendly, raw_error: err, code: err.code };
     }
 
     return {
       ok: true,
-      // A Private Replies API retorna { id } do comentário respondido, não recipient_id
       private_reply_id: data.id,
       message_sent: true,
     };
@@ -417,6 +414,7 @@ async function forwardToCrm(db, { username, commentText, keyword, campaignName }
 export async function processCommentEvent(db, {
   commentId,
   mediaId,
+  userId = '',
   username,
   text,
   mediaCaption = '',
@@ -616,7 +614,8 @@ export async function processCommentEvent(db, {
       metaConfig.accessToken,
       metaConfig.accountId,
       commentId,
-      resposta
+      resposta,
+      userId
     );
 
     if (metaResponse.ok) {

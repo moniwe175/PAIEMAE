@@ -58,6 +58,7 @@ export default async function handler(req, res) {
         if (!v.id || !v.media?.id || !v.text || String(v.from?.id) === String(entry.id)) continue;
         await processCommentEvent(db, {
           commentId: String(v.id), mediaId: String(v.media.id),
+          userId: String(v.from?.id || ''),
           username: v.from?.username || '', text: v.text,
         });
         processed++;
