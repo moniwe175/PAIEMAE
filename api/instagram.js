@@ -252,38 +252,52 @@ export async function fetchInstagramInsights(accessToken, accountId, days, media
   return { ok: true, period_days: days, reach: series, totals, media, updated_at: new Date().toISOString() };
 }
 
-// ─── Disparo de Resposta Privada ao Comentário (Meta Direct API) ─────────────
+// ─── Disparo de Resposta Privada ao Comentário (Instagram Private Replies API) ─
+// Documentação oficial: https://developers.facebook.com/docs/instagram-platform/private-replies
+// Endpoint: POST /{ig-comment-id}/private_replies
+// Permissão necessária: instagram_manage_comments  (NÃO é instagram_manage_messages)
+// O token deve ser de Página com acesso à conta profissional do Instagram.
 async function sendPrivateReply(accessToken, accountId, commentId, messageText) {
-  if (!accessToken || !accountId) {
-    return { ok: false, error: 'Credenciais Meta ausentes para envio de Direct.' };
+  void accountId; // não usado neste endpoint; mantido na assinatura por compatibilidade
+  if (!accessToken) {
+    return { ok: false, error: 'Token Meta ausente para envio de resposta privada.' };
+  }
+  if (!commentId) {
+    return { ok: false, error: 'ID do comentário ausente; não é possível enviar resposta privada.' };
   }
 
   try {
-    const url = `${META_BASE_URL}/${accountId}/messages`;
-    const payload = {
-      recipient: {
-        comment_id: commentId,
-      },
-      message: {
-        text: messageText,
-      },
-    };
+    // Endpoint correto: /{ig-comment-id}/private_replies
+    const url = `${META_BASE_URL}/${commentId}/private_replies`;
+    const params = new URLSearchParams({
+      recipient_id: commentId,   // ID do comentário — quem vai receber a resposta privada
+      message: messageText,
+      access_token: accessToken,
+    });
 
-    const res = await fetch(url, {
+    const res = await fetch(`${url}?${params.toString()}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
-      body: JSON.stringify(payload),
     });
 
     const data = await res.json();
 
     if (!res.ok || data.error) {
       const err = data.error || {};
-      let friendly = err.message || 'Falha ao enviar resposta privada na Meta.';
-      if (err.code === 10) {
-        friendly = 'Limite de envio excedido ou permissão instagram_manage_messages ausente.';
-      } else if (err.error_subcode === 2018028) {
-        friendly = 'Já se passaram mais de 7 dias desde o comentário (limite da janela da Meta) ou resposta já enviada.';
+      let friendly = err.message || 'Falha ao enviar resposta privada.';
+
+      // Mapeamento dos erros mais comuns da Private Replies API
+      if (err.code === 3) {
+        friendly = 'O aplicativo não tem capacidade para esta chamada. Verifique se instagram_manage_comments está aprovado no App Review e se o token de Página tem essa permissão.';
+      } else if (err.code === 10) {
+        friendly = 'Permissão insuficiente: instagram_manage_comments não concedida ao token.';
+      } else if (err.code === 100 && err.error_subcode === 2018028) {
+        friendly = 'Janela expirada: mais de 7 dias desde o comentário, ou resposta já enviada para este comentário.';
+      } else if (err.code === 100) {
+        friendly = `Parâmetro inválido na Private Replies API: ${err.message}`;
+      } else if (err.code === 190) {
+        friendly = 'Token inválido ou expirado. Gere um novo token de Página de longa duração.';
+      } else if (err.code === 200 || err.code === 230) {
+        friendly = 'Permissões de Página insuficientes. O token de Página precisa de instagram_manage_comments.';
       }
 
       return {
@@ -296,13 +310,14 @@ async function sendPrivateReply(accessToken, accountId, commentId, messageText) 
 
     return {
       ok: true,
-      recipient_id: data.recipient_id,
-      message_id: data.message_id,
+      // A Private Replies API retorna { id } do comentário respondido, não recipient_id
+      private_reply_id: data.id,
+      message_sent: true,
     };
   } catch (err) {
     return {
       ok: false,
-      error: `Erro ao enviar resposta privada: ${err.message}`,
+      error: `Erro de rede ao enviar resposta privada: ${err.message}`,
     };
   }
 }
