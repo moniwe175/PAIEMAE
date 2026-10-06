@@ -50,6 +50,8 @@ export default function InstagramTestModal({
         id: rule.id,
         palavra_chave: rule.palavra_chave,
         resposta_privada: rule.resposta_privada,
+        responder_comentario: rule.responder_comentario,
+        resposta_publica: rule.resposta_publica,
         status: rule.status,
         encaminhar_crm: rule.encaminhar_crm,
         campanha_nome: rule.campanha_nome,
@@ -94,7 +96,7 @@ export default function InstagramTestModal({
             <div>
               <span className="modal-title">Simulador de Comentário</span>
               <p style={{ margin: 0, fontSize: 11, color: 'var(--text-muted)' }}>
-                Pré-visualize a regra. O teste não envia Direct nem grava no CRM.
+                Pré-visualize a regra. O teste não envia Direct, não publica comentários e não grava no CRM.
               </p>
             </div>
           </div>
@@ -281,6 +283,13 @@ export default function InstagramTestModal({
                 <div style={{ fontSize: 13, lineHeight: 1.5, color: '#E5E7EB' }}>
                   {testResult.response_text}
                 </div>
+              </div>
+            )}
+
+            {testResult.public_reply?.status === 'simulado' && (
+              <div style={{ marginTop: 10, padding: 12, background: '#F3F4F6', borderRadius: 8, fontSize: 12 }}>
+                <strong>Resposta pública após o sucesso da DM (simulação):</strong>
+                <p style={{ margin: '6px 0 0' }}>{testResult.public_reply.text}</p>
               </div>
             )}
 

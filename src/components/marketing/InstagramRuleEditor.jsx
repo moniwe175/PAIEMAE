@@ -20,6 +20,8 @@ export default function InstagramRuleEditor({
   const [status, setStatus] = useState('pausado');
   const [campanhaId, setCampanhaId] = useState('');
   const [encaminharCrm, setEncaminharCrm] = useState(true);
+  const [responderComentario, setResponderComentario] = useState(false);
+  const [respostaPublica, setRespostaPublica] = useState('Prontinho! Te enviei as informações no Direct 💜');
   const [error, setError] = useState('');
 
   // Sincroniza estado quando a publicação ou regra selecionada muda
@@ -30,6 +32,8 @@ export default function InstagramRuleEditor({
       setStatus(existingRule.status || 'pausado');
       setCampanhaId(existingRule.campanha_id || '');
       setEncaminharCrm(existingRule.encaminhar_crm !== false);
+      setResponderComentario(existingRule.responder_comentario === true);
+      setRespostaPublica(existingRule.resposta_publica || 'Prontinho! Te enviei as informações no Direct 💜');
     } else {
       setKeyword('');
       setResposta(
@@ -38,6 +42,8 @@ export default function InstagramRuleEditor({
       setStatus('pausado');
       setCampanhaId('');
       setEncaminharCrm(true);
+      setResponderComentario(false);
+      setRespostaPublica('Prontinho! Te enviei as informações no Direct 💜');
     }
     setError('');
   }, [existingRule, selectedPost]);
@@ -63,6 +69,14 @@ export default function InstagramRuleEditor({
       setError('Digite a mensagem da resposta privada (DM).');
       return;
     }
+    if (responderComentario && !respostaPublica.trim()) {
+      setError('Digite a resposta pública antes de ativá-la.');
+      return;
+    }
+    if (respostaPublica.trim().length > 500) {
+      setError('A resposta pública aceita até 500 caracteres.');
+      return;
+    }
     setError('');
 
     const selectedCamp = campaigns.find((c) => String(c.id) === String(campanhaId));
@@ -80,6 +94,8 @@ export default function InstagramRuleEditor({
       campanha_id: campanhaId || null,
       campanha_nome: selectedCamp?.nome || null,
       encaminhar_crm: encaminharCrm,
+      responder_comentario: responderComentario,
+      resposta_publica: respostaPublica.trim(),
     };
 
     await onSaveRule(payload);
@@ -91,6 +107,10 @@ export default function InstagramRuleEditor({
 
   // Preview formatado com tags fictícias
   const previewText = resposta
+    .replace(/\{\{usuario\}\}/gi, '@maria_souza')
+    .replace(/\{\{nome\}\}/gi, 'Maria')
+    .replace(/\{\{post\}\}/gi, selectedPost.caption ? `"${selectedPost.caption.slice(0, 24)}..."` : 'publicação');
+  const publicPreview = respostaPublica
     .replace(/\{\{usuario\}\}/gi, '@maria_souza')
     .replace(/\{\{nome\}\}/gi, 'Maria')
     .replace(/\{\{post\}\}/gi, selectedPost.caption ? `"${selectedPost.caption.slice(0, 24)}..."` : 'publicação');
@@ -375,6 +395,43 @@ export default function InstagramRuleEditor({
             </div>
           </div>
         </div>
+      </div>
+
+      {/* Seção Resposta Pública */}
+      <div style={{ marginTop: 20, padding: 14, borderRadius: 8, border: '1px solid var(--border-light, #E5E7EB)' }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', fontWeight: 700, fontSize: 13 }}>
+          <input
+            type="checkbox"
+            checked={responderComentario}
+            disabled={saving}
+            onChange={(event) => { setResponderComentario(event.target.checked); setError(''); }}
+          />
+          Responder também ao comentário
+        </label>
+        <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 6 }}>
+          Publica esta resposta abaixo do comentário somente após a confirmação do envio da DM.
+          A resposta ficará visível no Instagram.
+        </p>
+        {responderComentario && (
+          <div className="form-group">
+            <label className="form-label" htmlFor="instagram-public-reply">Texto da resposta pública</label>
+            <textarea
+              id="instagram-public-reply"
+              className="form-textarea"
+              value={respostaPublica}
+              maxLength={500}
+              disabled={saving}
+              onChange={(event) => { setRespostaPublica(event.target.value); setError(''); }}
+              style={{ minHeight: 65 }}
+            />
+            <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+              {respostaPublica.length}/500 caracteres · Aceita emojis e a tag {'{{usuario}}'}.
+            </span>
+            <div style={{ marginTop: 8, padding: '8px 12px', borderRadius: 8, background: 'var(--bg-main, #F9FAFB)', fontSize: 12 }}>
+              <strong>Prévia do comentário: </strong>{publicPreview || 'Digite sua resposta acima.'}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Meta Limits & Regulations Note */}

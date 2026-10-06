@@ -658,6 +658,42 @@ async function forwardToCrm(db, { username, commentText, keyword, campaignName }
   }
 }
 
+// Resposta pública: o nó é o comentário, separado do envio privado pela Página.
+async function sendPublicReply(accessToken, commentId, messageText) {
+  try {
+    const response = await fetch(`${META_BASE_URL}/${encodeURIComponent(commentId)}/replies`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+      body: JSON.stringify({ message: messageText }),
+      signal: AbortSignal.timeout(15000),
+    });
+    const data = await response.json();
+    if (!response.ok || data.error) {
+      const error = data.error || {};
+      return {
+        status: response.status >= 500 ? 'incerto' : 'falha',
+        error: error.message || `A Meta recusou a resposta pública (HTTP ${response.status}).`,
+        diagnostic: { code: error.code, error_subcode: error.error_subcode, fbtrace_id: error.fbtrace_id },
+      };
+    }
+    if (!data.id) {
+      return { status: 'incerto', error: 'A Meta não retornou o ID da resposta pública. Confira o comentário antes de tentar novamente.' };
+    }
+    return { status: 'enviada', id: String(data.id), sent_at: new Date().toISOString() };
+  } catch {
+    // A requisição pode ter chegado à Meta. Não repetir automaticamente.
+    return { status: 'incerto', error: 'Não foi possível confirmar a resposta pública. Confira o comentário no Instagram; não houve nova tentativa automática.' };
+  }
+}
+
+function publicReplyValidation(enabled, message) {
+  if (typeof enabled !== 'boolean') return 'A opção de resposta pública deve ser verdadeiro ou falso.';
+  if (typeof message !== 'string') return 'O texto da resposta pública deve ser uma mensagem.';
+  if (enabled && !message.trim()) return 'Digite a resposta pública antes de ativá-la.';
+  if (message.trim().length > 500) return 'A resposta pública aceita até 500 caracteres.';
+  return null;
+}
+
 // ─── Processamento de Evento de Comentário ───────────────────────────────────
 export async function processCommentEvent(db, {
   commentId,
@@ -671,6 +707,10 @@ export async function processCommentEvent(db, {
   rule: explicitRule = null,
 }) {
   if (!commentId || !mediaId || !text) throw new Error('Evento de comentário incompleto.');
+  // Evita que uma resposta publicada pela própria conta acione a automação.
+  if (!isTestSimulation && userId && String(userId) === String(process.env.INSTAGRAM_ACCOUNT_ID)) {
+    return { ok: true, matched: false, status: 'ignorado', steps: [] };
+  }
   const safeUsername = (username || '').replace(/^@/, '');
   const steps = [];
   steps.push({
@@ -805,6 +845,12 @@ export async function processCommentEvent(db, {
     .replace(/\{\{nome\}\}/gi, safeUsername || 'você')
     .replace(/\{\{post\}\}/gi, mediaCaption ? `"${mediaCaption.slice(0, 30)}..."` : 'publicação');
 
+  const publicEnabled = rule.responder_comentario === true;
+  const publicText = (rule.resposta_publica || '').trim()
+    .replace(/\{\{usuario\}\}/gi, safeUsername ? `@${safeUsername}` : 'você')
+    .replace(/\{\{nome\}\}/gi, safeUsername || 'você')
+    .replace(/\{\{post\}\}/gi, mediaCaption ? `"${mediaCaption.slice(0, 30)}..."` : 'publicação');
+
   // 6. Diferenciação Clara: Simulação vs Operação Real
   if (isTestSimulation) {
     // SIMULAÇÃO: NÃO chama a Meta e NÃO cria lead real no CRM
@@ -812,6 +858,13 @@ export async function processCommentEvent(db, {
     steps.push({
       step: 'simulation_dm',
       message: `[SIMULAÇÃO] Resposta privada formatada para envio: "${resposta}" (Nenhum Direct enviado pela Meta em modo simulação).`,
+    });
+
+    steps.push({
+      step: 'simulation_public_reply',
+      message: publicEnabled
+        ? `[SIMULAÇÃO] Após o sucesso da DM, responderia ao comentário: "${publicText}". Nenhum comentário publicado.`
+        : '[SIMULAÇÃO] Resposta pública desativada nesta regra.',
     });
 
     const crmPreview = {
@@ -845,6 +898,7 @@ export async function processCommentEvent(db, {
       rule_id: rule.id,
       response_sent: false,
       response_text: resposta,
+      public_reply: { status: publicEnabled ? 'simulado' : 'desativado', text: publicText, sent: false },
       crm_preview: crmPreview,
       steps,
     };
@@ -875,6 +929,37 @@ export async function processCommentEvent(db, {
   } else {
     sendError = 'Credenciais Meta ausentes para envio real.';
     steps.push({ step: 'meta_error', message: sendError });
+  }
+
+  let publicReply = {
+    status: publicEnabled ? 'nao_enviada' : 'desativado',
+    text: publicEnabled ? publicText : null,
+    sent: false,
+  };
+  if (publicEnabled && responseSent) {
+    const validationError = publicReplyValidation(true, publicText);
+    if (validationError) {
+      publicReply = { ...publicReply, status: 'falha', error: validationError };
+    } else {
+      // Checkpoint durável da DM antes do segundo efeito externo.
+      publicReply.status = 'processando';
+      await recordInteraction(db, {
+        commentId, status: 'processando', respostaEnviada: true, respostaTexto: resposta,
+        metadata: { dm_message_id: metaResponse.message_id, public_reply: publicReply },
+      });
+      steps.push({ step: 'public_send', message: 'DM confirmada. Enviando a resposta pública ao comentário...' });
+      publicReply = { ...publicReply, ...await sendPublicReply(metaConfig.accessToken, commentId, publicText) };
+      publicReply.sent = publicReply.status === 'enviada';
+    }
+    steps.push({
+      step: publicReply.sent ? 'public_success' : 'public_error',
+      message: publicReply.sent
+        ? `Resposta pública enviada (ID ${publicReply.id}).`
+        : `DM enviada; resposta pública não confirmada: ${publicReply.error}`,
+    });
+  } else if (publicEnabled) {
+    publicReply.reason = 'A resposta pública exige o sucesso confirmado da DM.';
+    steps.push({ step: 'public_skipped', message: publicReply.reason });
   }
 
   // Encaminhar interesse real ao CRM
@@ -916,6 +1001,7 @@ export async function processCommentEvent(db, {
     erro: sendError || crmResult?.error || null,
     crmLeadId: crmResult?.lead_id || null,
     campanhaNome: rule.campanha_nome || null,
+    metadata: { dm_message_id: metaResponse?.message_id || null, public_reply: publicReply },
   });
 
   return {
@@ -928,6 +1014,7 @@ export async function processCommentEvent(db, {
     crm_lead_id: crmResult?.lead_id || null,
     is_new_lead: crmResult?.is_new || false,
     meta_response: metaResponse,
+    public_reply: publicReply,
     interaction: interactionRecord,
     steps,
   };
@@ -949,6 +1036,7 @@ async function recordInteraction(db, {
   erro = null,
   crmLeadId = null,
   campanhaNome = null,
+  metadata = null,
 }) {
   const item = { status: status || 'falha', resposta_enviada: respostaEnviada };
   if (mediaId) item.media_id = mediaId;
@@ -962,6 +1050,7 @@ async function recordInteraction(db, {
   if (erro) item.erro_detalhes = erro;
   if (crmLeadId) item.crm_lead_id = crmLeadId;
   if (campanhaNome) item.campanha_nome = campanhaNome;
+  if (metadata) item.metadata = metadata;
   const { data, error: updateError } = await db.from('instagram_interactions')
     .update(item).eq('comment_id', commentId).select().single();
   if (updateError) throw new Error(`Falha ao registrar resultado do comentário: ${updateError.message}`);
@@ -1097,7 +1186,12 @@ export default async function handler(req, res) {
         campanha_id,
         campanha_nome,
         encaminhar_crm = true,
+        responder_comentario = false,
+        resposta_publica = '',
       } = body;
+
+      const publicValidation = publicReplyValidation(responder_comentario, resposta_publica);
+      if (publicValidation) return res.status(400).json({ ok: false, error: publicValidation });
 
       if (!media_id || !palavra_chave || !resposta_privada) {
         return res.status(400).json({
@@ -1118,6 +1212,8 @@ export default async function handler(req, res) {
         campanha_id: campanha_id ? parseInt(campanha_id, 10) : null,
         campanha_nome: campanha_nome || null,
         encaminhar_crm: !!encaminhar_crm,
+        responder_comentario,
+        resposta_publica: resposta_publica.trim(),
         updated_at: new Date().toISOString(),
       };
 
@@ -1150,6 +1246,17 @@ export default async function handler(req, res) {
       }
 
       const updates = { updated_at: new Date().toISOString() };
+      if (body.responder_comentario !== undefined || body.resposta_publica !== undefined) {
+        const { data: current, error: readError } = await db.from('instagram_rules')
+          .select('responder_comentario,resposta_publica').eq('id', id).single();
+        if (readError) return res.status(500).json({ ok: false, error: readError.message });
+        const enabled = body.responder_comentario ?? current.responder_comentario ?? false;
+        const message = body.resposta_publica ?? current.resposta_publica ?? '';
+        const validationError = publicReplyValidation(enabled, message);
+        if (validationError) return res.status(400).json({ ok: false, error: validationError });
+        updates.responder_comentario = enabled;
+        updates.resposta_publica = message.trim();
+      }
       if (status) updates.status = status;
       if (resposta_privada) updates.resposta_privada = resposta_privada;
       if (palavra_chave) updates.palavra_chave = palavra_chave.trim().toUpperCase();
