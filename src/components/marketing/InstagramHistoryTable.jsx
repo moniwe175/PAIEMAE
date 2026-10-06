@@ -25,7 +25,8 @@ export default function InstagramHistoryTable({
         (item.palavra_chave_detectada || '').toLowerCase().includes(busca.toLowerCase());
 
       const matchStatus =
-        statusFiltro === 'todos' || item.status === statusFiltro;
+        statusFiltro === 'todos' || item.status === statusFiltro ||
+        (statusFiltro === 'falha' && ['falha', 'incerto'].includes(item.metadata?.public_reply?.status));
 
       return matchBusca && matchStatus;
     });
@@ -93,7 +94,7 @@ export default function InstagramHistoryTable({
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <History style={{ width: 16, height: 16, color: '#E1306C' }} />
           <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-dark)' }}>
-            Histórico de Comentários & Respostas Privadas
+            Histórico de Comentários e Respostas
           </span>
           <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
             ({filtradas.length} de {interactions.length})
@@ -166,13 +167,23 @@ export default function InstagramHistoryTable({
                 <th>Comentário Recebido</th>
                 <th>Palavra-chave</th>
                 <th>Resposta Privada / Erro</th>
+                <th>Resposta Pública</th>
                 <th>Vínculo CRM</th>
               </tr>
             </thead>
             <tbody>
               {filtradas.map((item) => {
-                const st = getStatusBadge(item.status);
+                const st = getStatusBadge(item.resposta_enviada ? 'sucesso' : item.status);
                 const StIcon = st.icon;
+                const publicReply = item.metadata?.public_reply;
+                const publicLabels = {
+                  enviada: 'Comentário respondido',
+                  falha: 'Resposta pública falhou',
+                  incerto: 'Envio público não confirmado',
+                  processando: 'Resposta pública em processamento',
+                  nao_enviada: 'Aguardava sucesso da DM',
+                  desativado: 'Desativada',
+                };
 
                 return (
                   <tr key={item.id || item.comment_id}>
@@ -302,6 +313,18 @@ export default function InstagramHistoryTable({
                             {item.erro_detalhes}
                           </span>
                         )}
+                      </div>
+                    </td>
+
+                    <td>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxWidth: 220, fontSize: 11 }}>
+                        <span style={{ color: publicReply?.sent ? '#059669' : ['falha', 'incerto'].includes(publicReply?.status) ? '#B45309' : 'var(--text-muted)' }}>
+                          {publicLabels[publicReply?.status] || '—'}
+                        </span>
+                        {publicReply?.text && <span>{publicReply.text}</span>}
+                        {publicReply?.error && <span title={publicReply.error}>{publicReply.error}</span>}
+                        {publicReply?.id && <span title={publicReply.id}>ID: {publicReply.id}</span>}
+                        {publicReply?.sent_at && <span>{fmtDate(publicReply.sent_at)}</span>}
                       </div>
                     </td>
 

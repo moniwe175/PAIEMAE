@@ -43,6 +43,12 @@ CREATE TABLE IF NOT EXISTS public.instagram_rules (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 -- A tela apresenta uma regra por publicação; evite uma escolha arbitrária no webhook.
+-- Resposta pública opcional: aplica também às instalações que já possuem regras.
+-- Regras existentes continuam enviando apenas a DM até ativação explícita.
+ALTER TABLE public.instagram_rules
+  ADD COLUMN IF NOT EXISTS responder_comentario boolean NOT NULL DEFAULT false,
+  ADD COLUMN IF NOT EXISTS resposta_publica text NOT NULL DEFAULT '';
+
 CREATE UNIQUE INDEX IF NOT EXISTS idx_instagram_rules_media_unique ON public.instagram_rules(media_id);
 CREATE INDEX IF NOT EXISTS idx_instagram_rules_status ON public.instagram_rules(status);
 
