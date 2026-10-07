@@ -17,6 +17,7 @@ import InstagramHistoryTable from '../components/marketing/InstagramHistoryTable
 import InstagramTestModal from '../components/marketing/InstagramTestModal';
 import InstagramConfigModal from '../components/marketing/InstagramConfigModal';
 import InstagramInsightsPanel from '../components/marketing/InstagramInsightsPanel';
+import IdeiasPlanejamento from '../components/marketing/IdeiasPlanejamento';
 import {
   getInstagramStatus,
   getInstagramMedia,
@@ -269,7 +270,7 @@ function CampanhaDetail({ campanha, onClose, onEdit }) {
 // ─── Main Component ────────────────────────────────────────────
 
 export default function Marketing() {
-  const [subTab, setSubTab] = useState('campanhas'); // 'campanhas' | 'instagram' | 'insights'
+  const [subTab, setSubTab] = useState('campanhas'); // 'campanhas' | 'instagram' | 'insights' | 'ideias'
 
   // ── Campanhas State ──
   const [campanhas, setCampanhas] = useState([]);
@@ -525,9 +526,11 @@ export default function Marketing() {
           <div className="page-header-label"><Megaphone />MARKETING & AUTOMAÇÃO</div>
           <h1 className="page-title">Marketing</h1>
           <p className="page-subtitle">
-            {subTab === 'campanhas'
+          {subTab === 'campanhas'
               ? `${campanhas.length} campanhas · ${ativas.length} ativas`
-              : subTab === 'insights' ? 'Desempenho orgânico do Instagram' : `Automação Oficial do Instagram · ${activeIgRulesCount} regras ativas`}
+              : subTab === 'insights' ? 'Desempenho orgânico do Instagram'
+              : subTab === 'ideias' ? `${campanhas.length > 0 ? 'Planejamento conectado a campanhas' : 'Capture e organize suas ideias de marketing'}`
+              : `Automação Oficial do Instagram · ${activeIgRulesCount} regras ativas`}
           </p>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
@@ -585,6 +588,13 @@ export default function Marketing() {
           style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700 }}
         >
           <TrendingUp style={{ width: 14, height: 14, color: '#C02662' }} /> Insights Instagram
+        </button>
+        <button
+          className={`tab-item${subTab === 'ideias' ? ' active' : ''}`}
+          onClick={() => setSubTab('ideias')}
+          style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700 }}
+        >
+          <Sparkles style={{ width: 14, height: 14, color: '#8B5CF6' }} /> Ideias e Planejamento
         </button>
       </div>
 
@@ -817,6 +827,17 @@ export default function Marketing() {
         </div>
       )}
       {subTab === 'insights' && <InstagramInsightsPanel statusData={igStatus} posts={igPosts} />}
+      {subTab === 'ideias' && (
+        <IdeiasPlanejamento
+          campanhas={campanhas}
+          onCampanhaCreated={(nova) => {
+            // Adiciona a nova campanha (rascunho) à lista local
+            setCampanhas(prev => [{ ...nova, nome: nova.name, canal: nova.type,
+              status: 'rascunho', mensagem: nova.message, publico_alvo: nova.target,
+              enviados: 0, abertos: 0, cliques: 0, conversoes: 0, orcamento: 0 }, ...prev]);
+          }}
+        />
+      )}
     </div>
   );
 }

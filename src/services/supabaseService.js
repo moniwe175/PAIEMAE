@@ -1015,6 +1015,118 @@ export async function deleteCampaign(id) {
   return { data: true, error: null };
 }
 
+// ─── Marketing Ideas (Ideias e Planejamento) ──────────────────
+
+export async function fetchIdeas() {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured', []);
+  const { data, error } = await supabase
+    .from('marketing_ideas')
+    .select('*, marketing_idea_tasks(*), marketing_idea_history(*)')
+    .order('created_at', { ascending: false });
+  if (error) return handleError(error, []);
+  return { data: data || [], error: null };
+}
+
+export async function insertIdeia(ideia) {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured');
+  const { titulo, descricao = '', canal = 'Instagram', tipo = 'conteudo',
+    status = 'ideia', prioridade = 'media', data_alvo = null,
+    tags = [], modelo_live = null } = ideia;
+  const { data, error } = await supabase
+    .from('marketing_ideas')
+    .insert([{ titulo, descricao, canal, tipo, status, prioridade, data_alvo, tags, modelo_live }])
+    .select()
+    .single();
+  if (error) return handleError(error);
+  // Registrar no histórico
+  await supabase.from('marketing_idea_history').insert([{
+    ideia_id: data.id, status_de: null, status_para: status,
+    nota: 'Ideia criada.',
+  }]);
+  return { data, error: null };
+}
+
+export async function updateIdeia(id, updates) {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured');
+  const { data: current } = await supabase
+    .from('marketing_ideas').select('status').eq('id', id).single();
+  const { data, error } = await supabase
+    .from('marketing_ideas').update(updates).eq('id', id).select().single();
+  if (error) return handleError(error);
+  // Registrar mudança de status no histórico
+  if (updates.status && current && updates.status !== current.status) {
+    await supabase.from('marketing_idea_history').insert([{
+      ideia_id: id,
+      status_de: current.status,
+      status_para: updates.status,
+      nota: updates._nota || null,
+    }]);
+  }
+  return { data, error: null };
+}
+
+export async function deleteIdeia(id) {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured');
+  const { error } = await supabase.from('marketing_ideas').delete().eq('id', id);
+  if (error) return handleError(error);
+  return { data: true, error: null };
+}
+
+export async function upsertIdeiaTask(task) {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured');
+  if (task.id) {
+    const { data, error } = await supabase
+      .from('marketing_idea_tasks').update({
+        titulo: task.titulo, concluida: task.concluida,
+        responsavel: task.responsavel, prazo: task.prazo, ordem: task.ordem,
+      }).eq('id', task.id).select().single();
+    if (error) return handleError(error);
+    return { data, error: null };
+  }
+  const { data, error } = await supabase
+    .from('marketing_idea_tasks')
+    .insert([{ ideia_id: task.ideia_id, titulo: task.titulo,
+      concluida: false, responsavel: task.responsavel,
+      prazo: task.prazo, ordem: task.ordem || 0 }])
+    .select().single();
+  if (error) return handleError(error);
+  return { data, error: null };
+}
+
+export async function deleteIdeiaTask(taskId) {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured');
+  const { error } = await supabase.from('marketing_idea_tasks').delete().eq('id', taskId);
+  if (error) return handleError(error);
+  return { data: true, error: null };
+}
+
+export async function convertIdeiaToRascunho(ideia) {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured');
+  const payload = {
+    name: ideia.titulo,
+    type: ideia.canal === 'Live' || ideia.canal === 'Stories' || ideia.canal === 'Reels'
+      ? 'Instagram' : (ideia.canal || 'Instagram'),
+    status: 'rascunho',
+    message: ideia.descricao || '',
+    target: '',
+    sent_count: 0,
+    notes: JSON.stringify({ orcamento: 0, data_inicio: ideia.data_alvo || '',
+      data_fim: '', abertos: 0, cliques: 0, conversoes: 0, enviados: 0,
+      origem_ideia: ideia.id }),
+  };
+  const { data, error } = await supabase
+    .from('campaigns').insert([payload]).select().single();
+  if (error) return handleError(error);
+  // Vincula a ideia à campanha criada e muda status para planejando
+  await supabase.from('marketing_ideas')
+    .update({ campanha_id: data.id, status: 'planejando' }).eq('id', ideia.id);
+  await supabase.from('marketing_idea_history').insert([{
+    ideia_id: ideia.id, status_de: ideia.status, status_para: 'planejando',
+    nota: `Convertida em rascunho de campanha (ID: ${data.id}).`,
+  }]);
+  return { data, error: null };
+}
+
 // ─── Marketing Engine Settings ──────────────────────────────
 
 export async function getMarketingEngineStatus() {
