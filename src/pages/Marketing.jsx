@@ -18,6 +18,7 @@ import InstagramTestModal from '../components/marketing/InstagramTestModal';
 import InstagramConfigModal from '../components/marketing/InstagramConfigModal';
 import InstagramInsightsPanel from '../components/marketing/InstagramInsightsPanel';
 import IdeiasPlanejamento from '../components/marketing/IdeiasPlanejamento';
+import { fetchLinkedIdeasForCampaign } from '../services/marketingIdeasService';
 import {
   getInstagramStatus,
   getInstagramMedia,
@@ -189,7 +190,22 @@ function DeleteConfirmModal({ onClose, onConfirm, nome }) {
 // ─── Campaign Detail Drawer ────────────────────────────────────
 
 function CampanhaDetail({ campanha, onClose, onEdit }) {
+  const [linkedIdeas, setLinkedIdeas] = useState([]);
+
+  useEffect(() => {
+    let active = true;
+    if (campanha?.id) {
+      fetchLinkedIdeasForCampaign(campanha.id).then(ideas => {
+        if (active) setLinkedIdeas(ideas || []);
+      });
+    } else {
+      setLinkedIdeas([]);
+    }
+    return () => { active = false; };
+  }, [campanha?.id]);
+
   if (!campanha) return null;
+
   const Icon = CANAL_ICON[campanha.canal] || Send;
   const cor = CANAL_COLOR[campanha.canal] || '#7A95B8';
   const st = STATUS_CONFIG[campanha.status] || STATUS_CONFIG.rascunho;
@@ -257,6 +273,22 @@ function CampanhaDetail({ campanha, onClose, onEdit }) {
           {campanha.orcamento > 0 && <div><strong>Orçamento:</strong> R$ {campanha.orcamento.toLocaleString('pt-BR')}</div>}
           {campanha.data_inicio && <div><strong>Período:</strong> {campanha.data_inicio} → {campanha.data_fim || '—'}</div>}
         </div>
+
+        {linkedIdeas.length > 0 && (
+          <div style={{ marginBottom: 16, background: '#F5F3FF', border: '1px solid #DDD6FE', borderRadius: 8, padding: 12 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: '#7C3AED', marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Sparkles style={{ width: 14, height: 14 }} /> Ideias / Iniciativas Vinculadas ({linkedIdeas.length})
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {linkedIdeas.map(i => (
+                <div key={i.id} style={{ fontSize: 12, color: 'var(--text-dark)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#fff', padding: '6px 10px', borderRadius: 6, border: '1px solid #EDE9FE' }}>
+                  <span style={{ fontWeight: 600 }}>{i.titulo}</span>
+                  <span style={{ fontSize: 11, padding: '2px 6px', borderRadius: 4, background: '#EDE9FE', color: '#6D28D9' }}>{i.etapa}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
           <button className="btn btn-ghost" onClick={onClose}>Fechar</button>
@@ -383,7 +415,15 @@ export default function Marketing() {
 
   const handleDeleteCampaign = async (id) => {
     const { error } = await deleteCampaign(id);
-    if (error) { alert(`Erro ao excluir campanha: ${error.message || error}`); return false; }
+    if (error) {
+      const msg = error.message || String(error);
+      if (msg.includes('ideia(s) vinculada(s)') || msg.includes('trg_check_campaign_ideas')) {
+        alert('Não é possível excluir esta campanha: existem ideias vinculadas a ela. Acesse a aba "Ideias e Planejamento" e desvincule a ideia antes de excluir a campanha.');
+      } else {
+        alert(`Erro ao excluir campanha: ${msg}`);
+      }
+      return false;
+    }
     setCampanhas(prev => prev.filter(c => c.id !== id));
     return true;
   };
