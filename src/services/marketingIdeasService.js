@@ -357,7 +357,6 @@ export async function archiveIdea(id, arquivar = true, author = null) {
   if (!id) return { ok: false, error: new Error('ID não informado.') };
 
   try {
-    // Tenta usar RPC seguro do banco
     const { data: rpcRes, error: rpcErr } = await supabase.rpc('fn_arquivar_ideia', {
       p_ideia_id: id,
       p_arquivar: arquivar,
@@ -365,30 +364,12 @@ export async function archiveIdea(id, arquivar = true, author = null) {
       p_autor_nome: author?.name || author?.email || null,
     });
 
-    if (!rpcErr && rpcRes && rpcRes.ok !== false) {
-      return { ok: true, error: null };
+    if (rpcErr) {
+      return { ok: false, error: new Error(rpcErr.message || 'Erro ao arquivar ideia.') };
     }
-
-    // Fallback caso a RPC ainda não tenha sido executada
-    const { error: updErr } = await supabase
-      .from('marketing_ideas')
-      .update({
-        arquivada: arquivar,
-        arquivada_em: arquivar ? new Date().toISOString() : null,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', id);
-
-    if (updErr) return { ok: false, error: updErr };
-
-    await supabase.from('marketing_idea_events').insert([{
-      ideia_id: id,
-      tipo: 'arquivamento',
-      autor_id: author?.id || null,
-      autor_nome: author?.name || author?.email || null,
-      dados: { arquivada: arquivar },
-    }]).catch(() => {});
-
+    if (rpcRes?.ok === false) {
+      return { ok: false, error: new Error(rpcRes.error || 'Falha ao arquivar ideia.') };
+    }
     return { ok: true, error: null };
   } catch (err) {
     return { ok: false, error: err };
@@ -549,27 +530,13 @@ export async function linkIdeaCampaign(ideiaId, campanhaId, author = null) {
       p_autor_nome: author?.name || author?.email || null,
     });
 
-    if (!rpcErr && rpcRes && rpcRes.ok !== false) {
-      return { ok: true, data: rpcRes };
+    if (rpcErr) {
+      return { ok: false, error: new Error(rpcErr.message || 'Erro ao vincular campanha.') };
     }
-
-    // Fallback direto se a RPC não existir
-    const { error: updErr } = await supabase
-      .from('marketing_ideas')
-      .update({ campanha_id: campanhaId, updated_at: new Date().toISOString() })
-      .eq('id', ideiaId);
-
-    if (updErr) return { ok: false, error: updErr };
-
-    await supabase.from('marketing_idea_events').insert([{
-      ideia_id: ideiaId,
-      tipo: 'vinculo',
-      autor_id: author?.id || null,
-      autor_nome: author?.name || author?.email || null,
-      dados: { campanha_id: campanhaId, acao: 'vinculada_existente' },
-    }]).catch(() => {});
-
-    return { ok: true };
+    if (rpcRes?.ok === false) {
+      return { ok: false, error: new Error(rpcRes.error || 'Falha ao vincular campanha.') };
+    }
+    return { ok: true, data: rpcRes };
   } catch (err) {
     return { ok: false, error: err };
   }
@@ -611,7 +578,7 @@ export async function fetchLinkedIdeasForCampaign(campaignId) {
   try {
     const { data } = await supabase
       .from('marketing_ideas')
-      .select('id, titulo, etapa, formato, data_prevista')
+      .select('id, titulo, etapa, formato, data_prevista, aprovado')
       .eq('campanha_id', campaignId);
     return data || [];
   } catch {
@@ -830,7 +797,8 @@ export async function approveIdea(id, aprovado = true, motivo = '', author = nul
 }
 
 /**
- * Carrega Layout da Lousa Digital
+ * Carrega Layout da Lousa Digital.
+ * Propaga erros reais — não retorna lousa vazia quando há falha de permissão/migração.
  */
 export async function fetchWhiteboardLayout(contexto = 'default') {
   try {
@@ -841,11 +809,28 @@ export async function fetchWhiteboardLayout(contexto = 'default') {
       .maybeSingle();
 
     if (error) {
-      const isMissingTable = error.code === '42P01' || error.message?.includes('does not exist');
-      return { data: { nodes: [], edges: [] }, versao: 1, structureMissing: isMissingTable, error: null };
+      const isMissingTable =
+        error.code === '42P01' ||
+        error.code === 'PGRST116' ||
+        error.message?.includes('does not exist');
+
+      if (isMissingTable) {
+        // Tabela ainda não foi criada — migração pendente
+        return {
+          data: null, versao: 1, structureMissing: true,
+          error: new Error('A tabela de lousa ainda não existe. Execute a migração SQL completa no Supabase.'),
+        };
+      }
+
+      // Erro real (permissão, timeout, etc.) — propagar
+      return {
+        data: null, versao: 1, structureMissing: false,
+        error: new Error(error.message || 'Erro ao carregar lousa.'),
+      };
     }
 
     if (!data) {
+      // Lousa ainda não tem registro — estado inicial válido, sem erro
       return { data: { nodes: [], edges: [] }, versao: 1, structureMissing: false, error: null };
     }
 
@@ -858,12 +843,13 @@ export async function fetchWhiteboardLayout(contexto = 'default') {
       error: null,
     };
   } catch (err) {
-    return { data: { nodes: [], edges: [] }, versao: 1, structureMissing: false, error: err };
+    return { data: null, versao: 1, structureMissing: false, error: err };
   }
 }
 
 /**
- * Salva Layout da Lousa com Controle de Versão e Concorrência
+ * Salva Layout da Lousa com Controle de Versão e Concorrência.
+ * Usa exclusivamente a RPC atômica — sem fallback que contorna rejeições.
  */
 export async function saveWhiteboardLayout({
   contexto = 'default',
@@ -880,52 +866,33 @@ export async function saveWhiteboardLayout({
       p_autor_nome: author?.name || author?.email || null,
     });
 
-    if (!rpcErr && rpcRes) {
-      if (rpcRes.conflict) {
-        return {
-          ok: false,
-          conflict: true,
-          error: new Error(rpcRes.error || 'A lousa foi alterada por outro usuário.'),
-          versaoServidor: rpcRes.versao_servidor,
-          layoutServidor: rpcRes.layout_servidor,
-        };
-      }
-      if (rpcRes.ok !== false) {
-        return { ok: true, versao: rpcRes.versao };
-      }
-    }
-
-    // Fallback direto
-    const { data: existing } = await supabase
-      .from('marketing_whiteboards')
-      .select('*')
-      .eq('contexto', contexto)
-      .maybeSingle();
-
-    if (existing && versaoEsperada != null && existing.versao > versaoEsperada) {
+    if (rpcErr) {
+      // RPC não existe (migração pendente) ou erro de permissão
       return {
         ok: false,
-        conflict: true,
-        error: new Error('A lousa foi alterada por outro usuário.'),
-        versaoServidor: existing.versao,
-        layoutServidor: existing.layout,
+        error: new Error(rpcErr.message || 'Erro ao salvar lousa. Verifique se a migração SQL foi aplicada.'),
       };
     }
 
-    const nextVersao = existing ? (existing.versao || 1) + 1 : 1;
-    const { error: upsertErr } = await supabase
-      .from('marketing_whiteboards')
-      .upsert([{
-        contexto,
-        layout,
-        versao: nextVersao,
-        updated_by: author?.id || null,
-        updated_by_nome: author?.name || author?.email || '',
-        updated_at: new Date().toISOString(),
-      }]);
+    if (!rpcRes) {
+      return { ok: false, error: new Error('Resposta vazia da RPC de salvamento.') };
+    }
 
-    if (upsertErr) return { ok: false, error: upsertErr };
-    return { ok: true, versao: nextVersao };
+    if (rpcRes.conflict) {
+      return {
+        ok: false,
+        conflict: true,
+        error: new Error(rpcRes.error || 'A lousa foi alterada por outro usuário.'),
+        versaoServidor: rpcRes.versao_servidor,
+        layoutServidor: rpcRes.layout_servidor,
+      };
+    }
+
+    if (rpcRes.ok === false) {
+      return { ok: false, error: new Error(rpcRes.error || 'Falha ao salvar lousa.') };
+    }
+
+    return { ok: true, versao: rpcRes.versao };
   } catch (err) {
     return { ok: false, error: err };
   }

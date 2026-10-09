@@ -6,7 +6,7 @@ import {
   Sparkles, History, AlignLeft,
   Clock, AlertCircle, Archive, Search, LayoutGrid, List,
   Link as LinkIcon, Unlink, Copy, ShieldAlert,
-  Send, MessageCircle, Play, CheckCircle2, User, StickyNote
+  Send, MessageCircle, Play, CheckCircle2,
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import MarketingWhiteboard from './whiteboard/MarketingWhiteboard';
@@ -1721,6 +1721,7 @@ export default function IdeiasPlanejamento({ campanhas = [], onCampanhaCreated }
   // Lousa Layout
   const [whiteboardLayout, setWhiteboardLayout] = useState({ nodes: [], edges: [] });
   const [whiteboardVersion, setWhiteboardVersion] = useState(1);
+  const [whiteboardError, setWhiteboardError] = useState(null); // erro real de leitura
 
   // Visualização Principal: Lousa por padrão! Alternativa: Lista
   const [viewMode, setViewMode] = useState('lousa'); // 'lousa' | 'lista'
@@ -1736,12 +1737,12 @@ export default function IdeiasPlanejamento({ campanhas = [], onCampanhaCreated }
   const [fichaModalData, setFichaModalData] = useState(null); // { id } ou { initialData }
 
   // Carregar lista de ideias e layout da lousa
-  const carregarTudo = useCallback(async () => {
+  const carregarTudo = useCallback(async (silent = false) => {
     if (!hasMarketingView) {
-      setLoading(false);
+      if (!silent) setLoading(false);
       return;
     }
-    setLoading(true);
+    if (!silent) setLoading(true);
     setErr('');
 
     const [resIdeas, resLayout, staff] = await Promise.all([
@@ -1750,7 +1751,7 @@ export default function IdeiasPlanejamento({ campanhas = [], onCampanhaCreated }
       fetchAuthorizedStaff(),
     ]);
 
-    setLoading(false);
+    if (!silent) setLoading(false);
 
     if (resIdeas.error) {
       if (resIdeas.structureMissing) {
@@ -1763,8 +1764,19 @@ export default function IdeiasPlanejamento({ campanhas = [], onCampanhaCreated }
 
     setStructureMissing(false);
     setIdeias(resIdeas.data || []);
-    setWhiteboardLayout(resLayout.data || { nodes: [], edges: [] });
-    setWhiteboardVersion(resLayout.versao || 1);
+
+    // Trata erro real da lousa separado do erro de ideias
+    if (resLayout.error) {
+      setWhiteboardError(resLayout.error);
+      setWhiteboardLayout({ nodes: [], edges: [] });
+      setWhiteboardVersion(1);
+    } else {
+      setWhiteboardError(null);
+      if (!silent) {
+        setWhiteboardLayout(resLayout.data || { nodes: [], edges: [] });
+        setWhiteboardVersion(resLayout.versao || 1);
+      }
+    }
     setStaffList(staff || []);
   }, [hasMarketingView, mostrarArquivadas]);
 
@@ -1797,14 +1809,14 @@ export default function IdeiasPlanejamento({ campanhas = [], onCampanhaCreated }
     busca.trim() !== '' ||
     filtroEtapa !== 'todas' ||
     filtroFormato !== 'todos' ||
-    filtroAprovacao !== 'todos' ||
+    filtroAprovacao !== 'todas' ||
     filtroResponsavel !== 'todos';
 
   const limparFiltros = () => {
     setBusca('');
     setFiltroEtapa('todas');
     setFiltroFormato('todos');
-    setFiltroAprovacao('todos');
+    setFiltroAprovacao('todas');
     setFiltroResponsavel('todos');
   };
 
@@ -1813,7 +1825,7 @@ export default function IdeiasPlanejamento({ campanhas = [], onCampanhaCreated }
     const author = user ? { id: user.id, email: user.email, name: user.user_metadata?.full_name } : null;
     const res = await insertIdea(payload, author);
     if (!res.error) {
-      await carregarTudo();
+      await carregarTudo(true);
     }
     return res;
   };
@@ -1822,7 +1834,11 @@ export default function IdeiasPlanejamento({ campanhas = [], onCampanhaCreated }
     const author = user ? { id: user.id, email: user.email, name: user.user_metadata?.full_name } : null;
     const res = await archiveIdea(id, arquivar, author);
     if (res.ok) {
-      await carregarTudo();
+      if (!mostrarArquivadas && arquivar) {
+        setIdeias(prev => prev.filter(i => i.id !== id));
+      } else {
+        setIdeias(prev => prev.map(i => i.id === id ? { ...i, arquivada: arquivar } : i));
+      }
     } else {
       alert(`Erro ao arquivar: ${res.error?.message || res.error}`);
     }
@@ -1832,7 +1848,12 @@ export default function IdeiasPlanejamento({ campanhas = [], onCampanhaCreated }
     const author = user ? { id: user.id, email: user.email, name: user.user_metadata?.full_name } : null;
     const res = await approveIdea(id, aprovado, motivo, author);
     if (res.ok) {
-      await carregarTudo();
+      setIdeias(prev => prev.map(i => i.id === id ? {
+        ...i,
+        aprovado: res.aprovado,
+        aprovado_em: res.aprovado_em,
+        aprovador_nome: res.aprovador_nome,
+      } : i));
     } else {
       alert(`Erro na aprovação: ${res.error?.message || res.error}`);
     }
@@ -2088,7 +2109,9 @@ export default function IdeiasPlanejamento({ campanhas = [], onCampanhaCreated }
       ) : viewMode === 'lousa' ? (
         /* ─── APRESENTAÇÃO PRINCIPAL: LOUSA DIGITAL ─── */
         <MarketingWhiteboard
-          ideias={ideiasFiltradas}
+          ideias={ideias}
+          visibleIdeaIds={temFiltroAtivo ? new Set(ideiasFiltradas.map(i => i.id)) : null}
+          hasActiveFilter={temFiltroAtivo}
           isReadOnly={isReadOnly}
           onOpenFicha={(id) => setFichaModalData({ id })}
           onNewIdeaQuick={() => setModalRapidoOpen(true)}
@@ -2097,6 +2120,7 @@ export default function IdeiasPlanejamento({ campanhas = [], onCampanhaCreated }
           onApproveIdea={handleApproveIdea}
           layoutData={whiteboardLayout}
           layoutVersion={whiteboardVersion}
+          layoutError={whiteboardError}
           onSaveLayout={handleSaveLayout}
         />
       ) : (
