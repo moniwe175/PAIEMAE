@@ -551,3 +551,165 @@ test('insertIdea: cria ideia com formato padrão "Não definido" e versão 1', a
   }
 });
 
+// ─── 8. Testes das 3 Correções Específicas Solicitadas ─────────────────────────
+
+test('updateIdea: detecta atomicamente colisão de edição simultânea via condição de versão', async () => {
+  const originalFrom = supabase.from;
+  try {
+    // Simula que a query de update com .eq("versao", 1) retornou null (outra sessão acabou de salvar versão 2)
+    supabase.from = () => ({
+      select() {
+        return {
+          eq() {
+            return {
+              single: async () => ({
+                data: { id: 'ideia-concorrente', titulo: 'Original', versao: 1, etapa: 'ideia' },
+                error: null,
+              }),
+              maybeSingle: async () => ({
+                data: { id: 'ideia-concorrente', titulo: 'Original', versao: 2, etapa: 'ideia' },
+                error: null,
+              }),
+            };
+          },
+        };
+      },
+      update() {
+        return {
+          eq() {
+            return {
+              eq() {
+                return {
+                  select() {
+                    return {
+                      // 0 linhas atualizadas porque a versão já avançou no banco
+                      maybeSingle: async () => ({ data: null, error: null }),
+                    };
+                  },
+                };
+              },
+            };
+          },
+        };
+      },
+    });
+
+    const res = await updateIdea('ideia-concorrente', { titulo: 'Novo Título' }, null, 1);
+    assert.equal(res.data, null);
+    assert.equal(res.conflict, true);
+    assert.match(res.error.message, /modificado por outro usuário/i);
+  } finally {
+    supabase.from = originalFrom;
+  }
+});
+
+test('fetchWhiteboardLayout: retorna versão 0 quando lousa ainda não existe no banco', async () => {
+  const originalFrom = supabase.from;
+  try {
+    supabase.from = () => ({
+      select() {
+        return {
+          eq() {
+            return {
+              // Lousa não existe no banco
+              maybeSingle: async () => ({ data: null, error: null }),
+            };
+          },
+        };
+      },
+    });
+
+    const res = await fetchWhiteboardLayout('default');
+    assert.equal(res.error, null);
+    assert.deepEqual(res.data, { nodes: [], edges: [] });
+    assert.equal(res.versao, 0, 'Lousa inexistente deve retornar versao 0 para controle estrito de primeira gravação');
+  } finally {
+    supabase.from = originalFrom;
+  }
+});
+
+test('Filtros da lousa: setas entre post-its NUNCA são ocultadas por filtros de ideias', () => {
+  // Lógica pura de verificação do cálculo de edges na presença de filtros
+  const allIdeaIds = new Set(['ideia-1', 'ideia-2']);
+  const visibleIdeaIds = new Set(['ideia-1']); // ideia-2 está filtrada/oculta
+
+  const edges = [
+    { id: 'e1', source: 'note-1', target: 'note-2' },           // entre dois post-its
+    { id: 'e2', source: 'ideia-1', target: 'note-1' },          // entre ideia visível e post-it
+    { id: 'e3', source: 'ideia-2', target: 'note-1' },          // entre ideia OCULTA e post-it
+    { id: 'e4', source: 'ideia-1', target: 'ideia-2' },         // entre ideia visível e ideia OCULTA
+  ];
+
+  const processed = edges.map(e => {
+    const sourceIsHiddenIdea = visibleIdeaIds ? (allIdeaIds.has(e.source) && !visibleIdeaIds.has(e.source)) : false;
+    const targetIsHiddenIdea = visibleIdeaIds ? (allIdeaIds.has(e.target) && !visibleIdeaIds.has(e.target)) : false;
+    const isHidden = sourceIsHiddenIdea || targetIsHiddenIdea;
+    return { ...e, hidden: isHidden };
+  });
+
+  // e1: seta entre post-its NÃO pode ser oculta
+  assert.equal(processed.find(e => e.id === 'e1').hidden, false);
+  // e2: seta entre ideia visível e post-it NÃO pode ser oculta
+  assert.equal(processed.find(e => e.id === 'e2').hidden, false);
+  // e3: seta conectada a ideia oculta DEVE ser oculta
+  assert.equal(processed.find(e => e.id === 'e3').hidden, true);
+  // e4: seta conectada a ideia oculta DEVE ser oculta
+  assert.equal(processed.find(e => e.id === 'e4').hidden, true);
+});
+
+test('saveWhiteboardLayout: primeira gravação com versão esperada 0 passa parâmetro correto para a RPC', async () => {
+  const originalRpc = supabase.rpc;
+  try {
+    let capturedParams = null;
+    supabase.rpc = async (fnName, params) => {
+      capturedParams = { fnName, params };
+      return { data: { ok: true, versao: 1 }, error: null };
+    };
+
+    const res = await saveWhiteboardLayout({
+      contexto: 'default',
+      layout: { nodes: [{ id: 'note-1' }], edges: [] },
+      versaoEsperada: 0,
+      author: { id: 'user-1', name: 'Tester' },
+    });
+
+    assert.equal(res.ok, true);
+    assert.equal(res.versao, 1);
+    assert.equal(capturedParams.fnName, 'fn_save_marketing_whiteboard');
+    assert.equal(capturedParams.params.p_versao_esperada, 0);
+  } finally {
+    supabase.rpc = originalRpc;
+  }
+});
+
+test('saveWhiteboardLayout: colisão na primeira gravação (outra sessão já criou a lousa) propaga conflito', async () => {
+  const originalRpc = supabase.rpc;
+  try {
+    supabase.rpc = async () => ({
+      data: {
+        ok: false,
+        conflict: true,
+        error: 'A lousa foi alterada por outro usuário. Recarregue para mesclar as alterações.',
+        versao_servidor: 1,
+        layout_servidor: { nodes: [{ id: 'note-outro' }], edges: [] },
+      },
+      error: null,
+    });
+
+    const res = await saveWhiteboardLayout({
+      contexto: 'default',
+      layout: { nodes: [{ id: 'note-1' }], edges: [] },
+      versaoEsperada: 0,
+    });
+
+    assert.equal(res.ok, false);
+    assert.equal(res.conflict, true);
+    assert.equal(res.versaoServidor, 1);
+    assert.match(res.error.message, /outro usuário/i);
+  } finally {
+    supabase.rpc = originalRpc;
+  }
+});
+
+
+

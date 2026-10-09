@@ -1720,7 +1720,7 @@ export default function IdeiasPlanejamento({ campanhas = [], onCampanhaCreated }
 
   // Lousa Layout
   const [whiteboardLayout, setWhiteboardLayout] = useState({ nodes: [], edges: [] });
-  const [whiteboardVersion, setWhiteboardVersion] = useState(1);
+  const [whiteboardVersion, setWhiteboardVersion] = useState(0);
   const [whiteboardError, setWhiteboardError] = useState(null); // erro real de leitura
 
   // Visualização Principal: Lousa por padrão! Alternativa: Lista
@@ -1769,12 +1769,12 @@ export default function IdeiasPlanejamento({ campanhas = [], onCampanhaCreated }
     if (resLayout.error) {
       setWhiteboardError(resLayout.error);
       setWhiteboardLayout({ nodes: [], edges: [] });
-      setWhiteboardVersion(1);
+      setWhiteboardVersion(0);
     } else {
       setWhiteboardError(null);
       if (!silent) {
         setWhiteboardLayout(resLayout.data || { nodes: [], edges: [] });
-        setWhiteboardVersion(resLayout.versao || 1);
+        setWhiteboardVersion(resLayout.versao != null ? resLayout.versao : 0);
       }
     }
     setStaffList(staff || []);
@@ -1911,12 +1911,16 @@ export default function IdeiasPlanejamento({ campanhas = [], onCampanhaCreated }
 
   const handleSaveLayout = async (layout, versaoEsperada) => {
     const author = user ? { id: user.id, email: user.email, name: user.user_metadata?.full_name } : null;
-    return await saveWhiteboardLayout({
+    const res = await saveWhiteboardLayout({
       contexto: 'default',
       layout,
       versaoEsperada,
       author,
     });
+    if (res?.ok && res.versao != null) {
+      setWhiteboardVersion(res.versao);
+    }
+    return res;
   };
 
   const handleUsarModeloLive = () => {

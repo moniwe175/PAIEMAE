@@ -125,7 +125,7 @@ function WhiteboardInner({
   const [saveError, setSaveError] = useState('');
 
   // Refs de estado síncrono para evitar closures desatualizadas
-  const versionRef = useRef(layoutVersion || 1);
+  const versionRef = useRef(layoutVersion != null ? layoutVersion : 0);
   const latestNodesRef = useRef([]);
   const latestEdgesRef = useRef([]);
   const isSavingRef = useRef(false);
@@ -287,14 +287,23 @@ function WhiteboardInner({
     const savedEdges = layoutData?.edges || [];
     const savedNodesMap = new Map(savedNodes.map(n => [n.id, n]));
 
-    versionRef.current = layoutVersion || 1;
+    versionRef.current = layoutVersion != null ? layoutVersion : 0;
     layoutLoadedRef.current = true;
 
+    const allIdeaIds = new Set(ideias.map(i => i.id));
     const ideaNodes = buildIdeaNodes(ideias, savedNodesMap, isReadOnly, stableCallbacks, visibleIdeaIds);
     const customNodes = buildCustomNodes(savedNodes, isReadOnly, stableCallbacks);
 
+    const processedEdges = savedEdges.map(e => {
+      const sourceIsHiddenIdea = visibleIdeaIds ? (allIdeaIds.has(e.source) && !visibleIdeaIds.has(e.source)) : false;
+      const targetIsHiddenIdea = visibleIdeaIds ? (allIdeaIds.has(e.target) && !visibleIdeaIds.has(e.target)) : false;
+      const isHidden = sourceIsHiddenIdea || targetIsHiddenIdea;
+      if (e.hidden === isHidden) return e;
+      return { ...e, hidden: isHidden };
+    });
+
     setNodes([...ideaNodes, ...customNodes]);
-    setEdges(savedEdges);
+    setEdges(processedEdges);
     setSaveStatus('saved');
     initializedRef.current = true;
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -328,6 +337,10 @@ function WhiteboardInner({
 
   useEffect(() => {
     if (!initializedRef.current) return;
+
+    // Conjunto de todos os IDs de ideias cadastradas no sistema
+    const allIdeaIds = new Set(ideias.map(i => i.id));
+
     setNodes(nds => nds.map(n => {
       if (n.type !== 'ideaNode') return n;
       const isHidden = visibleIdeaIds ? !visibleIdeaIds.has(n.id) : false;
@@ -336,13 +349,15 @@ function WhiteboardInner({
     }));
 
     setEdges(eds => eds.map(e => {
-      const sourceHidden = visibleIdeaIds ? !visibleIdeaIds.has(e.source) : false;
-      const targetHidden = visibleIdeaIds ? !visibleIdeaIds.has(e.target) : false;
-      const isHidden = sourceHidden || targetHidden;
+      // Uma extremidade só é considerada oculta se FOR UM CARTÃO DE IDEIA e esse cartão estiver filtrado.
+      // Setas entre post-its livres (ou entre post-it e ideia visível) NUNCA são ocultadas pelo filtro de ideias!
+      const sourceIsHiddenIdea = visibleIdeaIds ? (allIdeaIds.has(e.source) && !visibleIdeaIds.has(e.source)) : false;
+      const targetIsHiddenIdea = visibleIdeaIds ? (allIdeaIds.has(e.target) && !visibleIdeaIds.has(e.target)) : false;
+      const isHidden = sourceIsHiddenIdea || targetIsHiddenIdea;
       if (e.hidden === isHidden) return e;
       return { ...e, hidden: isHidden };
     }));
-  }, [visibleIdeaIds]);
+  }, [visibleIdeaIds, ideias]);
 
   // ─── 4. Atualiza modo de conexão nos nós sem re-hidratação de nós ───────────
 

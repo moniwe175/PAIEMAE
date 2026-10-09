@@ -295,14 +295,38 @@ export async function updateIdea(id, patch, author = null, currentVersion = null
     cleanPatch.versao = (current.versao || 1) + 1;
     cleanPatch.updated_at = new Date().toISOString();
 
-    const { data: updated, error: updErr } = await supabase
+    // Atualização com condição de versão no banco para garantir atomicidade real contra edição simultânea
+    let updateQuery = supabase
       .from('marketing_ideas')
       .update(cleanPatch)
-      .eq('id', id)
+      .eq('id', id);
+
+    if (currentVersion != null) {
+      updateQuery = updateQuery.eq('versao', currentVersion);
+    }
+
+    const { data: updated, error: updErr } = await updateQuery
       .select()
-      .single();
+      .maybeSingle();
 
     if (updErr) return { data: null, error: updErr };
+
+    // Se nenhuma linha foi atualizada, outro usuário alterou a versão simultaneamente
+    if (!updated && currentVersion != null) {
+      let latest = null;
+      try {
+        const { data } = await supabase.from('marketing_ideas').select('*').eq('id', id).maybeSingle();
+        latest = data;
+      } catch (_) {
+        // Fallback silencioso se não conseguir carregar dado mais recente
+      }
+      return {
+        data: null,
+        conflict: true,
+        error: new Error('Este registro foi modificado por outro usuário. Recarregue os dados para não sobrescrever as alterações.'),
+        serverData: latest,
+      };
+    }
 
     // 4. Registrar evento se houve mudança relevante (etapa, responsável, data)
     const eventos = [];
@@ -830,8 +854,8 @@ export async function fetchWhiteboardLayout(contexto = 'default') {
     }
 
     if (!data) {
-      // Lousa ainda não tem registro — estado inicial válido, sem erro
-      return { data: { nodes: [], edges: [] }, versao: 1, structureMissing: false, error: null };
+      // Lousa ainda não tem registro — estado inicial válido, versao 0 (ainda não gravada)
+      return { data: { nodes: [], edges: [] }, versao: 0, structureMissing: false, error: null };
     }
 
     return {
