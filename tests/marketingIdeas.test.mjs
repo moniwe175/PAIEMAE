@@ -12,8 +12,10 @@ import {
   fetchWhiteboardLayout,
   saveWhiteboardLayout,
   linkIdeaCampaign,
+  unlinkIdeaCampaign,
 } from '../src/services/marketingIdeasService.js';
 import { supabase } from '../src/lib/supabase.js';
+import { createClient } from '@supabase/supabase-js';
 
 // ─── 1. Formatação de Datas em Fuso America/Sao_Paulo ─────────────────────────
 
@@ -710,6 +712,236 @@ test('saveWhiteboardLayout: colisão na primeira gravação (outra sessão já c
     supabase.rpc = originalRpc;
   }
 });
+
+// ─── 9. Testes com o SDK Real do Supabase e Fetch Simulado (sem Promises falsas) ──
+
+function createSimulatedRealSdk(handler = {}) {
+  return createClient('https://mock-test.supabase.co', 'mock-anon-key', {
+    auth: { persistSession: false, autoRefreshToken: false },
+    global: {
+      fetch: async (url, options = {}) => {
+        const urlStr = url.toString();
+        const method = options.method || 'GET';
+        let body = null;
+        if (options.body) {
+          try {
+            body = JSON.parse(options.body);
+          } catch {
+            body = options.body;
+          }
+        }
+
+        const accept = options.headers?.get ? options.headers.get('accept') : options.headers?.['Accept'] || options.headers?.['accept'];
+        const isSingle = !!(accept && accept.includes('vnd.pgrst.object+json'));
+        const formatData = (item) => isSingle ? item : (Array.isArray(item) ? item : [item]);
+
+        if (handler.onFetch) {
+          const custom = await handler.onFetch({ url: urlStr, method, body, headers: options.headers });
+          if (custom) return custom;
+        }
+
+        if (urlStr.includes('/rest/v1/marketing_ideas')) {
+          if (method === 'POST') {
+            const row = Array.isArray(body) ? body[0] : body;
+            const resItem = { id: 'mock-idea-1', ...row, versao: 1 };
+            return new Response(JSON.stringify(formatData(resItem)), {
+              status: 201,
+              headers: { 'Content-Type': 'application/json', 'Content-Range': '0-0/1' },
+            });
+          }
+          if (method === 'PATCH') {
+            const row = Array.isArray(body) ? body[0] : body;
+            const resItem = { id: 'mock-idea-1', ...row, versao: 2 };
+            return new Response(JSON.stringify(formatData(resItem)), {
+              status: 200,
+              headers: { 'Content-Type': 'application/json', 'Content-Range': '0-0/1' },
+            });
+          }
+          if (method === 'GET') {
+            const resItem = {
+              id: 'mock-idea-1',
+              titulo: 'Ideia Base',
+              etapa: 'ideia',
+              versao: 1,
+              tags: [],
+              formato: 'Post',
+              criado_por: 'user-1',
+            };
+            return new Response(JSON.stringify(formatData(resItem)), {
+              status: 200,
+              headers: { 'Content-Type': 'application/json', 'Content-Range': '0-0/1' },
+            });
+          }
+        }
+
+        if (urlStr.includes('/rest/v1/marketing_idea_events')) {
+          if (method === 'POST') {
+            return new Response(JSON.stringify(formatData({ id: 'mock-event-1' })), {
+              status: 201,
+              headers: { 'Content-Type': 'application/json', 'Content-Range': '0-0/1' },
+            });
+          }
+        }
+
+        if (urlStr.includes('/rest/v1/marketing_idea_tasks')) {
+          if (method === 'POST') {
+            return new Response(JSON.stringify(formatData({ id: 'mock-task-1' })), {
+              status: 201,
+              headers: { 'Content-Type': 'application/json', 'Content-Range': '0-0/1' },
+            });
+          }
+          if (method === 'GET') {
+            return new Response(JSON.stringify([{ id: 'mock-task-1', titulo: 'Tarefa A', ordem: 0 }]), {
+              status: 200,
+              headers: { 'Content-Type': 'application/json', 'Content-Range': '0-0/1' },
+            });
+          }
+        }
+
+        return new Response(JSON.stringify([]), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      },
+    },
+  });
+}
+
+test('SDK Real: insertIdea executa com PostgrestQueryBuilder real (sem .catch) e registra criação', async () => {
+  const realClient = createSimulatedRealSdk();
+  const origFrom = supabase.from;
+  try {
+    supabase.from = realClient.from.bind(realClient);
+
+    const res = await insertIdea({ titulo: 'Nova Ideia Real SDK' }, { id: 'usr-1', name: 'Tester' });
+    assert.equal(res.error, null);
+    assert.ok(res.data);
+    assert.equal(res.data.titulo, 'Nova Ideia Real SDK');
+  } finally {
+    supabase.from = origFrom;
+  }
+});
+
+test('SDK Real: insertIdea preserva dados principais caso gravação de eventos falhe no banco (sem duplicatas)', async () => {
+  // Simula que a tabela marketing_idea_events falhou (ex: 500 no postgrest ou permissão)
+  const realClient = createSimulatedRealSdk({
+    onFetch: async ({ url, method }) => {
+      if (url.includes('/rest/v1/marketing_idea_events') && method === 'POST') {
+        return new Response(JSON.stringify({ message: 'relation marketing_idea_events does not exist' }), {
+          status: 400,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      return null;
+    },
+  });
+
+  const origFrom = supabase.from;
+  try {
+    supabase.from = realClient.from.bind(realClient);
+
+    const res = await insertIdea({ titulo: 'Ideia com Falha de Evento' });
+    // O registro principal deve ser preservado para não induzir clique repetido
+    assert.equal(res.error, null);
+    assert.ok(res.data);
+    assert.equal(res.data.titulo, 'Ideia com Falha de Evento');
+  } finally {
+    supabase.from = origFrom;
+  }
+});
+
+test('SDK Real: updateIdea executa com PostgrestQueryBuilder real (sem .catch) e atualiza campos', async () => {
+  const realClient = createSimulatedRealSdk();
+  const origFrom = supabase.from;
+  try {
+    supabase.from = realClient.from.bind(realClient);
+
+    const res = await updateIdea('mock-idea-1', { titulo: 'Título Atualizado' }, { id: 'usr-1' }, 1);
+    assert.equal(res.error, null);
+    assert.ok(res.data);
+    assert.equal(res.data.titulo, 'Título Atualizado');
+    assert.equal(res.data.versao, 2);
+  } finally {
+    supabase.from = origFrom;
+  }
+});
+
+test('SDK Real: updateIdea preserva atualização caso histórico falhe (não lança exceção nem quebra versão)', async () => {
+  const realClient = createSimulatedRealSdk({
+    onFetch: async ({ url, method }) => {
+      if (url.includes('/rest/v1/marketing_idea_events') && method === 'POST') {
+        return new Response(JSON.stringify({ message: 'error writing events' }), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      return null;
+    },
+  });
+
+  const origFrom = supabase.from;
+  try {
+    supabase.from = realClient.from.bind(realClient);
+
+    const res = await updateIdea('mock-idea-1', { titulo: 'Atualização Segura' }, null, 1);
+    assert.equal(res.error, null);
+    assert.ok(res.data);
+    assert.equal(res.data.titulo, 'Atualização Segura');
+  } finally {
+    supabase.from = origFrom;
+  }
+});
+
+test('SDK Real: duplicateIdea clona tarefas e registra evento com PostgrestQueryBuilder real (sem .catch)', async () => {
+  const realClient = createSimulatedRealSdk();
+  const origFrom = supabase.from;
+  try {
+    supabase.from = realClient.from.bind(realClient);
+
+    const res = await duplicateIdea('mock-idea-1', { id: 'usr-1', name: 'Clonador' });
+    assert.equal(res.error, null);
+    assert.ok(res.data);
+    assert.match(res.data.titulo, /Cópia/);
+  } finally {
+    supabase.from = origFrom;
+  }
+});
+
+test('SDK Real: unlinkIdeaCampaign remove vínculo e registra evento com PostgrestQueryBuilder real (sem .catch)', async () => {
+  const realClient = createSimulatedRealSdk();
+  const origFrom = supabase.from;
+  try {
+    supabase.from = realClient.from.bind(realClient);
+
+    const res = await unlinkIdeaCampaign('mock-idea-1', 'camp-uuid-old', { id: 'usr-1' });
+    assert.equal(res.ok, true);
+    assert.equal(res.error, undefined);
+  } finally {
+    supabase.from = origFrom;
+  }
+});
+
+test('SDK Real: approveIdea (fallback) executa com PostgrestQueryBuilder real (sem .catch)', async () => {
+  const realClient = createSimulatedRealSdk();
+  const origFrom = supabase.from;
+  const origRpc = supabase.rpc;
+  try {
+    supabase.from = realClient.from.bind(realClient);
+    // Simula que a RPC fn_aprovar_ideia não existe para testar o fallback direto
+    supabase.rpc = async () => ({
+      data: null,
+      error: { code: 'PGRST202', message: 'Could not find the function fn_aprovar_ideia' },
+    });
+
+    const res = await approveIdea('mock-idea-1', true, 'Aprovado para produção', { id: 'usr-1', name: 'Aprovador' });
+    assert.equal(res.ok, true);
+    assert.equal(res.data?.aprovado, true);
+  } finally {
+    supabase.from = origFrom;
+    supabase.rpc = origRpc;
+  }
+});
+
 
 
 

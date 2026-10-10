@@ -376,7 +376,7 @@ function WhiteboardInner({
   // ─── 5. Salvamento Serializado com Controle Estrito de Versão ───────────────
 
   const triggerSave = useCallback((newNodes = null, newEdges = null) => {
-    if (isReadOnly || !layoutLoadedRef.current) return;
+    if (isReadOnly || !layoutLoadedRef.current || saveStatus === 'load_error' || saveStatus === 'conflict') return;
     setSaveStatus('pending');
 
     if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
@@ -390,7 +390,7 @@ function WhiteboardInner({
       executeSave();
     }, 700);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isReadOnly]);
+  }, [isReadOnly, saveStatus]);
 
   const executeSave = useCallback(() => {
     if (isSavingRef.current) {
@@ -451,15 +451,18 @@ function WhiteboardInner({
             setSaveStatus('saved');
           }
         } else if (res?.conflict) {
+          hasPendingChangesRef.current = false;
           setSaveStatus('conflict');
           setSaveError(res?.error?.message || 'A lousa foi alterada por outro usuário. Recarregue para mesclar.');
         } else {
+          hasPendingChangesRef.current = false;
           setSaveStatus('error');
           setSaveError(res?.error?.message || 'Falha ao salvar lousa.');
         }
       })
       .catch(err => {
         isSavingRef.current = false;
+        hasPendingChangesRef.current = false;
         setSaveStatus('error');
         setSaveError(err?.message || 'Erro inesperado ao salvar.');
       });
@@ -467,9 +470,14 @@ function WhiteboardInner({
 
   useEffect(() => {
     return () => {
-      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+        if (layoutLoadedRef.current && !isReadOnly && pendingSaveRef.current) {
+          executeSave();
+        }
+      }
     };
-  }, []);
+  }, [executeSave, isReadOnly]);
 
   // ─── 6. Handlers do ReactFlow ─────────────────────────────────────────────
 

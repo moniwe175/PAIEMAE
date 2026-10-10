@@ -193,13 +193,20 @@ export async function insertIdea(rawPayload, author = null) {
 
     // Registra evento de criação se a tabela existir
     if (data?.id) {
-      await supabase.from('marketing_idea_events').insert([{
-        ideia_id: data.id,
-        tipo: 'criacao',
-        autor_id: author?.id || null,
-        autor_nome: author?.name || author?.email || null,
-        dados: { titulo: data.titulo, etapa: data.etapa },
-      }]).catch(() => {});
+      try {
+        const { error: evErr } = await supabase.from('marketing_idea_events').insert([{
+          ideia_id: data.id,
+          tipo: 'criacao',
+          autor_id: author?.id || null,
+          autor_nome: author?.name || author?.email || null,
+          dados: { titulo: data.titulo, etapa: data.etapa },
+        }]);
+        if (evErr) {
+          console.warn('Aviso: ideia criada com sucesso, mas o histórico não pôde ser gravado:', evErr);
+        }
+      } catch (evCatch) {
+        console.warn('Aviso: exceção ao registrar evento de criação:', evCatch);
+      }
     }
 
     return { data, error: null };
@@ -365,7 +372,14 @@ export async function updateIdea(id, patch, author = null, currentVersion = null
     }
 
     if (eventos.length > 0) {
-      await supabase.from('marketing_idea_events').insert(eventos).catch(() => {});
+      try {
+        const { error: evErr } = await supabase.from('marketing_idea_events').insert(eventos);
+        if (evErr) {
+          console.warn('Aviso: ideia atualizada com sucesso, mas o histórico não pôde ser gravado:', evErr);
+        }
+      } catch (evCatch) {
+        console.warn('Aviso: exceção ao registrar eventos de histórico da ideia:', evCatch);
+      }
     }
 
     return { data: updated, error: null };
@@ -457,25 +471,39 @@ export async function duplicateIdea(id, author = null) {
 
     // Clona tarefas pendentes
     if (tasks && tasks.length > 0) {
-      const tarefasClonadas = tasks.map((t, idx) => ({
-        ideia_id: nova.id,
-        titulo: t.titulo,
-        concluida: false,
-        responsavel: t.responsavel || null,
-        prazo: null,
-        ordem: t.ordem ?? idx,
-      }));
-      await supabase.from('marketing_idea_tasks').insert(tarefasClonadas).catch(() => {});
+      try {
+        const tarefasClonadas = tasks.map((t, idx) => ({
+          ideia_id: nova.id,
+          titulo: t.titulo,
+          concluida: false,
+          responsavel: t.responsavel || null,
+          prazo: null,
+          ordem: t.ordem ?? idx,
+        }));
+        const { error: taskErr } = await supabase.from('marketing_idea_tasks').insert(tarefasClonadas);
+        if (taskErr) {
+          console.warn('Aviso: ideia duplicada com sucesso, mas falha ao clonar tarefas:', taskErr);
+        }
+      } catch (taskCatch) {
+        console.warn('Aviso: exceção ao clonar tarefas da ideia:', taskCatch);
+      }
     }
 
     // Registra evento de duplicação
-    await supabase.from('marketing_idea_events').insert([{
-      ideia_id: nova.id,
-      tipo: 'duplicacao',
-      autor_id: author?.id || null,
-      autor_nome: author?.name || author?.email || null,
-      dados: { origem_id: orig.id, origem_titulo: orig.titulo },
-    }]).catch(() => {});
+    try {
+      const { error: evErr } = await supabase.from('marketing_idea_events').insert([{
+        ideia_id: nova.id,
+        tipo: 'duplicacao',
+        autor_id: author?.id || null,
+        autor_nome: author?.name || author?.email || null,
+        dados: { origem_id: orig.id, origem_titulo: orig.titulo },
+      }]);
+      if (evErr) {
+        console.warn('Aviso: ideia duplicada com sucesso, mas falha ao registrar evento no histórico:', evErr);
+      }
+    } catch (evCatch) {
+      console.warn('Aviso: exceção ao registrar evento de duplicação:', evCatch);
+    }
 
     return { data: nova, error: null };
   } catch (err) {
@@ -580,13 +608,20 @@ export async function unlinkIdeaCampaign(ideiaId, currentCampaignId = null, auth
 
     if (updErr) return { ok: false, error: updErr };
 
-    await supabase.from('marketing_idea_events').insert([{
-      ideia_id: ideiaId,
-      tipo: 'vinculo',
-      autor_id: author?.id || null,
-      autor_nome: author?.name || author?.email || null,
-      dados: { campanha_id_anterior: currentCampaignId, acao: 'desvinculada' },
-    }]).catch(() => {});
+    try {
+      const { error: evErr } = await supabase.from('marketing_idea_events').insert([{
+        ideia_id: ideiaId,
+        tipo: 'vinculo',
+        autor_id: author?.id || null,
+        autor_nome: author?.name || author?.email || null,
+        dados: { campanha_id_anterior: currentCampaignId, acao: 'desvinculada' },
+      }]);
+      if (evErr) {
+        console.warn('Aviso: ideia desvinculada com sucesso, mas falha ao registrar evento no histórico:', evErr);
+      }
+    } catch (evCatch) {
+      console.warn('Aviso: exceção ao registrar evento de desvínculo:', evCatch);
+    }
 
     return { ok: true };
   } catch (err) {
@@ -806,13 +841,20 @@ export async function approveIdea(id, aprovado = true, motivo = '', author = nul
 
     if (updErr) return { ok: false, error: updErr };
 
-    await supabase.from('marketing_idea_events').insert([{
-      ideia_id: id,
-      tipo: 'aprovacao',
-      autor_id: author?.id || null,
-      autor_nome: author?.name || author?.email || null,
-      dados: { aprovado, motivo: motivo || '', etapa_atual: cur.etapa },
-    }]).catch(() => {});
+    try {
+      const { error: evErr } = await supabase.from('marketing_idea_events').insert([{
+        ideia_id: id,
+        tipo: 'aprovacao',
+        autor_id: author?.id || null,
+        autor_nome: author?.name || author?.email || null,
+        dados: { aprovado, motivo: motivo || '', etapa_atual: cur.etapa },
+      }]);
+      if (evErr) {
+        console.warn('Aviso: aprovação registrada com sucesso, mas falha ao registrar evento no histórico:', evErr);
+      }
+    } catch (evCatch) {
+      console.warn('Aviso: exceção ao registrar evento de aprovação:', evCatch);
+    }
 
     return { ok: true, data: upd };
   } catch (err) {

@@ -618,7 +618,11 @@ function FichaIdeiaModal({
       }
       if (tasks.length > 0 && res.data?.id) {
         for (const t of tasks) {
-          await upsertIdeaTask({ ideia_id: res.data.id, titulo: t.titulo, ordem: t.ordem || 0 });
+          try {
+            await upsertIdeaTask({ ideia_id: res.data.id, titulo: t.titulo, ordem: t.ordem || 0 });
+          } catch (tErr) {
+            console.warn('Aviso: falha ao salvar tarefa da ideia criada:', tErr);
+          }
         }
       }
       onUpdated(res.data);
