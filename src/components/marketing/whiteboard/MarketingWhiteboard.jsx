@@ -36,7 +36,7 @@ import '@xyflow/react/dist/style.css';
 import {
   Plus, StickyNote, Type, Link as LinkIcon, Undo,
   Maximize2, ZoomIn, ZoomOut, AlertCircle, Check,
-  Clock, Sparkles, Archive, X, RefreshCw, AlertTriangle,
+  Clock, Sparkles, Archive, Trash2, X, RefreshCw, AlertTriangle,
 } from 'lucide-react';
 import MarketingIdeaNode from './MarketingIdeaNode';
 import MarketingNoteNode from './MarketingNoteNode';
@@ -109,6 +109,7 @@ function WhiteboardInner({
   onNewIdeaQuick,
   onUsarModeloLive,
   onArchiveIdea,
+  onDeleteIdea,
   onApproveIdea,
   layoutData,
   layoutVersion,
@@ -142,8 +143,9 @@ function WhiteboardInner({
   const connectionSourceRef = useRef(null);
   const [connectionSourceId, setConnectionSourceId] = useState(null);
 
-  // Modal de confirmação de arquivamento
+  // Modal de confirmação de arquivamento / exclusão
   const [confirmArchiveIdea, setConfirmArchiveIdea] = useState(null);
+  const [confirmDeleteIdea, setConfirmDeleteIdea] = useState(null);
 
   // Pilha de desfazer (Undo)
   const undoStackRef = useRef([]);
@@ -542,7 +544,11 @@ function WhiteboardInner({
     if (ideaToDelete) {
       const idea = ideias.find(i => i.id === ideaToDelete.id);
       if (idea) {
-        setConfirmArchiveIdea(idea);
+        if (idea.arquivada) {
+          setConfirmDeleteIdea(idea);
+        } else {
+          setConfirmArchiveIdea(idea);
+        }
       }
       return false;
     }
@@ -886,6 +892,42 @@ function WhiteboardInner({
                 }}
                 style={{ background: '#D97706', borderColor: '#D97706' }}>
                 Confirmar Arquivamento
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Confirmação de Exclusão Permanente */}
+      {confirmDeleteIdea && (
+        <div className="modal-overlay" onClick={() => setConfirmDeleteIdea(null)}>
+          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 420 }}>
+            <div className="modal-header">
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Trash2 style={{ width: 18, height: 18, color: '#DC2626' }} />
+                <span className="modal-title">Excluir permanentemente</span>
+              </div>
+              <button className="modal-close" onClick={() => setConfirmDeleteIdea(null)}>
+                <X style={{ width: 18, height: 18 }} />
+              </button>
+            </div>
+            <p style={{ fontSize: 13, color: 'var(--text-medium)', lineHeight: 1.5, margin: '10px 0 16px' }}>
+              Excluir <strong>&quot;{confirmDeleteIdea.titulo}&quot;</strong> permanentemente?
+              <br /><br />
+              Tarefas e histórico também serão removidos. <strong>Essa ação não pode ser desfeita.</strong>
+            </p>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <button type="button" className="btn btn-ghost"
+                onClick={() => setConfirmDeleteIdea(null)}>
+                Cancelar
+              </button>
+              <button type="button" className="btn btn-primary"
+                onClick={() => {
+                  if (onDeleteIdea) onDeleteIdea(confirmDeleteIdea.id, confirmDeleteIdea.titulo);
+                  setConfirmDeleteIdea(null);
+                }}
+                style={{ background: '#DC2626', borderColor: '#DC2626' }}>
+                Excluir permanentemente
               </button>
             </div>
           </div>

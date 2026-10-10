@@ -1872,11 +1872,13 @@ export default function IdeiasPlanejamento({ campanhas = [], onCampanhaCreated }
     }
   };
 
-  const handleDeleteIdea = async (id, titulo = '') => {
-    const confirmar = window.confirm(
-      `Excluir permanentemente "${titulo || 'esta ideia'}"?\n\nEssa ação não pode ser desfeita. Tarefas e histórico também serão removidos.`
-    );
-    if (!confirmar) return;
+  const handleDeleteIdea = async (id, titulo = '', { skipConfirm = false } = {}) => {
+    if (!skipConfirm) {
+      const confirmar = window.confirm(
+        `Excluir permanentemente "${titulo || 'esta ideia'}"?\n\nEssa ação não pode ser desfeita. Tarefas e histórico também serão removidos.`
+      );
+      if (!confirmar) return;
+    }
     const res = await deleteIdea(id);
     if (res.ok) {
       setIdeias(prev => prev.filter(i => i.id !== id));
@@ -2162,6 +2164,7 @@ export default function IdeiasPlanejamento({ campanhas = [], onCampanhaCreated }
           onNewIdeaQuick={() => setModalRapidoOpen(true)}
           onUsarModeloLive={handleUsarModeloLive}
           onArchiveIdea={handleArchive}
+          onDeleteIdea={(id, titulo) => handleDeleteIdea(id, titulo, { skipConfirm: true })}
           onApproveIdea={handleApproveIdea}
           layoutData={whiteboardLayout}
           layoutVersion={whiteboardVersion}
