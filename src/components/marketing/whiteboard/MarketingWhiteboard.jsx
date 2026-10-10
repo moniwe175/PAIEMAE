@@ -134,6 +134,7 @@ function WhiteboardInner({
   const pendingSaveRef = useRef(null); // { newNodes, newEdges } explicitamente calculados
   const layoutLoadedRef = useRef(false);
   const initializedRef = useRef(false);
+  const lastHydratedLayoutRef = useRef(null);
 
   // Modo conectar
   const [isConnectingMode, setIsConnectingMode] = useState(false);
@@ -273,7 +274,7 @@ function WhiteboardInner({
     onDeleteText: handleDeleteCustomNode,
   };
 
-  // ─── 1. Hidratação Inicial: Apenas quando layoutData/layoutVersion chegam ───
+  // ─── 1. Hidratação Inicial: Apenas quando layoutData / layoutError chegam ───
 
   useEffect(() => {
     if (layoutError) {
@@ -283,11 +284,17 @@ function WhiteboardInner({
       return;
     }
 
+    // Se já foi inicializado e o layoutData é a mesma referência, não reidratar
+    // para preservar novos nós, posições, setas e edições pendentes locais!
+    if (initializedRef.current && layoutData === lastHydratedLayoutRef.current) {
+      return;
+    }
+
+    lastHydratedLayoutRef.current = layoutData;
     const savedNodes = layoutData?.nodes || [];
     const savedEdges = layoutData?.edges || [];
     const savedNodesMap = new Map(savedNodes.map(n => [n.id, n]));
 
-    versionRef.current = layoutVersion != null ? layoutVersion : 0;
     layoutLoadedRef.current = true;
 
     const allIdeaIds = new Set(ideias.map(i => i.id));
@@ -307,7 +314,7 @@ function WhiteboardInner({
     setSaveStatus('saved');
     initializedRef.current = true;
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [layoutData, layoutVersion, layoutError]);
+  }, [layoutData, layoutError]);
 
   // ─── 2. Sincroniza dados de negócio das ideias sem tocar posições ───────────
 

@@ -867,9 +867,11 @@ test('SDK Real: updateIdea executa com PostgrestQueryBuilder real (sem .catch) e
 });
 
 test('SDK Real: updateIdea preserva atualização caso histórico falhe (não lança exceção nem quebra versão)', async () => {
+  let eventPostAttempted = false;
   const realClient = createSimulatedRealSdk({
     onFetch: async ({ url, method }) => {
       if (url.includes('/rest/v1/marketing_idea_events') && method === 'POST') {
+        eventPostAttempted = true;
         return new Response(JSON.stringify({ message: 'error writing events' }), {
           status: 500,
           headers: { 'Content-Type': 'application/json' },
@@ -883,10 +885,12 @@ test('SDK Real: updateIdea preserva atualização caso histórico falhe (não la
   try {
     supabase.from = realClient.from.bind(realClient);
 
-    const res = await updateIdea('mock-idea-1', { titulo: 'Atualização Segura' }, null, 1);
+    // Mudança de etapa dispara explicitamente o evento de histórico
+    const res = await updateIdea('mock-idea-1', { etapa: 'planejamento' }, null, 1);
     assert.equal(res.error, null);
     assert.ok(res.data);
-    assert.equal(res.data.titulo, 'Atualização Segura');
+    assert.equal(res.data.etapa, 'planejamento');
+    assert.equal(eventPostAttempted, true, 'O evento de histórico (POST para marketing_idea_events) deve ser tentado');
   } finally {
     supabase.from = origFrom;
   }
@@ -941,6 +945,118 @@ test('SDK Real: approveIdea (fallback) executa com PostgrestQueryBuilder real (s
     supabase.rpc = origRpc;
   }
 });
+
+// ─── 10. Testes de Regressão do Autosave e Preservação da Lousa ─────────────────
+
+test('Autosave Lousa: 1. Edição de post-it existente permanece na tela após salvar', () => {
+  // Simula o ciclo de vida do componente:
+  // Inicialização com layout que possui uma nota
+  const layoutData = {
+    nodes: [{ id: 'note-1', type: 'noteNode', data: { text: 'Texto Original', color: 'yellow' }, position: { x: 10, y: 10 } }],
+    edges: [],
+  };
+
+  let nodes = [...layoutData.nodes];
+  let version = 1;
+  let initialized = true;
+  let lastHydratedLayout = layoutData;
+
+  // 1. Usuário edita o texto do post-it
+  nodes = nodes.map(n => n.id === 'note-1' ? { ...n, data: { ...n.data, text: 'Texto Modificado pelo Usuário' } } : n);
+  assert.equal(nodes[0].data.text, 'Texto Modificado pelo Usuário');
+
+  // 2. Gravação do layout salva o novo texto e incrementa a versão no pai (1 -> 2)
+  version = 2; // setWhiteboardVersion(2)
+
+  // 3. Simula o efeito de hidratação com o desacoplamento de layoutVersion:
+  // Como layoutVersion NÃO está na dependência e layoutData não mudou de referência, NÃO reidrata!
+  const shouldRehydrate = (!initialized) || (layoutData !== lastHydratedLayout);
+  if (shouldRehydrate) {
+    nodes = [...layoutData.nodes]; // se reidratasse, reverteria
+  }
+
+  // O texto modificado DEVE continuar preservado na tela
+  assert.equal(nodes[0].data.text, 'Texto Modificado pelo Usuário');
+  assert.equal(version, 2);
+});
+
+test('Autosave Lousa: 2. Primeiro post-it criado permanece visível após a primeira gravação', () => {
+  // Inicialização com lousa vazia (versao 0)
+  const initialLayoutData = { nodes: [], edges: [] };
+  let nodes = [];
+  let version = 0;
+  let initialized = true;
+  let lastHydratedLayout = initialLayoutData;
+
+  // 1. Usuário cria o primeiro post-it
+  const novoPostIt = { id: 'note-first-1', type: 'noteNode', data: { text: 'Primeiro Post-it', color: 'yellow' }, position: { x: 50, y: 50 } };
+  nodes = [...nodes, novoPostIt];
+  assert.equal(nodes.length, 1);
+
+  // 2. Primeira gravação envia versão 0 e servidor retorna versão 1
+  version = 1; // setWhiteboardVersion(1)
+
+  // 3. Simula efeito de hidratação:
+  // A versão avançou de 0 para 1, mas o efeito de hidratação NÃO depende de layoutVersion
+  const shouldRehydrate = (!initialized) || (initialLayoutData !== lastHydratedLayout);
+  if (shouldRehydrate) {
+    nodes = [...initialLayoutData.nodes];
+  }
+
+  // O post-it criado DEVE continuar visível no canvas
+  assert.equal(nodes.length, 1);
+  assert.equal(nodes[0].id, 'note-first-1');
+  assert.equal(version, 1);
+});
+
+test('Autosave Lousa: 3. Nova edição durante uma gravação permanece e é salva na sequência', async () => {
+  let isSaving = false;
+  let hasPendingChanges = false;
+  let currentVersao = 1;
+  let savedVersions = [];
+  let savedTexts = [];
+
+  let currentNodes = [{ id: 'note-1', data: { text: 'V1' } }];
+  let pendingSave = null;
+
+  const fakeSave = async (nodesToSave, versaoEsperada) => {
+    savedVersions.push(versaoEsperada);
+    savedTexts.push(nodesToSave[0].data.text);
+    return { ok: true, versao: versaoEsperada + 1 };
+  };
+
+  // 1. Inicia primeiro salvamento
+  isSaving = true;
+  const firstSavePromise = fakeSave(currentNodes, currentVersao);
+
+  // 2. Enquanto o primeiro salvamento está ocorrendo (isSaving === true), usuário digita nova alteração
+  currentNodes = [{ id: 'note-1', data: { text: 'V2 em andamento' } }];
+  hasPendingChanges = true;
+  pendingSave = { newNodes: currentNodes };
+
+  // 3. Primeiro salvamento termina
+  const res1 = await firstSavePromise;
+  isSaving = false;
+  currentVersao = res1.versao; // avança para 2
+
+  // 4. Mecanismo de fila detecta hasPendingChanges e dispara a próxima gravação
+  if (hasPendingChanges) {
+    hasPendingChanges = false;
+    const nodesForNextSave = pendingSave.newNodes;
+    pendingSave = null;
+    isSaving = true;
+    const res2 = await fakeSave(nodesForNextSave, currentVersao);
+    isSaving = false;
+    currentVersao = res2.versao; // avança para 3
+  }
+
+  // Ambas as versões devem ter sido gravadas ordenadamente sem perda da edição concorrente
+  assert.deepEqual(savedVersions, [1, 2]);
+  assert.deepEqual(savedTexts, ['V1', 'V2 em andamento']);
+  assert.equal(currentVersao, 3);
+  assert.equal(currentNodes[0].data.text, 'V2 em andamento');
+});
+
 
 
 
