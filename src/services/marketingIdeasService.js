@@ -415,6 +415,41 @@ export async function archiveIdea(id, arquivar = true, author = null) {
 }
 
 /**
+ * Excluir ideia permanentemente (hard delete).
+ * Apaga tarefas e eventos associados primeiro para respeitar FKs sem ON DELETE CASCADE.
+ */
+export async function deleteIdea(id) {
+  if (!id) return { ok: false, error: new Error('ID não informado.') };
+
+  try {
+    // 1. Remove tarefas vinculadas
+    const { error: errTasks } = await supabase
+      .from('marketing_idea_tasks')
+      .delete()
+      .eq('ideia_id', id);
+    if (errTasks) return { ok: false, error: new Error(errTasks.message) };
+
+    // 2. Remove eventos/histórico vinculados
+    const { error: errEvents } = await supabase
+      .from('marketing_idea_events')
+      .delete()
+      .eq('ideia_id', id);
+    if (errEvents) return { ok: false, error: new Error(errEvents.message) };
+
+    // 3. Remove a ideia em si
+    const { error: errIdeia } = await supabase
+      .from('marketing_ideas')
+      .delete()
+      .eq('id', id);
+    if (errIdeia) return { ok: false, error: new Error(errIdeia.message) };
+
+    return { ok: true, error: null };
+  } catch (err) {
+    return { ok: false, error: err };
+  }
+}
+
+/**
  * Duplicar ideia: cria novo registro no status 'ideia' com tarefas estruturais
  * mas limpa vínculos, conclusões e datas de execução
  */

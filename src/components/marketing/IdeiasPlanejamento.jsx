@@ -17,6 +17,7 @@ import {
   updateIdea,
   approveIdea,
   archiveIdea,
+  deleteIdea,
   duplicateIdea,
   convertIdeaToCampaign,
   linkIdeaCampaign,
@@ -940,15 +941,38 @@ function FichaIdeiaModal({
                 >
                   <Copy style={{ width: 16, height: 16 }} />
                 </button>
-                <button
-                  type="button"
-                  className="btn btn-ghost"
-                  title={form.arquivada ? 'Restaurar ideia' : 'Arquivar ideia'}
-                  onClick={() => onArchived(ideiaId, !form.arquivada)}
-                  style={{ padding: 8, color: form.arquivada ? '#10B981' : '#6B7280' }}
-                >
-                  <Archive style={{ width: 16, height: 16 }} />
-                </button>
+                {form.arquivada ? (
+                  <>
+                    <button
+                      type="button"
+                      className="btn btn-ghost"
+                      title="Restaurar ideia"
+                      onClick={() => onArchived(ideiaId, false)}
+                      style={{ padding: 8, color: '#10B981' }}
+                    >
+                      <Archive style={{ width: 16, height: 16 }} />
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-ghost"
+                      title="Excluir permanentemente"
+                      onClick={() => onDeleted && onDeleted(ideiaId, form.titulo)}
+                      style={{ padding: 8, color: '#DC2626' }}
+                    >
+                      <Trash2 style={{ width: 16, height: 16 }} />
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    title="Arquivar ideia"
+                    onClick={() => onArchived(ideiaId, true)}
+                    style={{ padding: 8, color: '#6B7280' }}
+                  >
+                    <Archive style={{ width: 16, height: 16 }} />
+                  </button>
+                )}
               </>
             )}
             <button className="modal-close" onClick={onClose} style={{ marginLeft: 6 }}>
@@ -1848,6 +1872,19 @@ export default function IdeiasPlanejamento({ campanhas = [], onCampanhaCreated }
     }
   };
 
+  const handleDeleteIdea = async (id, titulo = '') => {
+    const confirmar = window.confirm(
+      `Excluir permanentemente "${titulo || 'esta ideia'}"?\n\nEssa ação não pode ser desfeita. Tarefas e histórico também serão removidos.`
+    );
+    if (!confirmar) return;
+    const res = await deleteIdea(id);
+    if (res.ok) {
+      setIdeias(prev => prev.filter(i => i.id !== id));
+    } else {
+      alert(`Erro ao excluir: ${res.error?.message || res.error}`);
+    }
+  };
+
   const handleApproveIdea = async (id, aprovado, motivo = '') => {
     const author = user ? { id: user.id, email: user.email, name: user.user_metadata?.full_name } : null;
     const res = await approveIdea(id, aprovado, motivo, author);
@@ -2220,16 +2257,31 @@ export default function IdeiasPlanejamento({ campanhas = [], onCampanhaCreated }
                           )}
                         </td>
                         <td style={{ padding: '12px 16px', textAlign: 'right' }}>
-                          <button
-                            className="btn btn-ghost"
-                            style={{ padding: '4px 8px', fontSize: 12 }}
-                            onClick={e => {
-                              e.stopPropagation();
-                              setFichaModalData({ id: ideia.id });
-                            }}
-                          >
-                            <Edit3 style={{ width: 13, height: 13 }} /> Abrir
-                          </button>
+                          <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end' }}>
+                            <button
+                              className="btn btn-ghost"
+                              style={{ padding: '4px 8px', fontSize: 12 }}
+                              onClick={e => {
+                                e.stopPropagation();
+                                setFichaModalData({ id: ideia.id });
+                              }}
+                            >
+                              <Edit3 style={{ width: 13, height: 13 }} /> Abrir
+                            </button>
+                            {mostrarArquivadas && !isReadOnly && (
+                              <button
+                                className="btn btn-ghost"
+                                style={{ padding: '4px 8px', fontSize: 12, color: '#DC2626' }}
+                                title="Excluir permanentemente"
+                                onClick={e => {
+                                  e.stopPropagation();
+                                  handleDeleteIdea(ideia.id, ideia.titulo);
+                                }}
+                              >
+                                <Trash2 style={{ width: 13, height: 13 }} />
+                              </button>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     );
@@ -2264,6 +2316,10 @@ export default function IdeiasPlanejamento({ campanhas = [], onCampanhaCreated }
           onUpdated={() => carregarTudo()}
           onArchived={async (id, arq) => {
             await handleArchive(id, arq);
+            setFichaModalData(null);
+          }}
+          onDeleted={async (id, titulo) => {
+            await handleDeleteIdea(id, titulo);
             setFichaModalData(null);
           }}
           onDuplicated={async (id) => {
