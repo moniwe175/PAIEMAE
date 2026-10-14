@@ -2,15 +2,16 @@
 -- PAIEMAE — Inteligência Comercial: Patch Incremental v2
 -- Arquivo: marketing_inteligencia_patch2.sql
 -- 
--- Aplica as correções dos 4 pontos identificados no commit 17a67c5:
+-- Aplica as correções dos pontos identificados:
 -- 1. Exclui despesas, sangrias e resumos dos recebimentos e da conciliação;
---    valida apenas pagamentos (receitas) e estornos em sheet_transactions.
+--    valida apenas pagamentos reais (receitas) em sheet_transactions. Procedimento realizado e pago na hora.
+--    Sem funcionalidade de estorno nesta entrega.
 -- 2. Elimina a multiplicação de pagamentos em fn_ic_canal_stats quando o cliente
 --    possui múltiplos leads/origens; exige atribuição comprovada (agendamento
 --    concluído na data do pagamento ou origem única inequívoca) e mantém valores
 --    sem evidência na categoria "Não atribuído".
--- 3. Atualiza fn_ic_client_rfm para aplicar o filtro estrito de tipos financeiros.
--- 4. Atualiza fn_ic_unlinked_transactions para retornar somente receitas/estornos elegíveis.
+-- 3. Atualiza fn_ic_client_rfm para aplicar o filtro estrito de receitas reais.
+-- 4. Atualiza fn_ic_unlinked_transactions para retornar somente receitas elegíveis.
 --
 -- IDEMPOTÊNCIA: Seguro rodar sobre o banco já atualizado pelo patch anterior.
 -- Preserva 100% dos dados, tabelas e vínculos existentes.
@@ -146,14 +147,13 @@ BEGIN
     AND appointment_date <= p_date_to;
 
   -- 8. Recebimentos confirmados e cobertura financeira via sheet_transactions e commercial_record_links
-  -- FILTRO ESTRITO: Apenas receitas e estornos válidos. Exclui despesas, sangrias e resumos.
+  -- FILTRO ESTRITO: Apenas receitas reais de procedimentos realizados e pagos na hora. Exclui despesas, sangrias e resumos.
   SELECT
     COUNT(*),
     COUNT(crl.id),
     COALESCE(SUM(
       CASE 
-        WHEN crl.id IS NOT NULL THEN
-          CASE WHEN st.row_type = 'estorno' THEN -ABS(st.gross) ELSE st.gross END
+        WHEN crl.id IS NOT NULL THEN st.gross
         ELSE 0
       END
     ), 0),
@@ -171,8 +171,9 @@ BEGIN
     AND st.date_ref <= p_date_to
     AND st.deleted_at IS NULL
     AND (st.is_metadata IS NOT TRUE OR st.is_metadata IS NULL)
-    -- Classificação comprovada: exige receita ou estorno (não aceita row_type nulo automaticamente)
-    AND lower(COALESCE(st.row_type, st.tipo, '')) IN ('receita', 'estorno')
+    -- Classificação comprovada: apenas receitas reais de procedimentos realizados e pagos na hora.
+    -- Sem funcionalidade de estorno nesta entrega.
+    AND lower(COALESCE(st.row_type, st.tipo, '')) = 'receita'
     AND NOT (lower(COALESCE(st.row_type, st.tipo, '')) LIKE ANY (ARRAY['despesa%', 'saida%', 'saída%', 'sangria%', 'gasto%', 'total%', 'resumo%']))
     AND NOT (lower(COALESCE(st.client, '')) LIKE ANY (ARRAY['sangria%', 'despesa%', 'passagem%', 'produtos%', 'tributos%', 'outras saída%', 'outras saida%', 'total%', 'resumo%']))
     AND NOT (lower(COALESCE(st.procedure, '')) LIKE ANY (ARRAY['sangria%', 'despesa%', 'passagem%', 'produtos%', 'tributos%', 'outras saída%', 'outras saida%', 'total%', 'resumo%']));
@@ -279,7 +280,7 @@ BEGIN
     SELECT
       st.id AS tx_id,
       crl.client_id,
-      CASE WHEN st.row_type = 'estorno' THEN -ABS(st.gross) ELSE st.gross END AS net_val,
+      st.gross AS net_val,
       st.date_ref
     FROM sheet_transactions st
     INNER JOIN commercial_record_links crl
@@ -289,8 +290,8 @@ BEGIN
       AND st.date_ref <= p_date_to
       AND st.deleted_at IS NULL
       AND (st.is_metadata IS NOT TRUE OR st.is_metadata IS NULL)
-      -- Classificação comprovada: apenas receita e estorno
-      AND lower(COALESCE(st.row_type, st.tipo, '')) IN ('receita', 'estorno')
+      -- Classificação comprovada: apenas receitas reais. Sem estornos.
+      AND lower(COALESCE(st.row_type, st.tipo, '')) = 'receita'
       AND NOT (lower(COALESCE(st.row_type, st.tipo, '')) LIKE ANY (ARRAY['despesa%', 'saida%', 'saída%', 'sangria%', 'gasto%', 'total%', 'resumo%']))
       AND NOT (lower(COALESCE(st.client, '')) LIKE ANY (ARRAY['sangria%', 'despesa%', 'passagem%', 'produtos%', 'tributos%', 'outras saída%', 'outras saida%', 'total%', 'resumo%']))
       AND NOT (lower(COALESCE(st.procedure, '')) LIKE ANY (ARRAY['sangria%', 'despesa%', 'passagem%', 'produtos%', 'tributos%', 'outras saída%', 'outras saida%', 'total%', 'resumo%']))
@@ -351,7 +352,7 @@ END;
 $$;
 
 
--- ─── 3. RPC 3: RFM com filtro estrito de receitas/estornos ───────────────────
+-- ─── 3. RPC 3: RFM com filtro estrito de receitas reais ──────────────────────────
 CREATE OR REPLACE FUNCTION public.fn_ic_client_rfm(
   p_date_from    date,
   p_date_to      date,
@@ -383,15 +384,13 @@ BEGIN
       crl.client_id AS rev_client_id,
       COALESCE(SUM(
         CASE 
-          WHEN st.date_ref >= p_date_from AND st.date_ref <= p_date_to THEN
-            CASE WHEN st.row_type = 'estorno' THEN -ABS(st.gross) ELSE st.gross END
+          WHEN st.date_ref >= p_date_from AND st.date_ref <= p_date_to THEN st.gross
           ELSE 0
         END
       ), 0) AS rec_periodo,
       COALESCE(SUM(
         CASE 
-          WHEN st.date_ref <= p_date_to THEN
-            CASE WHEN st.row_type = 'estorno' THEN -ABS(st.gross) ELSE st.gross END
+          WHEN st.date_ref <= p_date_to THEN st.gross
           ELSE 0
         END
       ), 0) AS rec_total
@@ -401,8 +400,8 @@ BEGIN
      AND crl.source_table = 'sheet_transactions'
     WHERE st.deleted_at IS NULL
       AND (st.is_metadata IS NOT TRUE OR st.is_metadata IS NULL)
-      -- Classificação comprovada: apenas receita e estorno
-      AND lower(COALESCE(st.row_type, st.tipo, '')) IN ('receita', 'estorno')
+      -- Classificação comprovada: apenas receitas reais. Sem estornos.
+      AND lower(COALESCE(st.row_type, st.tipo, '')) = 'receita'
       AND NOT (lower(COALESCE(st.row_type, st.tipo, '')) LIKE ANY (ARRAY['despesa%', 'saida%', 'saída%', 'sangria%', 'gasto%', 'total%', 'resumo%']))
       AND NOT (lower(COALESCE(st.client, '')) LIKE ANY (ARRAY['sangria%', 'despesa%', 'passagem%', 'produtos%', 'tributos%', 'outras saída%', 'outras saida%', 'total%', 'resumo%']))
       AND NOT (lower(COALESCE(st.procedure, '')) LIKE ANY (ARRAY['sangria%', 'despesa%', 'passagem%', 'produtos%', 'tributos%', 'outras saída%', 'outras saida%', 'total%', 'resumo%']))
@@ -466,7 +465,7 @@ END;
 $$;
 
 
--- ─── 4. RPC 4: Consulta de transações não vinculadas (somente receitas/estornos) ───
+-- ─── 4. RPC 4: Consulta de transações não vinculadas (somente receitas reais) ───
 CREATE OR REPLACE FUNCTION public.fn_ic_unlinked_transactions(
   p_date_from date,
   p_date_to   date,

@@ -93,7 +93,7 @@ O UPDATE precisa filtrar simultaneamente por id e version esperada, incrementand
 
 A RPC de overview retorna receita_status = indisponivel de forma fixa. A UI usa unavailable sem consultar uma situação dinâmica. Nenhum serviço desta entrega lê commercial_record_links para calcular o valor.
 
-A ausência de FK direta impede atribuição individual automática, mas não prova, por si só, que o total geral de recebimentos é impossível. Validar primeiro a fonte financeira e a semântica dos registros. Implementar cobertura, exclusão de metadados/linhas apagadas, deduplicação, pacotes e estornos conforme a especificação original.
+A ausência de FK direta impede atribuição individual automática, mas não prova, por si só, que o total geral de recebimentos é impossível. Validar primeiro a fonte financeira e a semântica dos registros. Implementar cobertura, exclusão de metadados/linhas apagadas, deduplicação e pacotes conforme a especificação original (estornos retirados do escopo operacional por operar com procedimento realizado e pago na hora).
 
 Se algo não pode ser calculado, manter a ausência verdadeira. Se um vínculo confirmado habilita o cálculo, ele precisa efetivamente mudar o resultado.
 

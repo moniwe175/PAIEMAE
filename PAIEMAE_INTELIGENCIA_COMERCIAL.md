@@ -130,7 +130,7 @@ Usar o cadastro existente como identidade. Exibir:
 | Último atendimento | Última ocorrência concluída até a data de referência |
 | Dias sem atendimento | Dias de calendário desde essa ocorrência |
 | Atendimentos no período | Contagem distinta de ocorrências concluídas |
-| Total recebido no período | Pagamentos confirmados atribuídos ao cliente, líquidos de estornos registrados |
+| Total recebido no período | Recebimentos reais confirmados atribuídos ao cliente (procedimento realizado e pago na hora; sem funcionalidade de estorno nesta entrega) |
 | Total recebido no histórico disponível | Mesma regra para toda a cobertura conhecida, com data inicial da base |
 | Serviços realizados | Serviços de ocorrências concluídas, deduplicados corretamente |
 | Origem e campanha | Valor, evidência e eventuais lacunas |
@@ -287,7 +287,7 @@ Usar America/Sao_Paulo. Períodos incluem a data inicial e final na interface; c
 | Novos clientes observados | Clientes cujo primeiro atendimento conhecido está no período; evidenciar cobertura histórica |
 | Clientes que retornaram | Atendidos no período que têm atendimento concluído anterior ao início dele |
 | Participação de clientes que retornaram | Grupo anterior dividido pelos clientes atendidos no período; não chamar de taxa de retenção de coorte |
-| Recebimentos líquidos registrados | Valores efetivamente recebidos no período menos estornos/devoluções efetivamente registrados no período, sem abater custos operacionais |
+| Recebimentos reais registrados | Valores efetivamente recebidos no período (procedimento realizado e pago na hora; sem funcionalidade de estorno nesta entrega), sem abater custos operacionais |
 | Recebido por cliente pagante | Recebimentos atribuídos divididos pelos clientes distintos associados a pagamentos positivos no período; nomear a unidade corretamente |
 | Interessados registrados | Leads distintos criados no período; não equiparar automaticamente a pessoas distintas |
 | Lead com agendamento | Lead da coorte com pelo menos um agendamento válido e vinculado até a data de corte |
@@ -330,7 +330,7 @@ Inspecionar schema, constraints, grants, RLS e RPCs existentes em ambiente autor
 
 Escolher e documentar uma fonte canônica por recebimento. Não somar transactions, sheet_transactions e daily_reports como receitas independentes.
 
-Validar o significado de gross, formas de pagamento, status, estornos, linhas de resumo e comandas. A presença de um campo numérico não prova recebimento.
+Validar o significado de gross, formas de pagamento, status, linhas de resumo e comandas. A presença de um campo numérico não prova recebimento. Na operação clínica da Pai e Mãe, o procedimento é realizado e pago na hora; controles de devolução ou estorno não fazem parte do escopo desta entrega.
 
 Normalizar BRL com decimal no banco ou centavos inteiros nos cálculos; não usar soma imprecisa de ponto flutuante como fonte monetária.
 
@@ -447,7 +447,7 @@ Fixtures devem ficar isoladas de produção. Testar o código real de cálculo/c
 | Origem ausente | “Não informada”, sem virar Instagram |
 | Origem legada “Instagram” | Modalidade não identificada até existir evidência |
 | Comanda espelhada em duas fontes | Receita contabilizada uma única vez |
-| Recebimento de R$ 1.000 e estorno de R$ 200 no período | R$ 800 líquidos registrados, sem duplicar linhas de resumo |
+| Recebimento de R$ 1.000 no período | R$ 1.000 recebidos registrados, sem duplicar linhas de resumo (estornos fora de escopo operacional) |
 | Pacote pago, três sessões consumidas | Valor recebido uma vez; atendimentos contados separadamente |
 | Dois clientes homônimos | Sem união automática dos valores |
 | Dados sem confirmação de pagamento | Não aparecem como recebimentos confirmados |

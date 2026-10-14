@@ -270,7 +270,7 @@ describe('Inteligência Comercial — Suíte Completa de Contratos e Serviço Re
             assert.equal(payload.version, 2, 'Nova versão deve ser incrementada para 2');
             assert.ok(payload.updated_at);
             return {
-              eq: function(field, val) {
+              eq: function (field, val) {
                 executedFilters.push({ field, val });
                 return this;
               },
@@ -287,7 +287,7 @@ describe('Inteligência Comercial — Suíte Completa de Contratos e Serviço Re
         const res = await updateSegment('seg-1', { name: 'Segmento VIP' }, 1);
         assert.equal(res.error, null);
         assert.equal(res.data.version, 2);
-        
+
         // Valida que o filtro do UPDATE exigiu simultaneamente id E version
         const idFilter = executedFilters.find(f => f.field === 'id' && f.val === 'seg-1');
         const verFilter = executedFilters.find(f => f.field === 'version' && f.val === 1);
@@ -303,7 +303,7 @@ describe('Inteligência Comercial — Suíte Completa de Contratos e Serviço Re
 
       supabase.from = (table) => ({
         update: () => ({
-          eq: function() { return this; },
+          eq: function () { return this; },
           // Simula retorno de 0 linhas atualizadas (pois version != expectedVer)
           select: async () => ({ data: [], error: null }),
         }),
@@ -327,7 +327,7 @@ describe('Inteligência Comercial — Suíte Completa de Contratos e Serviço Re
         update: (payload) => {
           assert.equal(payload.archived, true);
           return {
-            eq: function() { return this; },
+            eq: function () { return this; },
             select: async () => ({ data: [], error: null }), // 0 linhas
           };
         },
@@ -710,9 +710,9 @@ describe('Inteligência Comercial — Suíte Completa de Contratos e Serviço Re
       { id: 't2', gross: 700.00, row_type: null, client: 'SANGRIA CAIXA' }, // Sangria sem tipo definido -> NÃO deve entrar
       { id: 't3', gross: 200.00, row_type: null, client: 'João Santos' }, // Nulo sem classificação -> NÃO entra como receita confirmada
       { id: 't4', gross: 100.00, row_type: 'estorno', client: 'Maria Silva' }, // Estorno deduzido
-      { id: 't5', gross: 80.00,  row_type: 'despesa', client: 'PASSAGEM' }, // Despesa operacional
+      { id: 't5', gross: 80.00, row_type: 'despesa', client: 'PASSAGEM' }, // Despesa operacional
       { id: 't6', gross: 120.00, row_type: 'sangria', client: 'SANGRIA' }, // Sangria de caixa
-      { id: 't7', gross: 90.00,  row_type: 'receita', client: 'OUTRAS SAÍDAS' }, // Descrição de saída disfarçada
+      { id: 't7', gross: 90.00, row_type: 'receita', client: 'OUTRAS SAÍDAS' }, // Descrição de saída disfarçada
       { id: 't8', gross: 500.00, row_type: 'resumo', client: 'TOTAL DO DIA' }, // Linha de resumo/total
     ];
 

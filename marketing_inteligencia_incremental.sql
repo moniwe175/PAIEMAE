@@ -221,8 +221,7 @@ BEGIN
     COUNT(crl.id),
     COALESCE(SUM(
       CASE 
-        WHEN crl.id IS NOT NULL THEN
-          CASE WHEN st.row_type = 'estorno' THEN -ABS(st.gross) ELSE st.gross END
+        WHEN crl.id IS NOT NULL THEN st.gross
         ELSE 0
       END
     ), 0),
@@ -240,8 +239,9 @@ BEGIN
     AND st.date_ref <= p_date_to
     AND st.deleted_at IS NULL
     AND (st.is_metadata IS NOT TRUE OR st.is_metadata IS NULL)
-    -- Classificação comprovada: exige receita ou estorno (não aceita row_type nulo automaticamente)
-    AND lower(COALESCE(st.row_type, st.tipo, '')) IN ('receita', 'estorno')
+    -- Classificação comprovada: apenas receitas reais de procedimentos realizados e pagos na hora.
+    -- Sem funcionalidade de estorno nesta entrega.
+    AND lower(COALESCE(st.row_type, st.tipo, '')) = 'receita'
     -- NOT (expr LIKE ANY (ARRAY[...])) é sintaxe PostgreSQL válida e correta.
     -- Exclui tipos de lançamento que não são receita de atendimento.
     AND NOT (lower(COALESCE(st.row_type, st.tipo, '')) LIKE ANY (ARRAY['despesa%','saida%','saída%','sangria%','gasto%','total%','resumo%']))
@@ -351,7 +351,7 @@ BEGIN
     SELECT
       st.id AS tx_id,
       crl.client_id,
-      CASE WHEN st.row_type = 'estorno' THEN -ABS(st.gross) ELSE st.gross END AS net_val,
+      st.gross AS net_val,
       st.date_ref
     FROM sheet_transactions st
     INNER JOIN commercial_record_links crl
@@ -361,9 +361,9 @@ BEGIN
       AND st.date_ref <= p_date_to
       AND st.deleted_at IS NULL
       AND (st.is_metadata IS NOT TRUE OR st.is_metadata IS NULL)
-      -- Classificação comprovada: apenas receita e estorno.
+      -- Classificação comprovada: apenas receitas reais. Sem estornos.
       -- NOT (expr LIKE ANY (ARRAY[...])) é sintaxe PostgreSQL válida e correta.
-      AND lower(COALESCE(st.row_type, st.tipo, '')) IN ('receita', 'estorno')
+      AND lower(COALESCE(st.row_type, st.tipo, '')) = 'receita'
       AND NOT (lower(COALESCE(st.row_type, st.tipo, '')) LIKE ANY (ARRAY['despesa%','saida%','saída%','sangria%','gasto%','total%','resumo%']))
       AND NOT (lower(COALESCE(st.client, ''))             LIKE ANY (ARRAY['sangria%','despesa%','passagem%','produtos%','tributos%','outras saída%','outras saida%','total%','resumo%']))
       AND NOT (lower(COALESCE(st.procedure, ''))          LIKE ANY (ARRAY['sangria%','despesa%','passagem%','produtos%','tributos%','outras saída%','outras saida%','total%','resumo%']))
@@ -458,15 +458,13 @@ BEGIN
       crl.client_id AS rev_client_id,
       COALESCE(SUM(
         CASE 
-          WHEN st.date_ref >= p_date_from AND st.date_ref <= p_date_to THEN
-            CASE WHEN st.row_type = 'estorno' THEN -ABS(st.gross) ELSE st.gross END
+          WHEN st.date_ref >= p_date_from AND st.date_ref <= p_date_to THEN st.gross
           ELSE 0
         END
       ), 0) AS rec_periodo,
       COALESCE(SUM(
         CASE 
-          WHEN st.date_ref <= p_date_to THEN
-            CASE WHEN st.row_type = 'estorno' THEN -ABS(st.gross) ELSE st.gross END
+          WHEN st.date_ref <= p_date_to THEN st.gross
           ELSE 0
         END
       ), 0) AS rec_total
@@ -476,9 +474,9 @@ BEGIN
      AND crl.source_table = 'sheet_transactions'
     WHERE st.deleted_at IS NULL
       AND (st.is_metadata IS NOT TRUE OR st.is_metadata IS NULL)
-      -- Classificação comprovada: apenas receita e estorno.
+      -- Classificação comprovada: apenas receitas reais. Sem estornos.
       -- NOT (expr LIKE ANY (ARRAY[...])) é sintaxe PostgreSQL válida e correta.
-      AND lower(COALESCE(st.row_type, st.tipo, '')) IN ('receita', 'estorno')
+      AND lower(COALESCE(st.row_type, st.tipo, '')) = 'receita'
       AND NOT (lower(COALESCE(st.row_type, st.tipo, '')) LIKE ANY (ARRAY['despesa%','saida%','saída%','sangria%','gasto%','total%','resumo%']))
       AND NOT (lower(COALESCE(st.client, ''))             LIKE ANY (ARRAY['sangria%','despesa%','passagem%','produtos%','tributos%','outras saída%','outras saida%','total%','resumo%']))
       AND NOT (lower(COALESCE(st.procedure, ''))          LIKE ANY (ARRAY['sangria%','despesa%','passagem%','produtos%','tributos%','outras saída%','outras saida%','total%','resumo%']))
