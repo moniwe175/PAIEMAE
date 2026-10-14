@@ -229,7 +229,10 @@ BEGIN
   WHERE st.date_ref >= p_date_from
     AND st.date_ref <= p_date_to
     AND st.deleted_at IS NULL
-    AND (st.is_metadata IS NOT TRUE OR st.is_metadata IS NULL);
+    AND (st.is_metadata IS NOT TRUE OR st.is_metadata IS NULL)
+    AND (st.row_type IN ('receita', 'estorno') OR st.row_type IS NULL)
+    AND lower(COALESCE(st.row_type, '')) NOT LIKE ANY (ARRAY['despesa%', 'saida%', 'saída%', 'sangria%', 'gasto%', 'total%', 'resumo%'])
+    AND lower(COALESCE(st.client, '')) NOT LIKE ANY (ARRAY['sangria%', 'despesa%', 'passagem%', 'produtos%', 'tributos%', 'outras saída%', 'outras saida%', 'total%']);
 
   IF v_transacoes_total = 0 THEN
     v_receita_status := 'sem_lancamentos';
@@ -329,32 +332,77 @@ BEGIN
       AND (l.created_at AT TIME ZONE 'America/Sao_Paulo')::date <= p_date_to
     GROUP BY COALESCE(NULLIF(TRIM(l.origem), ''), 'Não informada')
   ),
-  canal_financeiro AS (
+  -- Transações elegíveis do período vinculadas a pacientes
+  tx_with_client AS (
     SELECT
-      COALESCE(NULLIF(TRIM(l.origem), ''), 'Não informada') AS canal_nome,
-      COALESCE(SUM(
-        CASE WHEN st.row_type = 'estorno' THEN -ABS(st.gross) ELSE st.gross END
-      ), 0) AS valor_atribuido
-    FROM crm_leads l
-    INNER JOIN commercial_record_links crl ON crl.client_id = l.client_id
-    INNER JOIN sheet_transactions st
-      ON st.id::text = crl.source_id
-     AND crl.source_table = 'sheet_transactions'
+      st.id AS tx_id,
+      crl.client_id,
+      CASE WHEN st.row_type = 'estorno' THEN -ABS(st.gross) ELSE st.gross END AS net_val,
+      st.date_ref
+    FROM sheet_transactions st
+    INNER JOIN commercial_record_links crl
+      ON crl.source_table = 'sheet_transactions'
+     AND crl.source_id = st.id::text
     WHERE st.date_ref >= p_date_from
       AND st.date_ref <= p_date_to
       AND st.deleted_at IS NULL
       AND (st.is_metadata IS NOT TRUE OR st.is_metadata IS NULL)
-    GROUP BY COALESCE(NULLIF(TRIM(l.origem), ''), 'Não informada')
+      AND (st.row_type IN ('receita', 'estorno') OR st.row_type IS NULL)
+      AND lower(COALESCE(st.row_type, '')) NOT LIKE ANY (ARRAY['despesa%', 'saida%', 'saída%', 'sangria%', 'gasto%', 'total%', 'resumo%'])
+      AND lower(COALESCE(st.client, '')) NOT LIKE ANY (ARRAY['sangria%', 'despesa%', 'passagem%', 'produtos%', 'tributos%', 'outras saída%', 'outras saida%', 'total%'])
+  ),
+  -- Atribuição comprovada 1-para-1 por transação para evitar duplicação em múltiplos leads:
+  -- Prioridade 1: Agendamento do cliente na data do pagamento que está vinculado a um lead
+  -- Prioridade 2: Origem única e inequívoca do cliente (se todos os leads do cliente possuem a mesma origem)
+  -- Sem comprovação suficiente: 'Não atribuído'
+  tx_attributed AS (
+    SELECT
+      tx.tx_id,
+      tx.net_val,
+      COALESCE(
+        (
+          SELECT COALESCE(NULLIF(TRIM(l.origem), ''), 'Não informada')
+          FROM crm_leads l
+          INNER JOIN appointments a ON a.id = l.appointment_id
+          WHERE a.client_id = tx.client_id
+            AND a.appointment_date = tx.date_ref
+            AND a.status NOT IN ('cancelado', 'desmarcado', 'falta')
+          ORDER BY l.created_at DESC
+          LIMIT 1
+        ),
+        (
+          SELECT COALESCE(NULLIF(TRIM(MIN(l.origem)), ''), 'Não informada')
+          FROM crm_leads l
+          WHERE l.client_id = tx.client_id
+            AND (l.created_at AT TIME ZONE 'America/Sao_Paulo')::date <= tx.date_ref
+          HAVING COUNT(DISTINCT COALESCE(NULLIF(TRIM(l.origem), ''), 'Não informada')) = 1
+        ),
+        'Não atribuído'
+      ) AS canal_atribuido
+    FROM tx_with_client tx
+  ),
+  canal_financeiro AS (
+    SELECT
+      ta.canal_atribuido AS canal_nome,
+      COALESCE(SUM(ta.net_val), 0) AS valor_atribuido
+    FROM tx_attributed ta
+    GROUP BY ta.canal_atribuido
+  ),
+  todos_canais AS (
+    SELECT canal_nome FROM lead_agg
+    UNION
+    SELECT canal_nome FROM canal_financeiro
   )
   SELECT
-    la.canal_nome AS canal,
-    la.total_leads AS interessados_total,
-    la.total_com_agend AS interessados_com_agendamento,
-    la.total_atendidos AS clientes_atendidos_vinculados,
-    COALESCE(cf.valor_atribuido, 0) AS recebimentos_atribuidos
-  FROM lead_agg la
-  LEFT JOIN canal_financeiro cf ON cf.canal_nome = la.canal_nome
-  ORDER BY la.total_leads DESC;
+    tc.canal_nome                                    AS canal,
+    COALESCE(la.total_leads, 0)                      AS interessados_total,
+    COALESCE(la.total_com_agend, 0)                  AS interessados_com_agendamento,
+    COALESCE(la.total_atendidos, 0)                  AS clientes_atendidos_vinculados,
+    COALESCE(cf.valor_atribuido, 0)                  AS recebimentos_atribuidos
+  FROM todos_canais tc
+  LEFT JOIN lead_agg la ON la.canal_nome = tc.canal_nome
+  LEFT JOIN canal_financeiro cf ON cf.canal_nome = tc.canal_nome
+  ORDER BY COALESCE(la.total_leads, 0) DESC, COALESCE(cf.valor_atribuido, 0) DESC;
 END;
 $$;
 
@@ -411,6 +459,9 @@ BEGIN
      AND crl.source_table = 'sheet_transactions'
     WHERE st.deleted_at IS NULL
       AND (st.is_metadata IS NOT TRUE OR st.is_metadata IS NULL)
+      AND (st.row_type IN ('receita', 'estorno') OR st.row_type IS NULL)
+      AND lower(COALESCE(st.row_type, '')) NOT LIKE ANY (ARRAY['despesa%', 'saida%', 'saída%', 'sangria%', 'gasto%', 'total%', 'resumo%'])
+      AND lower(COALESCE(st.client, '')) NOT LIKE ANY (ARRAY['sangria%', 'despesa%', 'passagem%', 'produtos%', 'tributos%', 'outras saída%', 'outras saida%', 'total%'])
     GROUP BY crl.client_id
   ),
   filtered_clients AS (
@@ -770,6 +821,10 @@ BEGIN
       AND st.date_ref <= p_date_to
       AND st.deleted_at IS NULL
       AND (st.is_metadata IS NOT TRUE OR st.is_metadata IS NULL)
+      -- Exclui despesas, sangrias e resumos da lista de conciliação
+      AND (st.row_type IN ('receita', 'estorno') OR st.row_type IS NULL)
+      AND lower(COALESCE(st.row_type, '')) NOT LIKE ANY (ARRAY['despesa%', 'saida%', 'saída%', 'sangria%', 'gasto%', 'total%', 'resumo%'])
+      AND lower(COALESCE(st.client, '')) NOT LIKE ANY (ARRAY['sangria%', 'despesa%', 'passagem%', 'produtos%', 'tributos%', 'outras saída%', 'outras saida%', 'total%'])
   ),
   counted AS (
     SELECT COUNT(*) AS total_rows FROM unlinked

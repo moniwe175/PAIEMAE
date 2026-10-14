@@ -50,6 +50,7 @@ import {
   fetchCommercialSettings,
   saveCommercialSettings,
   getDateRange,
+  getIsoDateRangeSaoPaulo,
   fmtDate,
   fmtBRL,
 } from '../../../services/inteligenciaComercialService';
@@ -254,12 +255,35 @@ function ActionCard({ label, count, description, color, icon: Icon, onAction, ac
 // ─── Modal de Detalhamento / Registros (Drilldown) ─────────────────────────────
 
 function RecordsModal({ title, subtitle, items = [], loading, columns = [], onClose }) {
+  const [search, setSearch] = useState('');
+  const [page, setPage] = useState(1);
+  const pageSize = 15;
+
+  const filtered = useMemo(() => {
+    if (!search.trim()) return items;
+    const q = search.toLowerCase();
+    return items.filter(it => {
+      return columns.some(c => {
+        const val = it[c.key];
+        if (val == null) return false;
+        return String(val).toLowerCase().includes(q);
+      });
+    });
+  }, [items, search, columns]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const currentPage = Math.min(page, totalPages);
+  const paginated = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return filtered.slice(start, start + pageSize);
+  }, [filtered, currentPage, pageSize]);
+
   return (
     <div className="modal-overlay" onClick={onClose} style={{ zIndex: 1100 }}>
       <div
         className="modal"
         onClick={e => e.stopPropagation()}
-        style={{ maxWidth: 840, width: '92%', maxHeight: '85vh', display: 'flex', flexDirection: 'column' }}
+        style={{ maxWidth: 860, width: '92%', maxHeight: '85vh', display: 'flex', flexDirection: 'column' }}
       >
         <div className="modal-header">
           <div>
@@ -269,11 +293,34 @@ function RecordsModal({ title, subtitle, items = [], loading, columns = [], onCl
           <button className="modal-close" onClick={onClose}><X size={18} /></button>
         </div>
 
+        {/* Barra de pesquisa rápida */}
+        <div style={{ padding: '8px 20px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 10 }}>
+          <Search size={14} style={{ color: 'var(--text-muted)' }} />
+          <input
+            type="text"
+            className="form-input"
+            placeholder="Filtrar registros por paciente, procedimento, origem..."
+            value={search}
+            onChange={e => { setSearch(e.target.value); setPage(1); }}
+            style={{ fontSize: 12, padding: '4px 8px', flex: 1, border: 'none', background: 'transparent' }}
+          />
+          {search && (
+            <button
+              onClick={() => { setSearch(''); setPage(1); }}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 11 }}
+            >
+              Limpar busca
+            </button>
+          )}
+        </div>
+
         <div style={{ flex: 1, overflowY: 'auto', padding: '16px 20px' }}>
           {loading ? (
             <p style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '30px 0' }}>Carregando registros…</p>
-          ) : items.length === 0 ? (
-            <p style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '30px 0' }}>Nenhum registro correspondente encontrado.</p>
+          ) : paginated.length === 0 ? (
+            <p style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '30px 0' }}>
+              {search ? 'Nenhum registro encontrado para a busca informada.' : 'Nenhum registro correspondente encontrado.'}
+            </p>
           ) : (
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
               <thead>
@@ -286,7 +333,7 @@ function RecordsModal({ title, subtitle, items = [], loading, columns = [], onCl
                 </tr>
               </thead>
               <tbody>
-                {items.map((it, idx) => (
+                {paginated.map((it, idx) => (
                   <tr key={it.id || idx} style={{ borderBottom: '1px solid var(--border)', background: idx % 2 === 0 ? 'transparent' : 'var(--bg-main)' }}>
                     {columns.map(c => (
                       <td key={c.key} style={{ padding: '10px 12px', textAlign: c.align || 'left', color: 'var(--text-dark)' }}>
@@ -300,11 +347,38 @@ function RecordsModal({ title, subtitle, items = [], loading, columns = [], onCl
           )}
         </div>
 
-        <div style={{ padding: '12px 20px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        {/* Rodapé com Paginação */}
+        <div style={{ padding: '12px 20px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
           <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-            Exibindo {items.length} registro(s)
+            Exibindo {filtered.length === 0 ? 0 : (currentPage - 1) * pageSize + 1} a {Math.min(currentPage * pageSize, filtered.length)} de {filtered.length} registro(s)
           </span>
-          <button className="btn btn-ghost" onClick={onClose}>Fechar</button>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            {totalPages > 1 && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <button
+                  className="btn btn-ghost"
+                  style={{ fontSize: 11, padding: '4px 8px' }}
+                  onClick={() => setPage(p => Math.max(1, p - 1))}
+                  disabled={currentPage <= 1}
+                >
+                  <ChevronLeft size={14} /> Anterior
+                </button>
+                <span style={{ fontSize: 11, color: 'var(--text-muted)', margin: '0 4px' }}>
+                  {currentPage} / {totalPages}
+                </span>
+                <button
+                  className="btn btn-ghost"
+                  style={{ fontSize: 11, padding: '4px 8px' }}
+                  onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                  disabled={currentPage >= totalPages}
+                >
+                  Próxima <ChevronRight size={14} />
+                </button>
+              </div>
+            )}
+            <button className="btn btn-ghost" onClick={onClose}>Fechar</button>
+          </div>
         </div>
       </div>
     </div>
@@ -916,10 +990,17 @@ function VisaoGeral({ periodPreset, onPeriodChange, onSwitchTab }) {
 
   const m = metrics || {};
 
-  // Detalhamento de Clientes Atendidos
-  const openAttendedDrilldown = async () => {
-    setDrilldown({ title: 'Clientes Atendidos no Período', subtitle: `Período: ${fmtDate(from)} a ${fmtDate(to)}`, loading: true, items: [] });
-    const { data } = await supabase
+  // Detalhamento de Clientes Atendidos (com classificação rigorosa de Novo e Retorno)
+  const openAttendedDrilldown = async (filterType = 'todos') => {
+    setDrilldown({
+      title: filterType === 'novos' ? 'Novos Clientes no Período' : filterType === 'retorno' ? 'Clientes que Retornaram no Período' : 'Clientes Atendidos no Período',
+      subtitle: `Período: ${fmtDate(from)} a ${fmtDate(to)}`,
+      loading: true,
+      items: [],
+    });
+
+    // 1. Atendimentos finalizados no período
+    const { data: periodAppts } = await supabase
       .from('appointments')
       .select('id, client_id, client_name, client_phone, procedure, appointment_date, status')
       .eq('status', 'finalizado')
@@ -927,52 +1008,165 @@ function VisaoGeral({ periodPreset, onPeriodChange, onSwitchTab }) {
       .lte('appointment_date', to)
       .order('appointment_date', { ascending: false });
 
-    // Deduplica por client_id ou nome
-    const uniqueClients = [];
-    const seen = new Set();
-    (data || []).forEach(a => {
-      const key = a.client_id || a.client_name;
-      if (!seen.has(key)) {
-        seen.add(key);
-        uniqueClients.push(a);
+    // Agrupa por cliente no período
+    const clientMap = new Map();
+    (periodAppts || []).forEach(a => {
+      const cid = a.client_id;
+      if (!cid) return;
+      if (!clientMap.has(cid)) {
+        clientMap.set(cid, {
+          id: cid,
+          client_id: cid,
+          client_name: a.client_name || `Paciente #${cid}`,
+          client_phone: a.client_phone || '—',
+          procedure: a.procedure || '—',
+          appointment_date: a.appointment_date,
+          total_no_periodo: 0,
+        });
       }
+      clientMap.get(cid).total_no_periodo += 1;
     });
 
+    const clientIds = Array.from(clientMap.keys());
+    
+    // 2. Verifica histórico prévio para saber se é Novo ou Retorno (mesma regra da RPC)
+    const priorClientIds = new Set();
+    if (clientIds.length > 0) {
+      const { data: priorAppts } = await supabase
+        .from('appointments')
+        .select('client_id')
+        .eq('status', 'finalizado')
+        .lt('appointment_date', from)
+        .in('client_id', clientIds);
+      (priorAppts || []).forEach(p => priorClientIds.add(p.client_id));
+    }
+
+    const allClients = Array.from(clientMap.values()).map(c => {
+      const isRetorno = priorClientIds.has(c.client_id);
+      return {
+        ...c,
+        tipo: isRetorno ? 'Retorno' : 'Novo cliente',
+      };
+    });
+
+    let filtered = allClients;
+    if (filterType === 'novos') {
+      filtered = allClients.filter(c => c.tipo === 'Novo cliente');
+    } else if (filterType === 'retorno') {
+      filtered = allClients.filter(c => c.tipo === 'Retorno');
+    }
+
     setDrilldown({
-      title: 'Clientes Únicos Atendidos no Período',
-      subtitle: `${uniqueClients.length} cliente(s) distinto(s) com atendimento finalizado entre ${fmtDate(from)} e ${fmtDate(to)}`,
+      title: filterType === 'novos' ? 'Novos Clientes Observados' : filterType === 'retorno' ? 'Clientes que Retornaram' : 'Clientes Únicos Atendidos no Período',
+      subtitle: `${filtered.length} paciente(s) entre ${fmtDate(from)} e ${fmtDate(to)}`,
       loading: false,
-      items: uniqueClients,
+      items: filtered,
       columns: [
         { key: 'client_name', label: 'Paciente' },
         { key: 'client_phone', label: 'Telefone' },
-        { key: 'procedure', label: 'Último Procedimento no Período' },
-        { key: 'appointment_date', label: 'Data', render: it => fmtDate(it.appointment_date) },
+        { key: 'procedure', label: 'Procedimento Recente' },
+        { key: 'appointment_date', label: 'Último no Período', render: it => fmtDate(it.appointment_date) },
+        { key: 'total_no_periodo', label: 'Atendimentos', align: 'center' },
+        {
+          key: 'tipo',
+          label: 'Classificação',
+          render: it => (
+            <span style={{
+              fontSize: 11,
+              padding: '2px 8px',
+              borderRadius: 12,
+              fontWeight: 600,
+              background: it.tipo === 'Retorno' ? '#10B9811A' : '#8B5CF61A',
+              color: it.tipo === 'Retorno' ? '#10B981' : '#8B5CF6',
+            }}>
+              {it.tipo}
+            </span>
+          ),
+        },
       ],
     });
   };
 
-  // Detalhamento de Interessados
-  const openLeadsDrilldown = async () => {
-    setDrilldown({ title: 'Novos Interessados no Período', subtitle: `Período: ${fmtDate(from)} a ${fmtDate(to)}`, loading: true, items: [] });
-    const { data } = await supabase
+  // Detalhamento de Interessados (delimitado exatamente por America/Sao_Paulo)
+  const openLeadsDrilldown = async (onlyConverted = false) => {
+    setDrilldown({
+      title: onlyConverted ? 'Interessados com Agendamento Válido' : 'Novos Interessados no Período',
+      subtitle: `Período: ${fmtDate(from)} a ${fmtDate(to)}`,
+      loading: true,
+      items: [],
+    });
+
+    // Delimitação exata dos limites de data em America/Sao_Paulo (UTC-3)
+    const { startIso, endIso } = getIsoDateRangeSaoPaulo(from, to);
+
+    const { data: leadsData } = await supabase
       .from('crm_leads')
       .select('id, nome, telefone, origem, servico_interesse, status, created_at, appointment_id')
-      .gte('created_at', from + 'T00:00:00Z')
-      .lte('created_at', to + 'T23:59:59Z')
+      .gte('created_at', startIso)
+      .lte('created_at', endIso)
       .order('created_at', { ascending: false });
 
+    // Verifica status real dos agendamentos vinculados
+    const apptIds = (leadsData || []).map(l => l.appointment_id).filter(Boolean);
+    const apptMap = new Map();
+    if (apptIds.length > 0) {
+      const { data: appts } = await supabase
+        .from('appointments')
+        .select('id, status, appointment_date, procedure')
+        .in('id', apptIds);
+      (appts || []).forEach(a => apptMap.set(a.id, a));
+    }
+
+    const processed = (leadsData || []).map(l => {
+      const appt = l.appointment_id ? apptMap.get(l.appointment_id) : null;
+      const isCanceled = appt && ['cancelado', 'desmarcado', 'falta'].includes(appt.status);
+      const isPastCutoff = appt && appt.appointment_date > to;
+      const isValid = appt && !isCanceled && !isPastCutoff;
+
+      let agendamentoLabel = 'Sem agendamento';
+      let agendamentoBadgeColor = 'var(--text-muted)';
+      if (appt) {
+        if (isCanceled) {
+          agendamentoLabel = `Cancelado (${appt.status})`;
+          agendamentoBadgeColor = '#DC2626';
+        } else if (isPastCutoff) {
+          agendamentoLabel = `Pós-corte (${fmtDate(appt.appointment_date)})`;
+          agendamentoBadgeColor = '#D97706';
+        } else {
+          agendamentoLabel = `Válido (${fmtDate(appt.appointment_date)})`;
+          agendamentoBadgeColor = '#10B981';
+        }
+      }
+
+      return {
+        ...l,
+        isValidConversion: isValid,
+        agendamentoLabel,
+        agendamentoBadgeColor,
+      };
+    });
+
+    const itemsToShow = onlyConverted ? processed.filter(l => l.isValidConversion) : processed;
+
     setDrilldown({
-      title: 'Interessados Registrados no CRM',
-      subtitle: `${data?.length || 0} lead(s) criado(s) no período`,
+      title: onlyConverted ? 'Interessados com Agendamento Válido (Conversão)' : 'Interessados Registrados no CRM',
+      subtitle: `${itemsToShow.length} lead(s) registrado(s) entre ${fmtDate(from)} e ${fmtDate(to)}`,
       loading: false,
-      items: data || [],
+      items: itemsToShow,
       columns: [
         { key: 'nome', label: 'Nome' },
         { key: 'origem', label: 'Origem', render: it => it.origem || 'Não informada' },
         { key: 'servico_interesse', label: 'Interesse' },
         { key: 'status', label: 'Etapa do CRM' },
-        { key: 'appointment_id', label: 'Agendamento', render: it => it.appointment_id ? 'Vinculado' : 'Sem agendamento' },
+        {
+          key: 'agendamentoLabel',
+          label: 'Situação Agendamento',
+          render: it => (
+            <span style={{ fontSize: 11, color: it.agendamentoBadgeColor, fontWeight: 600 }}>
+              {it.agendamentoLabel}
+            </span>
+          ),
+        },
         { key: 'created_at', label: 'Data de Entrada', render: it => fmtDate(it.created_at) },
       ],
     });
@@ -1033,7 +1227,7 @@ function VisaoGeral({ periodPreset, onPeriodChange, onSwitchTab }) {
           icon={Users}
           color="#8B5CF6"
           loading={loading}
-          onClick={openAttendedDrilldown}
+          onClick={() => openAttendedDrilldown('todos')}
         />
         <MetricCard
           label="Clientes que retornaram"
@@ -1043,9 +1237,7 @@ function VisaoGeral({ periodPreset, onPeriodChange, onSwitchTab }) {
           icon={RefreshCw}
           color="#10B981"
           loading={loading}
-          onClick={() => {
-            if (onSwitchTab) onSwitchTab('clientes-publicos', 'sem_retorno');
-          }}
+          onClick={() => openAttendedDrilldown('retorno')}
         />
         <MetricCard
           label="Interessados registrados"
@@ -1057,7 +1249,7 @@ function VisaoGeral({ periodPreset, onPeriodChange, onSwitchTab }) {
           icon={UserPlus}
           color="#3B82F6"
           loading={loading}
-          onClick={openLeadsDrilldown}
+          onClick={() => openLeadsDrilldown(false)}
         />
 
         {/* Recebimentos confirmados e conciliados */}

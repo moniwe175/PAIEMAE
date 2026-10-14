@@ -1,10 +1,11 @@
 /* eslint-disable react/prop-types */
 import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useLocation } from 'react-router-dom';
 import {
   Users, Plus, Search, XCircle, RefreshCw, Phone, Calendar,
   CheckCircle, Clock, AlertTriangle, MessageSquare,
   ChevronRight, Link2, Send, Star, ArrowRight, Flag, ClipboardList,
-  Check, X, Inbox, Archive, UserPlus,
+  Check, X, Inbox, Archive, UserPlus, Filter,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import {
@@ -1018,6 +1019,7 @@ function LeadRow({ lead, onClick, overdue, dueToday }) {
 
 export default function CrmInteressados() {
   const { user, canEdit, canView, checkIsAdmin } = useAuth();
+  const location = useLocation();
   const [leads, setLeads] = useState([]);
   const [clientes, setClientes] = useState([]);
   const [agendamentos, setAgendamentos] = useState([]);
@@ -1028,8 +1030,28 @@ export default function CrmInteressados() {
   const [filtroMeus, setFiltroMeus] = useState(false);
   const [filtroSemAcao, setFiltroSemAcao] = useState(false);
   const [filtroArquivados, setFiltroArquivados] = useState(false);
+  const [filtroOrigemParam, setFiltroOrigemParam] = useState(null);
   const [showNova, setShowNova] = useState(false);
   const [selectedLead, setSelectedLead] = useState(null);
+
+  // Sincroniza aba e filtros vindos da Inteligência Comercial (/crm?filtro=...)
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const f = params.get('filtro');
+    if (f === 'atrasados' || f === 'retornos_pendentes') {
+      setAba('atrasados');
+      setFiltroSemAcao(false);
+      setFiltroArquivados(false);
+      setFiltroOrigemParam(f);
+    } else if (f === 'sem_acao' || f === 'interessados_sem_acao') {
+      setAba('todos');
+      setFiltroSemAcao(true);
+      setFiltroArquivados(false);
+      setFiltroOrigemParam(f);
+    } else {
+      setFiltroOrigemParam(null);
+    }
+  }, [location.search]);
 
   const isAdmin = checkIsAdmin();
   const canViewCrm = isAdmin || canView('crm');
@@ -1100,7 +1122,11 @@ export default function CrmInteressados() {
       if (!filtroArquivados && l.arquivado) return false;
       if (filtroArquivados && !l.arquivado) return false;
       if (filtroMeus && l.responsavel?.toLowerCase() !== (user?.email || '').toLowerCase()) return false;
-      if (filtroSemAcao && (l.proxima_acao_descricao && !l.proxima_acao_concluida)) return false;
+      if (filtroSemAcao) {
+        if (['encerrado_ganho', 'encerrado_perdido'].includes(l.status)) return false;
+        const hasValidPendingAction = l.proxima_acao_prazo && l.proxima_acao_descricao && l.proxima_acao_descricao.trim() && !l.proxima_acao_concluida;
+        if (hasValidPendingAction) return false;
+      }
       if (!q) return true;
       return (
         (l.nome || '').toLowerCase().includes(q) ||
@@ -1193,6 +1219,45 @@ export default function CrmInteressados() {
           )}
         </div>
       </div>
+
+      {/* Banner de filtro vindo da Inteligência Comercial */}
+      {filtroOrigemParam && (
+        <div style={{
+          marginBottom: 16,
+          padding: '10px 16px',
+          background: '#8B5CF614',
+          border: '1px solid #8B5CF644',
+          borderRadius: 8,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          fontSize: 13,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#6D28D9' }}>
+            <Filter style={{ width: 16, height: 16 }} />
+            <span>
+              Filtro da Inteligência Comercial ativo:{' '}
+              <strong>
+                {filtroOrigemParam === 'atrasados' || filtroOrigemParam === 'retornos_pendentes'
+                  ? 'Retornos pendentes (próxima ação vencida e não concluída)'
+                  : 'Interessados sem próxima ação definida'}
+              </strong>
+            </span>
+          </div>
+          <button
+            className="btn btn-ghost btn-sm"
+            style={{ fontSize: 11, padding: '4px 10px', color: '#6D28D9' }}
+            onClick={() => {
+              window.history.replaceState({}, '', '/crm');
+              setFiltroOrigemParam(null);
+              setFiltroSemAcao(false);
+              setAba('fila');
+            }}
+          >
+            Limpar filtro
+          </button>
+        </div>
+      )}
 
       {/* KPI Cards */}
       <div className="grid-4 section-gap" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>

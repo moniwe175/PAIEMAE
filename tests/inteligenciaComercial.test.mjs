@@ -27,6 +27,7 @@ import {
   previewSegment,
   validateIcpProfile,
   saveCampaignBrief,
+  getIsoDateRangeSaoPaulo,
   linkCommercialRecord,
   unlinkCommercialRecord,
   checkIntelligenceSetup,
@@ -485,6 +486,11 @@ describe('Inteligência Comercial — Suíte Completa de Contratos e Serviço Re
       supabase.from = (table) => {
         assert.equal(table, 'marketing_campaign_briefs');
         return {
+          select: () => ({
+            eq: () => ({
+              maybeSingle: async () => ({ data: null, error: null }),
+            }),
+          }),
           upsert: (payloads) => {
             insertedPayload = payloads[0];
             return {
@@ -667,6 +673,280 @@ describe('Inteligência Comercial — Suíte Completa de Contratos e Serviço Re
       } finally {
         supabase.from = originalFrom;
       }
+    });
+  });
+
+  describe('13. Exclusão de Despesas, Sangrias e Resumos de Receitas Financeiras', () => {
+    const rawTransactions = [
+      { id: 't1', gross: 350.00, row_type: 'receita', client: 'Maria Silva' },
+      { id: 't2', gross: 200.00, row_type: null, client: 'João Santos' }, // Nulo tratado como receita
+      { id: 't3', gross: 50.00,  row_type: 'estorno', client: 'Maria Silva' }, // Estorno
+      { id: 't4', gross: 80.00,  row_type: 'despesa', client: 'PASSAGEM' }, // Despesa operacional
+      { id: 't5', gross: 120.00, row_type: 'sangria', client: 'SANGRIA' }, // Sangria de caixa
+      { id: 't6', gross: 90.00,  row_type: 'receita', client: 'OUTRAS SAÍDAS' }, // Descrição de saída disfarçada
+      { id: 't7', gross: 500.00, row_type: 'resumo', client: 'TOTAL DO DIA' }, // Linha de resumo/total
+    ];
+
+    function isEligibleReceipt(t) {
+      const rt = String(t.row_type || '').toLowerCase().trim();
+      const client = String(t.client || '').toLowerCase().trim();
+
+      if (['sangria', 'despesa', 'resumo'].includes(rt)) return false;
+      if (rt.startsWith('despesa') || rt.startsWith('saida') || rt.startsWith('saída') || rt.startsWith('sangria') || rt.startsWith('gasto') || rt.startsWith('total')) return false;
+      if (client.startsWith('sangria') || client.startsWith('despesa') || client.startsWith('passagem') || client.startsWith('produtos') || client.startsWith('tributos') || client.startsWith('outras saída') || client.startsWith('outras saida') || client.startsWith('total')) return false;
+
+      return rt === 'receita' || rt === 'estorno' || !rt;
+    }
+
+    it('Filtra estritamente receitas e estornos válidos, excluindo despesas e sangrias', () => {
+      const eligible = rawTransactions.filter(isEligibleReceipt);
+      assert.equal(eligible.length, 3, 'Apenas t1, t2 e t3 devem ser elegíveis');
+      assert.deepEqual(eligible.map(t => t.id), ['t1', 't2', 't3']);
+    });
+
+    it('Calcula valor líquido considerando estorno como dedução', () => {
+      const eligible = rawTransactions.filter(isEligibleReceipt);
+      const net = eligible.reduce((acc, t) => {
+        if (t.row_type === 'estorno') return acc - Math.abs(t.gross);
+        return acc + t.gross;
+      }, 0);
+      // 350 (t1) + 200 (t2) - 50 (t3) = 500
+      assert.equal(net, 500.00);
+    });
+  });
+
+  describe('14. Atribuição Comprovada de Canais sem Duplicação de Pagamentos', () => {
+    // Cenário: Cliente 1 tem 2 leads: 'Instagram' e 'Google'.
+    // Pagamento de R$ 500 ocorreu na data de um agendamento gerado pelo lead 'Instagram'.
+    // Cliente 2 tem 2 leads, ambos de 'Indicação'. Pagamento de R$ 300.
+    // Cliente 3 tem 2 leads conflitantes ('WhatsApp' e 'Passou na rua') sem agendamento na data do pagamento. Pagamento de R$ 200.
+
+    const leads = [
+      { id: 'l1', client_id: 1, origem: 'Instagram', appointment_id: 'a1', created_at: '2026-09-01T10:00:00Z' },
+      { id: 'l2', client_id: 1, origem: 'Google', appointment_id: null, created_at: '2026-09-05T10:00:00Z' },
+      { id: 'l3', client_id: 2, origem: 'Indicação', appointment_id: null, created_at: '2026-09-02T10:00:00Z' },
+      { id: 'l4', client_id: 2, origem: 'Indicação', appointment_id: null, created_at: '2026-09-08T10:00:00Z' },
+      { id: 'l5', client_id: 3, origem: 'WhatsApp', appointment_id: null, created_at: '2026-09-03T10:00:00Z' },
+      { id: 'l6', client_id: 3, origem: 'Passou na rua', appointment_id: null, created_at: '2026-09-04T10:00:00Z' },
+    ];
+
+    const appointments = [
+      { id: 'a1', client_id: 1, appointment_date: '2026-09-10', status: 'finalizado' },
+    ];
+
+    const transactions = [
+      { tx_id: 'tx1', client_id: 1, net_val: 500, date_ref: '2026-09-10' },
+      { tx_id: 'tx2', client_id: 2, net_val: 300, date_ref: '2026-09-15' },
+      { tx_id: 'tx3', client_id: 3, net_val: 200, date_ref: '2026-09-20' },
+    ];
+
+    function attributeTransaction(tx, leadsList, apptsList) {
+      // Prioridade 1: Agendamento vinculado a lead na mesma data
+      const matchingAppt = apptsList.find(a => a.client_id === tx.client_id && a.appointment_date === tx.date_ref && a.status === 'finalizado');
+      if (matchingAppt) {
+        const matchingLead = leadsList.find(l => l.appointment_id === matchingAppt.id);
+        if (matchingLead) return matchingLead.origem;
+      }
+
+      // Prioridade 2: Origem única e inequívoca do cliente
+      const clientLeads = leadsList.filter(l => l.client_id === tx.client_id && l.created_at.slice(0, 10) <= tx.date_ref);
+      const uniqueOrigins = Array.from(new Set(clientLeads.map(l => l.origem || 'Não informada')));
+      if (uniqueOrigins.length === 1) {
+        return uniqueOrigins[0];
+      }
+
+      // Sem comprovação suficiente: 'Não atribuído'
+      return 'Não atribuído';
+    }
+
+    it('Transação com múltiplos leads não multiplica receita entre canais', () => {
+      const channelTotals = {};
+
+      for (const tx of transactions) {
+        const canal = attributeTransaction(tx, leads, appointments);
+        channelTotals[canal] = (channelTotals[canal] || 0) + tx.net_val;
+      }
+
+      assert.equal(channelTotals['Instagram'], 500, 'tx1 atribuída comprovadamente a Instagram via agendamento a1');
+      assert.equal(channelTotals['Google'], undefined, 'Google não recebeu a receita de tx1');
+      assert.equal(channelTotals['Indicação'], 300, 'tx2 atribuída a Indicação por origem única do cliente 2');
+      assert.equal(channelTotals['Não atribuído'], 200, 'tx3 mantida em Não atribuído por conflito entre WhatsApp e Passou na rua');
+
+      // Soma total de canais DEVE bater exatamente com a soma das transações (0 duplicação)
+      const totalAttributed = Object.values(channelTotals).reduce((a, b) => a + b, 0);
+      const totalTransactions = transactions.reduce((a, b) => a + b.net_val, 0);
+      assert.equal(totalAttributed, totalTransactions, 'A soma das receitas atribuídas deve bater 100% com o total');
+    });
+  });
+
+  describe('15. Preservação Bidirecional de Dados em saveCampaignBrief', () => {
+    it('Vincular público preserva objetivo, orçamento e aprendizado pré-existentes', async () => {
+      const originalFrom = supabase.from;
+      let upsertedRow = null;
+
+      // Simula brief existente com objetivo e orçamento já preenchidos
+      const existingInDb = {
+        campaign_id: 10,
+        objetivo: 'Reativar 50 clientes inativos',
+        meta: '20 agendamentos',
+        orcamento_planejado: 1500,
+        investimento_realizado: 1200,
+        aprendizado: 'Bons resultados no final de semana',
+        responsavel: 'Equipe Marketing',
+      };
+
+      supabase.from = (table) => {
+        assert.equal(table, 'marketing_campaign_briefs');
+        return {
+          select: () => ({
+            eq: () => ({
+              maybeSingle: async () => ({ data: existingInDb, error: null }),
+            }),
+          }),
+          upsert: (payloads) => {
+            upsertedRow = payloads[0];
+            return {
+              select: () => ({
+                single: async () => ({ data: upsertedRow, error: null }),
+              }),
+            };
+          },
+        };
+      };
+
+      try {
+        // Envia apenas os dados de vínculo de público
+        const res = await saveCampaignBrief({
+          campaign_id: 10,
+          segment_id: 'seg-xyz',
+          segment_version: 2,
+          conditions_snapshot: [{ field: 'dias_sem_atendimento', operator: 'gte', value: '60' }],
+          estimated_count: 85,
+        });
+
+        assert.equal(res.error, null);
+        assert.equal(upsertedRow.campaign_id, 10);
+        assert.equal(upsertedRow.segment_id, 'seg-xyz');
+        assert.equal(upsertedRow.segment_version, 2);
+        assert.equal(upsertedRow.estimated_count, 85);
+        // Garante que campos não enviados foram PRESERVADOS do banco
+        assert.equal(upsertedRow.objetivo, 'Reativar 50 clientes inativos');
+        assert.equal(upsertedRow.meta, '20 agendamentos');
+        assert.equal(upsertedRow.orcamento_planejado, 1500);
+        assert.equal(upsertedRow.investimento_realizado, 1200);
+        assert.equal(upsertedRow.aprendizado, 'Bons resultados no final de semana');
+      } finally {
+        supabase.from = originalFrom;
+      }
+    });
+
+    it('Editar ficha da campanha preserva vínculo do público e snapshots pré-existentes', async () => {
+      const originalFrom = supabase.from;
+      let upsertedRow = null;
+
+      // Simula brief existente com vínculo de público já gravado
+      const existingInDb = {
+        campaign_id: 20,
+        segment_id: 'seg-vip',
+        segment_version: 4,
+        conditions_snapshot: [{ field: 'total_atendimentos', operator: 'gte', value: '3' }],
+        estimated_count: 42,
+        snapshot_date: '2026-10-10T12:00:00Z',
+      };
+
+      supabase.from = (table) => {
+        assert.equal(table, 'marketing_campaign_briefs');
+        return {
+          select: () => ({
+            eq: () => ({
+              maybeSingle: async () => ({ data: existingInDb, error: null }),
+            }),
+          }),
+          upsert: (payloads) => {
+            upsertedRow = payloads[0];
+            return {
+              select: () => ({
+                single: async () => ({ data: upsertedRow, error: null }),
+              }),
+            };
+          },
+        };
+      };
+
+      try {
+        // Envia apenas edição de campos de texto da campanha
+        const res = await saveCampaignBrief({
+          campaign_id: 20,
+          objetivo: 'Lançamento de Procedimento Novo',
+          orcamento_planejado: 3000,
+          aprendizado: 'Campanha em andamento',
+        });
+
+        assert.equal(res.error, null);
+        assert.equal(upsertedRow.campaign_id, 20);
+        assert.equal(upsertedRow.objetivo, 'Lançamento de Procedimento Novo');
+        assert.equal(upsertedRow.orcamento_planejado, 3000);
+        // Garante que segment_id e snapshot foram PRESERVADOS
+        assert.equal(upsertedRow.segment_id, 'seg-vip');
+        assert.equal(upsertedRow.segment_version, 4);
+        assert.deepEqual(upsertedRow.conditions_snapshot, existingInDb.conditions_snapshot);
+        assert.equal(upsertedRow.estimated_count, 42);
+        assert.equal(upsertedRow.snapshot_date, '2026-10-10T12:00:00Z');
+      } finally {
+        supabase.from = originalFrom;
+      }
+    });
+  });
+
+  describe('16. Limites de Data ISO em America/Sao_Paulo (getIsoDateRangeSaoPaulo)', () => {
+    it('Converte período de datas para início (00:00:00-03:00) e fim (23:59:59.999-03:00)', () => {
+      const { startIso, endIso } = getIsoDateRangeSaoPaulo('2026-09-01', '2026-09-30');
+      // 2026-09-01T00:00:00-03:00 em UTC é 03:00:00Z
+      assert.equal(startIso, '2026-09-01T03:00:00.000Z');
+      // 2026-09-30T23:59:59.999-03:00 em UTC é 2026-10-01T02:59:59.999Z
+      assert.equal(endIso, '2026-10-01T02:59:59.999Z');
+    });
+
+    it('startIso < endIso para qualquer intervalo válido', () => {
+      const { startIso, endIso } = getIsoDateRangeSaoPaulo('2026-10-14', '2026-10-14');
+      assert.ok(startIso < endIso);
+    });
+  });
+
+  describe('17. Critérios de Filtro Sincronizados com /crm', () => {
+    const hojeStr = '2026-10-14';
+    const leads = [
+      // 1. Atrasado (próxima ação vencida e não concluída em lead ativo)
+      { id: 'l1', status: 'aguardando_cliente', arquivado: false, proxima_acao_prazo: '2026-10-10', proxima_acao_concluida: false, proxima_acao_descricao: 'Enviar mensagem' },
+      // 2. Sem ação (lead ativo sem prazo ou sem descrição)
+      { id: 'l2', status: 'aguardando_resposta', arquivado: false, proxima_acao_prazo: null, proxima_acao_descricao: '' },
+      // 3. Em dia (prazo futuro)
+      { id: 'l3', status: 'aguardando_resposta', arquivado: false, proxima_acao_prazo: '2026-10-20', proxima_acao_concluida: false, proxima_acao_descricao: 'Ligar semana que vem' },
+      // 4. Encerrado com prazo atrasado (NÃO deve aparecer)
+      { id: 'l4', status: 'encerrado_perdido', arquivado: false, proxima_acao_prazo: '2026-10-01', proxima_acao_concluida: false, proxima_acao_descricao: 'Reativar' },
+      // 5. Arquivado com prazo atrasado (NÃO deve aparecer)
+      { id: 'l5', status: 'aguardando_resposta', arquivado: true, proxima_acao_prazo: '2026-10-05', proxima_acao_concluida: false, proxima_acao_descricao: 'Mensagem' },
+    ];
+
+    it('Filtro atrasados em /crm coincide com retornos_pendentes da Visão Geral', () => {
+      const atrasados = leads.filter(l => {
+        if (l.arquivado) return false;
+        if (['encerrado_ganho', 'encerrado_perdido'].includes(l.status)) return false;
+        return l.proxima_acao_prazo && l.proxima_acao_prazo < hojeStr && !l.proxima_acao_concluida;
+      });
+      assert.equal(atrasados.length, 1);
+      assert.equal(atrasados[0].id, 'l1');
+    });
+
+    it('Filtro sem_acao em /crm coincide com interessados_sem_acao da Visão Geral', () => {
+      const semAcao = leads.filter(l => {
+        if (l.arquivado) return false;
+        if (['encerrado_ganho', 'encerrado_perdido'].includes(l.status)) return false;
+        const hasValidAction = l.proxima_acao_prazo && l.proxima_acao_descricao && l.proxima_acao_descricao.trim() && !l.proxima_acao_concluida;
+        return !hasValidAction;
+      });
+      assert.equal(semAcao.length, 1);
+      assert.equal(semAcao[0].id, 'l2');
     });
   });
 

@@ -349,30 +349,51 @@ export async function fetchCampaignBrief(campaignId) {
  */
 export async function saveCampaignBrief(brief) {
   if (!cfg()) return handleErr('Supabase not configured');
+  const campaignId = Number(brief.campaign_id);
+  if (!campaignId) return handleErr('campaign_id é obrigatório para salvar o brief');
+
+  // Busca brief existente para preservar campos não enviados nos dois sentidos
+  const { data: existing } = await supabase
+    .from('marketing_campaign_briefs')
+    .select('*')
+    .eq('campaign_id', campaignId)
+    .maybeSingle();
+
+  // Helper de mesclagem: valor explicitamente enviado tem prioridade;
+  // se undefined, mantém o valor existente no banco
+  const pick = (field, fallback = null) => {
+    if (brief[field] !== undefined) return brief[field];
+    if (existing && existing[field] !== undefined) return existing[field];
+    return fallback;
+  };
+
+  const segmentId = pick('segment_id');
   const payload = {
-    campaign_id: Number(brief.campaign_id),
-    objetivo: brief.objetivo || null,
-    meta: brief.meta || null,
-    publico_descricao: brief.publico_descricao || null,
-    segment_id: brief.segment_id || null,
-    segment_version: brief.segment_version || null,
-    conditions_snapshot: brief.conditions_snapshot || null,
-    estimated_count: brief.estimated_count != null ? Number(brief.estimated_count) : null,
-    snapshot_date: brief.snapshot_date || (brief.segment_id ? new Date().toISOString() : null),
-    responsavel: brief.responsavel || null,
-    okr_kr_ref: brief.okr_kr_ref || null,
-    orcamento_planejado: brief.orcamento_planejado != null ? Number(brief.orcamento_planejado) : null,
-    investimento_realizado: brief.investimento_realizado != null ? Number(brief.investimento_realizado) : null,
-    resultado_observado: brief.resultado_observado || null,
-    decisao: brief.decisao || null,
-    aprendizado: brief.aprendizado || null,
+    campaign_id: campaignId,
+    objetivo: pick('objetivo'),
+    meta: pick('meta'),
+    publico_descricao: pick('publico_descricao'),
+    segment_id: segmentId,
+    segment_version: pick('segment_version') != null ? Number(pick('segment_version')) : null,
+    conditions_snapshot: pick('conditions_snapshot'),
+    estimated_count: pick('estimated_count') != null ? Number(pick('estimated_count')) : null,
+    snapshot_date: pick('snapshot_date') || (segmentId ? (existing?.snapshot_date || new Date().toISOString()) : null),
+    responsavel: pick('responsavel'),
+    okr_kr_ref: pick('okr_kr_ref'),
+    orcamento_planejado: pick('orcamento_planejado') != null ? Number(pick('orcamento_planejado')) : null,
+    investimento_realizado: pick('investimento_realizado') != null ? Number(pick('investimento_realizado')) : null,
+    resultado_observado: pick('resultado_observado'),
+    decisao: pick('decisao'),
+    aprendizado: pick('aprendizado'),
     updated_at: new Date().toISOString(),
   };
+
   const { data, error } = await supabase
     .from('marketing_campaign_briefs')
     .upsert([payload], { onConflict: 'campaign_id' })
     .select()
     .single();
+
   if (error) return handleErr(error);
   return { data, error: null };
 }
@@ -554,3 +575,17 @@ export function fmtBRL(val) {
     maximumFractionDigits: 2,
   })}`;
 }
+
+/**
+ * Converte intervalo de datas YYYY-MM-DD para limites de timestamp ISO UTC
+ * correspondentes ao início (00:00:00) e fim (23:59:59.999) em America/Sao_Paulo (UTC-3).
+ *
+ * Ex: from = '2026-09-01' -> startIso = '2026-09-01T03:00:00.000Z'
+ *     to   = '2026-09-30' -> endIso   = '2026-10-01T02:59:59.999Z'
+ */
+export function getIsoDateRangeSaoPaulo(from, to) {
+  const startIso = new Date(`${from}T00:00:00-03:00`).toISOString();
+  const endIso = new Date(`${to}T23:59:59.999-03:00`).toISOString();
+  return { startIso, endIso };
+}
+
