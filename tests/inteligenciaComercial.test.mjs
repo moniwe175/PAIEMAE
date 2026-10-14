@@ -704,12 +704,12 @@ describe('Inteligência Comercial — Suíte Completa de Contratos e Serviço Re
     });
   });
 
-  describe('13. Exclusão de Despesas, Sangrias e Resumos de Receitas Financeiras', () => {
+  describe('13. Exclusão de Despesas, Sangrias e Resumos de Receitas Financeiras (Escopo sem Estorno)', () => {
     const rawTransactions = [
       { id: 't1', gross: 800.00, row_type: 'receita', client: 'Maria Silva' },
       { id: 't2', gross: 700.00, row_type: null, client: 'SANGRIA CAIXA' }, // Sangria sem tipo definido -> NÃO deve entrar
       { id: 't3', gross: 200.00, row_type: null, client: 'João Santos' }, // Nulo sem classificação -> NÃO entra como receita confirmada
-      { id: 't4', gross: 100.00, row_type: 'estorno', client: 'Maria Silva' }, // Estorno deduzido
+      { id: 't4', gross: 100.00, row_type: 'estorno', client: 'Maria Silva' }, // Estorno (fora do escopo da clínica - procedimento pago na hora)
       { id: 't5', gross: 80.00, row_type: 'despesa', client: 'PASSAGEM' }, // Despesa operacional
       { id: 't6', gross: 120.00, row_type: 'sangria', client: 'SANGRIA' }, // Sangria de caixa
       { id: 't7', gross: 90.00, row_type: 'receita', client: 'OUTRAS SAÍDAS' }, // Descrição de saída disfarçada
@@ -721,8 +721,8 @@ describe('Inteligência Comercial — Suíte Completa de Contratos e Serviço Re
       const client = String(t.client || '').toLowerCase().trim();
       const proc = String(t.procedure || '').toLowerCase().trim();
 
-      // Classificação comprovada: apenas receita ou estorno (não aceita null automaticamente)
-      if (!['receita', 'estorno'].includes(rt)) return false;
+      // Classificação comprovada: apenas receitas reais de procedimentos realizados e pagos na hora
+      if (rt !== 'receita') return false;
 
       // Exclusão estrita: NOT (expressão LIKE ANY (...))
       const excludedTypes = ['despesa', 'saida', 'saída', 'sangria', 'gasto', 'total', 'resumo'];
@@ -735,20 +735,17 @@ describe('Inteligência Comercial — Suíte Completa de Contratos e Serviço Re
       return true;
     }
 
-    it('Filtra estritamente receitas e estornos comprovados, excluindo sangria sem tipo e despesas', () => {
+    it('Filtra estritamente receitas reais comprovadas, excluindo sangria sem tipo, despesas e estornos', () => {
       const eligible = rawTransactions.filter(isEligibleReceipt);
-      assert.equal(eligible.length, 2, 'Apenas t1 e t4 são elegíveis (receita confirmada e estorno)');
-      assert.deepEqual(eligible.map(t => t.id), ['t1', 't4']);
+      assert.equal(eligible.length, 1, 'Apenas t1 é elegível (receita real confirmada)');
+      assert.deepEqual(eligible.map(t => t.id), ['t1']);
     });
 
-    it('Calcula valor líquido considerando estorno como dedução (R$ 700 líquido e NUNCA R$ 1.500)', () => {
+    it('Calcula total recebido real (R$ 800 e NUNCA R$ 1.500)', () => {
       const eligible = rawTransactions.filter(isEligibleReceipt);
-      const net = eligible.reduce((acc, t) => {
-        if (t.row_type === 'estorno') return acc - Math.abs(t.gross);
-        return acc + t.gross;
-      }, 0);
-      // 800 (t1) - 100 (t4) = 700. Sangria de 700 (t2) foi excluída e não virou 1.500.
-      assert.equal(net, 700.00);
+      const total = eligible.reduce((acc, t) => acc + t.gross, 0);
+      // 800 (t1). Sangria de 700 (t2) foi excluída e não virou 1.500. Estorno (t4) fora de escopo.
+      assert.equal(total, 800.00);
     });
   });
 
@@ -1043,7 +1040,7 @@ describe('Inteligência Comercial — Suíte Completa de Contratos e Serviço Re
   });
 
   describe('18. Execução de Queries SQL Reais em PostgreSQL Isolado (pg-mem)', () => {
-    it('Exclusão estrita de sangria sem tipo e cálculo de receita líquida (R$ 800 - 100 = 700)', () => {
+    it('Exclusão estrita de sangria sem tipo e cálculo de receita real (R$ 800 recebido)', () => {
       const db = newDb();
       db.public.none(`
         CREATE TABLE sheet_transactions (
@@ -1066,24 +1063,23 @@ describe('Inteligência Comercial — Suíte Completa de Contratos e Serviço Re
           ('5', 'Cliente Pendente', null, null, null, 200.00, '2026-10-01', null, false);
       `);
 
-      // Executa a cláusula WHERE real da RPC fn_ic_overview_metrics / fn_ic_canal_stats
+      // Executa a cláusula WHERE real da RPC fn_ic_overview_metrics / fn_ic_canal_stats (escopo sem estorno)
       const rows = db.public.many(`
-        SELECT id, client, row_type, gross,
-               CASE WHEN lower(COALESCE(row_type, tipo, '')) = 'estorno' THEN -gross ELSE gross END as net_val
+        SELECT id, client, row_type, gross, gross as net_val
         FROM sheet_transactions st
         WHERE deleted_at IS NULL
           AND (is_metadata IS NOT TRUE OR is_metadata IS NULL)
-          AND lower(COALESCE(row_type, tipo, '')) IN ('receita', 'estorno')
+          AND lower(COALESCE(row_type, tipo, '')) = 'receita'
           AND NOT (lower(COALESCE(row_type, tipo, '')) LIKE ANY (ARRAY['despesa%', 'saida%', 'saída%', 'sangria%', 'gasto%', 'total%', 'resumo%']))
           AND NOT (lower(COALESCE(client, '')) LIKE ANY (ARRAY['sangria%', 'despesa%', 'passagem%', 'produtos%', 'tributos%', 'outras saída%', 'outras saida%', 'total%', 'resumo%']))
           AND NOT (lower(COALESCE(procedure, '')) LIKE ANY (ARRAY['sangria%', 'despesa%', 'passagem%', 'produtos%', 'tributos%', 'outras saída%', 'outras saida%', 'total%', 'resumo%']));
       `);
 
-      assert.equal(rows.length, 2, 'Apenas Maria Silva (receita) e João Santos (estorno) devem ser retornados');
-      assert.deepEqual(rows.map(r => r.id), ['1', '4']);
+      assert.equal(rows.length, 1, 'Apenas Maria Silva (receita confirmada) deve ser retornada');
+      assert.deepEqual(rows.map(r => r.id), ['1']);
 
-      const totalLiquido = rows.reduce((acc, r) => acc + Number(r.net_val), 0);
-      assert.equal(totalLiquido, 700, 'O líquido deve ser 700 e NUNCA 1500 (sangria de 700 foi excluída)');
+      const totalRecebido = rows.reduce((acc, r) => acc + Number(r.gross), 0);
+      assert.equal(totalRecebido, 800, 'O total deve ser 800 e NUNCA 1500 (sangria de 700 foi excluída, estorno fora de escopo)');
     });
 
     it('v_interessados_sem_acao conta lead com tarefa concluída no PostgreSQL isolado', () => {

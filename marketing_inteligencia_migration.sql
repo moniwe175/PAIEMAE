@@ -584,15 +584,13 @@ BEGIN
       crl.client_id AS rev_client_id,
       COALESCE(SUM(
         CASE 
-          WHEN st.date_ref >= p_date_from AND st.date_ref <= p_date_to THEN
-            CASE WHEN st.row_type = 'estorno' THEN -ABS(st.gross) ELSE st.gross END
+          WHEN st.date_ref >= p_date_from AND st.date_ref <= p_date_to THEN st.gross
           ELSE 0
         END
       ), 0) AS rec_periodo,
       COALESCE(SUM(
         CASE 
-          WHEN st.date_ref <= p_date_to THEN
-            CASE WHEN st.row_type = 'estorno' THEN -ABS(st.gross) ELSE st.gross END
+          WHEN st.date_ref <= p_date_to THEN st.gross
           ELSE 0
         END
       ), 0) AS rec_total
@@ -602,8 +600,9 @@ BEGIN
      AND crl.source_table = 'sheet_transactions'
     WHERE st.deleted_at IS NULL
       AND (st.is_metadata IS NOT TRUE OR st.is_metadata IS NULL)
-      -- Classificação comprovada: apenas receita e estorno
-      AND lower(COALESCE(st.row_type, st.tipo, '')) IN ('receita', 'estorno')
+      -- Classificação comprovada: apenas receitas reais. Sem estornos.
+      -- NOT (expr LIKE ANY (ARRAY[...])) é sintaxe PostgreSQL válida e correta.
+      AND lower(COALESCE(st.row_type, st.tipo, '')) = 'receita'
       AND NOT (lower(COALESCE(st.row_type, st.tipo, '')) LIKE ANY (ARRAY['despesa%', 'saida%', 'saída%', 'sangria%', 'gasto%', 'total%', 'resumo%']))
       AND NOT (lower(COALESCE(st.client, '')) LIKE ANY (ARRAY['sangria%', 'despesa%', 'passagem%', 'produtos%', 'tributos%', 'outras saída%', 'outras saida%', 'total%', 'resumo%']))
       AND NOT (lower(COALESCE(st.procedure, '')) LIKE ANY (ARRAY['sangria%', 'despesa%', 'passagem%', 'produtos%', 'tributos%', 'outras saída%', 'outras saida%', 'total%', 'resumo%']))
