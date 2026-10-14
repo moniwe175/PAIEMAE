@@ -1123,8 +1123,14 @@ export default function CrmInteressados() {
       if (filtroArquivados && !l.arquivado) return false;
       if (filtroMeus && l.responsavel?.toLowerCase() !== (user?.email || '').toLowerCase()) return false;
       if (filtroSemAcao) {
-        if (['encerrado_ganho', 'encerrado_perdido'].includes(l.status)) return false;
-        const hasValidPendingAction = l.proxima_acao_prazo && l.proxima_acao_descricao && l.proxima_acao_descricao.trim() && !l.proxima_acao_concluida;
+        if (['encerrado_ganho', 'encerrado_perdido', 'arquivado'].includes(l.status)) return false;
+        // Lead com tarefa pendente ativa: tem prazo, descrição não vazia E NÃO concluída
+        const hasValidPendingAction = Boolean(
+          l.proxima_acao_prazo &&
+          l.proxima_acao_descricao &&
+          l.proxima_acao_descricao.trim() &&
+          !l.proxima_acao_concluida
+        );
         if (hasValidPendingAction) return false;
       }
       if (!q) return true;
@@ -1161,7 +1167,10 @@ export default function CrmInteressados() {
       hoje:       activeLeads.filter(l => isDueToday(l) && !['encerrado_ganho','encerrado_perdido'].includes(l.status)).length,
       agendados:  activeLeads.filter(l => l.status === 'agendado').length,
       ganhos:     leads.filter(l => l.status === 'encerrado_ganho').length,
-      semAcao:    activeLeads.filter(l => !l.proxima_acao_descricao || l.proxima_acao_concluida).length,
+      semAcao:    activeLeads.filter(l => (
+        !['encerrado_ganho', 'encerrado_perdido', 'arquivado'].includes(l.status) &&
+        (!l.proxima_acao_prazo || !l.proxima_acao_descricao || !l.proxima_acao_descricao.trim() || l.proxima_acao_concluida === true)
+      )).length,
     };
   }, [leads]);
 

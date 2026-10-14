@@ -1109,16 +1109,16 @@ describe('Inteligência Comercial — Suíte Completa de Contratos e Serviço Re
           ('lead-1', false, 'aguardando_resposta', '2026-10-10', 'Ligar para confirmar', true),
           ('lead-2', false, 'aguardando_resposta', null, null, false),
           ('lead-3', false, 'aguardando_resposta', '2026-10-20', 'Retornar semana que vem', false),
-          ('lead-4', false, 'encerrado_ganho', null, null, false);
+          ('lead-4', false, 'encerrado_ganho', null, null, false),
+          ('lead-5', false, 'aguardando_resposta', '2026-10-15', '   ', false);
       `);
 
-      // Executa a query da RPC fn_ic_overview_metrics (versão corrigida com NOT AND)
-      // lead-1: arquivado=false, status=aguardando_resposta, prazo NãO NULL, descricao NãO NULL, descricao<>'', concluida=TRUE
-      //   -> NOT (prazo IS NOT NULL AND desc IS NOT NULL AND desc<>'' AND concluida IS FALSE)
-      //   -> NOT (true AND true AND true AND false) -> NOT false -> TRUE -> conta em sem_acao
-      // lead-2: prazo NULL -> NOT (false AND ...) -> NOT false -> TRUE -> conta em sem_acao
-      // lead-3: prazo NOT NULL, desc NOT NULL, desc<>'', concluida=false -> NOT (true AND true AND true AND true) -> NOT true -> FALSE -> não conta
+      // Executa a query exata da RPC fn_ic_overview_metrics com TRIM
+      // lead-1: prazo preenchido, descricao preenchida, mas concluida=TRUE -> NOT false -> conta em sem_acao
+      // lead-2: prazo NULL -> NOT false -> conta em sem_acao
+      // lead-3: prazo preenchido, descricao preenchida, concluida=FALSE -> NOT true -> NÃO conta
       // lead-4: status encerrado_ganho -> filtrado por AND status NOT IN
+      // lead-5: prazo preenchido, descricao com só espaços ('   ') -> TRIM('   ') = '' -> NOT false -> conta em sem_acao
       const res = db.public.one(`
         SELECT COUNT(*) as count
         FROM crm_leads
@@ -1127,12 +1127,12 @@ describe('Inteligência Comercial — Suíte Completa de Contratos e Serviço Re
           AND NOT (
             proxima_acao_prazo IS NOT NULL
             AND proxima_acao_descricao IS NOT NULL
-            AND proxima_acao_descricao <> ''
+            AND TRIM(proxima_acao_descricao) <> ''
             AND (proxima_acao_concluida IS FALSE OR proxima_acao_concluida IS NULL)
           );
       `);
 
-      assert.equal(Number(res.count), 2, 'lead-1 (concluída) e lead-2 (sem prazo) devem contar em interessados_sem_acao');
+      assert.equal(Number(res.count), 3, 'lead-1 (concluída), lead-2 (sem prazo) e lead-5 (só espaços) devem contar em interessados_sem_acao');
     });
   });
 

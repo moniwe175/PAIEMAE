@@ -344,55 +344,103 @@ export async function fetchCampaignBrief(campaignId) {
 }
 
 /**
- * Salva ou atualiza o brief de uma campanha (upsert por campaign_id).
- * Guarda snapshot imutável dos critérios do segmento no momento do vínculo.
+ * Salva ou atualiza o brief de uma campanha de forma atômica.
+ * - Se a leitura prévia falhar, interrompe imediatamente o salvamento para evitar perda de dados.
+ * - Atualização atômica: se o registro já existe, envia via UPDATE apenas os campos
+ *   explicitamente fornecidos, preservando as demais colunas no banco mesmo sob edições simultâneas.
+ * - Guarda snapshot imutável dos critérios do segmento no momento do vínculo.
  */
 export async function saveCampaignBrief(brief) {
   if (!cfg()) return handleErr('Supabase not configured');
   const campaignId = Number(brief.campaign_id);
   if (!campaignId) return handleErr('campaign_id é obrigatório para salvar o brief');
 
-  // Busca brief existente para preservar campos não enviados nos dois sentidos
-  const { data: existing } = await supabase
+  // 1. Busca brief existente. Se falhar na leitura (erro de rede, permissão, etc.),
+  // INTERROMPE imediatamente para não salvar campos nulos ou corromper dados.
+  const { data: existing, error: readError } = await supabase
     .from('marketing_campaign_briefs')
     .select('*')
     .eq('campaign_id', campaignId)
     .maybeSingle();
 
-  // Helper de mesclagem: valor explicitamente enviado tem prioridade;
-  // se undefined, mantém o valor existente no banco
-  const pick = (field, fallback = null) => {
-    if (brief[field] !== undefined) return brief[field];
-    if (existing && existing[field] !== undefined) return existing[field];
-    return fallback;
-  };
+  if (readError) {
+    return handleErr(readError);
+  }
 
-  const segmentId = pick('segment_id');
-  const payload = {
-    campaign_id: campaignId,
-    objetivo: pick('objetivo'),
-    meta: pick('meta'),
-    publico_descricao: pick('publico_descricao'),
-    segment_id: segmentId,
-    segment_version: pick('segment_version') != null ? Number(pick('segment_version')) : null,
-    conditions_snapshot: pick('conditions_snapshot'),
-    estimated_count: pick('estimated_count') != null ? Number(pick('estimated_count')) : null,
-    snapshot_date: pick('snapshot_date') || (segmentId ? (existing?.snapshot_date || new Date().toISOString()) : null),
-    responsavel: pick('responsavel'),
-    okr_kr_ref: pick('okr_kr_ref'),
-    orcamento_planejado: pick('orcamento_planejado') != null ? Number(pick('orcamento_planejado')) : null,
-    investimento_realizado: pick('investimento_realizado') != null ? Number(pick('investimento_realizado')) : null,
-    resultado_observado: pick('resultado_observado'),
-    decisao: pick('decisao'),
-    aprendizado: pick('aprendizado'),
-    updated_at: new Date().toISOString(),
-  };
+  // 2. Mapeamento estrito apenas dos campos enviados pelo chamador (brief[field] !== undefined).
+  // Atualização atômica: campos omitidos não são enviados no payload de update,
+  // preservando-os no banco mesmo sob edições simultâneas.
+  const patch = {};
 
-  const { data, error } = await supabase
-    .from('marketing_campaign_briefs')
-    .upsert([payload], { onConflict: 'campaign_id' })
-    .select()
-    .single();
+  const allowedFields = [
+    'objetivo',
+    'meta',
+    'publico_descricao',
+    'segment_id',
+    'segment_version',
+    'conditions_snapshot',
+    'estimated_count',
+    'snapshot_date',
+    'responsavel',
+    'okr_kr_ref',
+    'orcamento_planejado',
+    'investimento_realizado',
+    'resultado_observado',
+    'decisao',
+    'aprendizado',
+  ];
+
+  for (const field of allowedFields) {
+    if (brief[field] !== undefined) {
+      if (['orcamento_planejado', 'investimento_realizado'].includes(field)) {
+        patch[field] = brief[field] != null ? Number(brief[field]) : null;
+      } else if (['segment_version', 'estimated_count'].includes(field)) {
+        patch[field] = brief[field] != null ? Number(brief[field]) : null;
+      } else {
+        patch[field] = brief[field];
+      }
+    }
+  }
+
+  // Snapshot de público imutável no momento do vínculo
+  if (brief.segment_id !== undefined) {
+    if (brief.segment_id && !patch.snapshot_date) {
+      patch.snapshot_date = (existing?.segment_id === brief.segment_id && existing?.snapshot_date)
+        ? existing.snapshot_date
+        : new Date().toISOString();
+    } else if (!brief.segment_id) {
+      patch.snapshot_date = null;
+    }
+  }
+
+  patch.updated_at = new Date().toISOString();
+
+  let data, error;
+  if (existing) {
+    // Registro já existe: UPDATE atômico com APENAS os campos modificados.
+    // Preserva no banco colunas não enviadas (evita sobrescrever edições simultâneas).
+    const updateRes = await supabase
+      .from('marketing_campaign_briefs')
+      .update(patch)
+      .eq('campaign_id', campaignId)
+      .select()
+      .single();
+    data = updateRes?.data;
+    error = updateRes?.error;
+  } else {
+    // Primeiro cadastro: insere com campaign_id
+    const insertPayload = {
+      campaign_id: campaignId,
+      ...patch,
+    };
+    const insertRes = await supabase
+      .from('marketing_campaign_briefs')
+      .insert([insertPayload])
+      .select()
+      .single();
+    data = insertRes?.data;
+    error = insertRes?.error;
+  }
 
   if (error) return handleErr(error);
   return { data, error: null };
