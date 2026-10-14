@@ -118,13 +118,27 @@ CREATE TABLE IF NOT EXISTS public.commercial_record_links (
   id           uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
   source_table text        NOT NULL DEFAULT 'sheet_transactions',
   source_id    text        NOT NULL,
-  client_id    uuid        NOT NULL REFERENCES public.clients(id) ON DELETE CASCADE,
+  client_id    integer     NOT NULL REFERENCES public.clients(id) ON DELETE CASCADE,
   author_id    uuid        REFERENCES auth.users(id) ON DELETE SET NULL,
   author_name  text,
   confirmed_at timestamptz NOT NULL DEFAULT now(),
   note         text,
   UNIQUE (source_table, source_id)
 );
+
+-- Caso commercial_record_links tenha sido criada anteriormente com client_id uuid, ajusta para integer
+DO $$ BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns 
+    WHERE table_schema = 'public' 
+      AND table_name = 'commercial_record_links' 
+      AND column_name = 'client_id' 
+      AND data_type = 'uuid'
+  ) THEN
+    ALTER TABLE public.commercial_record_links DROP COLUMN client_id CASCADE;
+    ALTER TABLE public.commercial_record_links ADD COLUMN client_id integer NOT NULL REFERENCES public.clients(id) ON DELETE CASCADE;
+  END IF;
+END $$;
 
 COMMENT ON TABLE public.commercial_record_links IS
   'Associações confirmadas fontes financeiras → clients. Requer confirmação humana.';
@@ -217,6 +231,7 @@ COMMIT;
 
 -- RPC 1: Métricas agregadas da Visão Geral
 -- Agrega no banco para evitar busca paginada no frontend.
+DROP FUNCTION IF EXISTS public.fn_ic_overview_metrics(date, date);
 CREATE OR REPLACE FUNCTION public.fn_ic_overview_metrics(
   p_date_from date,
   p_date_to   date
@@ -361,6 +376,7 @@ $$;
 GRANT EXECUTE ON FUNCTION public.fn_ic_overview_metrics(date, date) TO authenticated;
 
 -- RPC 2: Estatísticas por canal de origem dos leads
+DROP FUNCTION IF EXISTS public.fn_ic_canal_stats(date, date);
 CREATE OR REPLACE FUNCTION public.fn_ic_canal_stats(
   p_date_from date,
   p_date_to   date
@@ -400,6 +416,7 @@ GRANT EXECUTE ON FUNCTION public.fn_ic_canal_stats(date, date) TO authenticated;
 
 -- RPC 3: RFM de clientes (recência e frequência de atendimento)
 -- Valor (V do RFM) indisponível: sheet_transactions.client é texto sem FK.
+DROP FUNCTION IF EXISTS public.fn_ic_client_rfm(date, date, integer, integer);
 CREATE OR REPLACE FUNCTION public.fn_ic_client_rfm(
   p_date_from date,
   p_date_to   date,
@@ -407,7 +424,7 @@ CREATE OR REPLACE FUNCTION public.fn_ic_client_rfm(
   p_offset    integer DEFAULT 0
 )
 RETURNS TABLE (
-  client_id            uuid,
+  client_id            integer,
   client_name          text,
   client_source        text,
   primeiro_atendimento date,
@@ -450,6 +467,7 @@ $$;
 GRANT EXECUTE ON FUNCTION public.fn_ic_client_rfm(date, date, integer, integer) TO authenticated;
 
 -- RPC 4: Preview server-side de segmento de leads (campos e operadores validados)
+DROP FUNCTION IF EXISTS public.fn_ic_segment_preview_leads(jsonb, integer);
 CREATE OR REPLACE FUNCTION public.fn_ic_segment_preview_leads(
   p_conditions jsonb,
   p_limit      integer DEFAULT 20
@@ -529,6 +547,7 @@ $$;
 GRANT EXECUTE ON FUNCTION public.fn_ic_segment_preview_leads(jsonb, integer) TO authenticated;
 
 -- RPC 5: Preview server-side de segmento de clientes
+DROP FUNCTION IF EXISTS public.fn_ic_segment_preview_clients(jsonb, integer);
 CREATE OR REPLACE FUNCTION public.fn_ic_segment_preview_clients(
   p_conditions jsonb,
   p_limit      integer DEFAULT 20
