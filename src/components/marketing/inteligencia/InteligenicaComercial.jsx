@@ -4,8 +4,11 @@
  * Sub-aba de Inteligência Comercial dentro de Marketing.
  * Três visões: Visão Geral, Clientes e Públicos, Canais e Campanhas.
  *
- * Carregado sob demanda (conditional render em Marketing.jsx).
- * Não faz chamadas à Meta, Instagram, nem altera automações existentes.
+ * Totalmente integrada com conciliação financeira, segmentos avançados por serviço/frequência,
+ * ICP com evidências e validação, paginação de clientes, indicadores clicáveis (drilldown),
+ * e fluxo completo de Público → Ideia → Campanha.
+ *
+ * Restrições rigorosas mantidas: sem chamadas à Meta, Instagram ou alteração de automações.
  */
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
@@ -16,9 +19,14 @@ import {
   TrendingUp, Users, UserPlus, RefreshCw, Target, AlertTriangle,
   Clock, CheckCircle, Plus, Archive, ChevronRight, Info, Settings,
   Search, Layers, Star, Megaphone, BookOpen, X, Save, Eye,
-  BarChart2, Filter, AlertCircle, HelpCircle,
+  BarChart2, Filter, AlertCircle, HelpCircle, Check, DollarSign,
+  ArrowRight, ShieldCheck, Edit3, Link2, ExternalLink, Calendar,
+  ChevronLeft, ChevronDown, ListFilter,
 } from 'lucide-react';
 import { useAuth } from '../../../contexts/AuthContext';
+import { supabase } from '../../../lib/supabase';
+import { insertIdea } from '../../../services/marketingIdeasService';
+import { fetchCampaigns, fetchClients } from '../../../services/supabaseService';
 import {
   checkIntelligenceSetup,
   fetchOverviewMetrics,
@@ -32,8 +40,13 @@ import {
   fetchIcpProfiles,
   saveIcpProfile,
   updateIcpProfile,
+  validateIcpProfile,
   fetchCampaignBrief,
   saveCampaignBrief,
+  fetchUnlinkedTransactions,
+  linkCommercialRecord,
+  unlinkCommercialRecord,
+  fetchCommercialLinks,
   fetchCommercialSettings,
   saveCommercialSettings,
   getDateRange,
@@ -51,64 +64,116 @@ const PERIOD_PRESETS = [
 ];
 
 const SUBVIEWS = [
-  { key: 'visao-geral',       label: 'Visão Geral',       icon: BarChart2 },
+  { key: 'visao-geral',       label: 'Visão Geral',         icon: BarChart2 },
   { key: 'clientes-publicos', label: 'Clientes e Públicos', icon: Users },
-  { key: 'canais-campanhas',  label: 'Canais e Campanhas', icon: Target },
+  { key: 'canais-campanhas',  label: 'Canais e Campanhas',  icon: Target },
 ];
 
 const SEGMENT_FIELDS_LEAD = [
-  { value: 'origem',                label: 'Origem' },
-  { value: 'servico_interesse',     label: 'Serviço de interesse' },
-  { value: 'status',                label: 'Etapa do CRM' },
-  { value: 'responsavel',           label: 'Responsável' },
-  { value: 'proxima_acao_concluida',label: 'Próxima ação concluída' },
-  { value: 'proxima_acao_prazo',    label: 'Prazo da próxima ação' },
+  { value: 'origem',                 label: 'Origem',                    type: 'text' },
+  { value: 'servico_interesse',      label: 'Serviço de interesse',      type: 'text' },
+  { value: 'status',                 label: 'Etapa do CRM',              type: 'text' },
+  { value: 'responsavel',            label: 'Responsável',               type: 'text' },
+  { value: 'proxima_acao_concluida', label: 'Próxima ação concluída',    type: 'boolean' },
+  { value: 'proxima_acao_prazo',     label: 'Prazo da próxima ação',     type: 'date' },
 ];
 
 const SEGMENT_FIELDS_CLIENT = [
-  { value: 'source',       label: 'Origem' },
-  { value: 'status',       label: 'Status' },
-  { value: 'city',         label: 'Cidade' },
-  { value: 'neighborhood', label: 'Bairro' },
-  { value: 'name',         label: 'Nome' },
+  { value: 'name',                label: 'Nome do cliente',            type: 'text' },
+  { value: 'source',              label: 'Origem de aquisição',        type: 'text' },
+  { value: 'status',              label: 'Status do paciente',         type: 'text' },
+  { value: 'city',                label: 'Cidade',                     type: 'text' },
+  { value: 'neighborhood',        label: 'Bairro',                     type: 'text' },
+  { value: 'total_atendimentos',  label: 'Total de atendimentos',      type: 'numeric' },
+  { value: 'dias_sem_atendimento',label: 'Dias sem atendimento',       type: 'numeric' },
+  { value: 'servico_realizado',   label: 'Serviço/procedimento feito', type: 'text' },
 ];
 
-const OPERATORS_TEXT = [
-  { value: 'eq',       label: 'igual a' },
-  { value: 'neq',      label: 'diferente de' },
-  { value: 'contains', label: 'contém' },
-  { value: 'is_null',  label: 'não informado' },
-  { value: 'not_null', label: 'informado' },
-];
+const OPERATORS_BY_TYPE = {
+  text: [
+    { value: 'eq',       label: 'igual a' },
+    { value: 'neq',      label: 'diferente de' },
+    { value: 'contains', label: 'contém' },
+    { value: 'is_null',  label: 'não informado' },
+    { value: 'not_null', label: 'informado' },
+  ],
+  numeric: [
+    { value: 'gte',      label: 'maior ou igual a' },
+    { value: 'lte',      label: 'menor ou igual a' },
+    { value: 'eq',       label: 'igual a' },
+    { value: 'neq',      label: 'diferente de' },
+    { value: 'is_null',  label: 'não informado' },
+    { value: 'not_null', label: 'informado' },
+  ],
+  date: [
+    { value: 'gte',      label: 'a partir de' },
+    { value: 'lte',      label: 'até' },
+    { value: 'eq',       label: 'igual a' },
+    { value: 'is_null',  label: 'não informado' },
+    { value: 'not_null', label: 'informado' },
+  ],
+  boolean: [
+    { value: 'eq',       label: 'é igual a' },
+    { value: 'is_null',  label: 'não definido' },
+    { value: 'not_null', label: 'definido' },
+  ],
+};
 
-const OPERATORS_DATE = [
-  { value: 'gte', label: 'a partir de' },
-  { value: 'lte', label: 'até' },
-  { value: 'eq',  label: 'igual a' },
-];
+// ─── Componentes Compartilhados ───────────────────────────────────────────────
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+function MetricCard({
+  label, value, sublabel, unit, note, color = '#8B5CF6',
+  icon: Icon, loading, unavailable, onClick, badge,
+}) {
+  const isClickable = Boolean(onClick);
 
-function MetricCard({ label, value, sublabel, unit, note, color = '#8B5CF6', icon: Icon, loading, unavailable }) {
   return (
-    <div style={{
-      background: 'var(--bg-card)',
-      border: `1px solid ${unavailable ? '#374151' : color + '33'}`,
-      borderRadius: 12,
-      padding: '20px 24px',
-      display: 'flex',
-      flexDirection: 'column',
-      gap: 8,
-      minWidth: 160,
-      flex: 1,
-      position: 'relative',
-      overflow: 'hidden',
-    }}>
+    <div
+      onClick={isClickable ? onClick : undefined}
+      style={{
+        background: 'var(--bg-card)',
+        border: `1px solid ${unavailable ? '#374151' : color + '33'}`,
+        borderRadius: 12,
+        padding: '20px 24px',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 8,
+        minWidth: 160,
+        flex: 1,
+        position: 'relative',
+        overflow: 'hidden',
+        cursor: isClickable ? 'pointer' : 'default',
+        transition: 'transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease',
+      }}
+      onMouseEnter={e => {
+        if (isClickable) {
+          e.currentTarget.style.transform = 'translateY(-2px)';
+          e.currentTarget.style.boxShadow = `0 8px 20px ${color}15`;
+          e.currentTarget.style.borderColor = color;
+        }
+      }}
+      onMouseLeave={e => {
+        if (isClickable) {
+          e.currentTarget.style.transform = 'translateY(0)';
+          e.currentTarget.style.boxShadow = 'none';
+          e.currentTarget.style.borderColor = unavailable ? '#374151' : color + '33';
+        }
+      }}
+    >
       <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: unavailable ? '#374151' : color, borderRadius: '12px 12px 0 0' }} />
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        {Icon && <Icon size={16} style={{ color: unavailable ? 'var(--text-muted)' : color }} />}
-        <span style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 500 }}>{label}</span>
+      
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {Icon && <Icon size={16} style={{ color: unavailable ? 'var(--text-muted)' : color }} />}
+          <span style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 500 }}>{label}</span>
+        </div>
+        {badge && (
+          <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 12, background: color + '18', color, fontWeight: 600 }}>
+            {badge}
+          </span>
+        )}
       </div>
+
       {loading ? (
         <div style={{ height: 40, display: 'flex', alignItems: 'center' }}>
           <div style={{ width: 60, height: 28, background: 'var(--bg-main)', borderRadius: 6, animation: 'pulse 1.5s infinite' }} />
@@ -128,6 +193,11 @@ function MetricCard({ label, value, sublabel, unit, note, color = '#8B5CF6', ico
           </div>
           {sublabel && <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{sublabel}</span>}
           {note && <p style={{ fontSize: 11, color: 'var(--text-muted)', margin: 0, lineHeight: 1.4 }}>{note}</p>}
+          {isClickable && (
+            <div style={{ fontSize: 11, color, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4, marginTop: 4 }}>
+              Ver registros <ChevronRight size={12} />
+            </div>
+          )}
         </>
       )}
     </div>
@@ -145,7 +215,7 @@ function ActionCard({ label, count, description, color, icon: Icon, onAction, ac
       alignItems: 'center',
       gap: 16,
       flex: 1,
-      minWidth: 200,
+      minWidth: 220,
     }}>
       <div style={{
         width: 48, height: 48, borderRadius: 10,
@@ -168,9 +238,10 @@ function ActionCard({ label, count, description, color, icon: Icon, onAction, ac
           onClick={onAction}
           style={{
             background: color + '18', border: `1px solid ${color}44`,
-            borderRadius: 8, padding: '6px 12px',
-            color, fontSize: 12, fontWeight: 500,
+            borderRadius: 8, padding: '7px 12px',
+            color, fontSize: 12, fontWeight: 600,
             cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0,
+            transition: 'background 0.2s',
           }}
         >
           {actionLabel || 'Ver →'}
@@ -180,107 +251,652 @@ function ActionCard({ label, count, description, color, icon: Icon, onAction, ac
   );
 }
 
-function CoverageStrip({ cobertura, loading }) {
-  if (loading) return null;
-  if (!cobertura) return null;
-  const pct = cobertura.pct_com_client;
-  const semClient = cobertura.total_appointments_finalizados - cobertura.appointments_com_client;
+// ─── Modal de Detalhamento / Registros (Drilldown) ─────────────────────────────
 
+function RecordsModal({ title, subtitle, items = [], loading, columns = [], onClose }) {
   return (
-    <div style={{
-      background: 'var(--bg-card)',
-      border: '1px solid var(--border)',
-      borderRadius: 10,
-      padding: '14px 20px',
-      display: 'flex',
-      alignItems: 'center',
-      gap: 16,
-      flexWrap: 'wrap',
-    }}>
-      <Info size={16} style={{ color: 'var(--text-muted)', flexShrink: 0 }} />
-      <span style={{ fontSize: 13, color: 'var(--text-muted)', flex: 1, minWidth: 200 }}>
-        <strong style={{ color: 'var(--text-dark)' }}>Qualidade dos dados:</strong>
-        {' '}{cobertura.total_appointments_finalizados} atendimentos finalizados no período —
-        {' '}{cobertura.appointments_com_client} com cliente vinculado
-        {pct !== null ? ` (${pct}%)` : ''}.
-        {semClient > 0 && (
-          <> {semClient} sem vínculo de cliente — não entram nos indicadores por cliente.</>
-        )}
-      </span>
-      <span style={{
-        fontSize: 11, padding: '3px 10px', borderRadius: 20,
-        background: pct === null ? '#374151' : pct >= 80 ? '#10B98118' : pct >= 50 ? '#D9770618' : '#DC262618',
-        color: pct === null ? 'var(--text-muted)' : pct >= 80 ? '#10B981' : pct >= 50 ? '#D97706' : '#DC2626',
-        fontWeight: 600,
-      }}>
-        {pct === null ? 'Sem dados' : `${pct}% vinculados`}
-      </span>
-    </div>
-  );
-}
+    <div className="modal-overlay" onClick={onClose} style={{ zIndex: 1100 }}>
+      <div
+        className="modal"
+        onClick={e => e.stopPropagation()}
+        style={{ maxWidth: 840, width: '92%', maxHeight: '85vh', display: 'flex', flexDirection: 'column' }}
+      >
+        <div className="modal-header">
+          <div>
+            <span className="modal-title" style={{ fontSize: 16 }}>{title}</span>
+            {subtitle && <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--text-muted)' }}>{subtitle}</p>}
+          </div>
+          <button className="modal-close" onClick={onClose}><X size={18} /></button>
+        </div>
 
-function RevenueUnavailableCard() {
-  return (
-    <div style={{
-      background: 'var(--bg-card)',
-      border: '1px solid #374151',
-      borderRadius: 12,
-      padding: '20px 24px',
-      display: 'flex',
-      gap: 14,
-      alignItems: 'flex-start',
-    }}>
-      <AlertCircle size={18} style={{ color: '#6B7280', flexShrink: 0, marginTop: 2 }} />
-      <div>
-        <p style={{ margin: 0, fontSize: 13, color: 'var(--text-muted)', fontWeight: 600 }}>
-          Recebimentos confirmados — Indisponível
-        </p>
-        <p style={{ margin: '6px 0 0', fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.5 }}>
-          <code>sheet_transactions.client</code> é texto livre sem chave para <code>clients</code>.
-          Para habilitar este indicador, associe manualmente os lançamentos via{' '}
-          <strong>Qualidade dos dados → Conciliação financeira</strong> (em desenvolvimento).
-        </p>
+        <div style={{ flex: 1, overflowY: 'auto', padding: '16px 20px' }}>
+          {loading ? (
+            <p style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '30px 0' }}>Carregando registros…</p>
+          ) : items.length === 0 ? (
+            <p style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '30px 0' }}>Nenhum registro correspondente encontrado.</p>
+          ) : (
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                  {columns.map(c => (
+                    <th key={c.key} style={{ padding: '8px 12px', textAlign: c.align || 'left', color: 'var(--text-muted)', fontWeight: 600 }}>
+                      {c.label}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {items.map((it, idx) => (
+                  <tr key={it.id || idx} style={{ borderBottom: '1px solid var(--border)', background: idx % 2 === 0 ? 'transparent' : 'var(--bg-main)' }}>
+                    {columns.map(c => (
+                      <td key={c.key} style={{ padding: '10px 12px', textAlign: c.align || 'left', color: 'var(--text-dark)' }}>
+                        {c.render ? c.render(it) : it[c.key] || '—'}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+
+        <div style={{ padding: '12px 20px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+            Exibindo {items.length} registro(s)
+          </span>
+          <button className="btn btn-ghost" onClick={onClose}>Fechar</button>
+        </div>
       </div>
     </div>
   );
 }
 
-function SetupPendingBanner({ reason }) {
+// ─── Modal de Conciliação Financeira ──────────────────────────────────────────
+
+function FinancialReconciliationModal({ from, to, onClose, onRefreshMetrics }) {
+  const { user } = useAuth();
+  const [tab, setTab] = useState('pendentes'); // 'pendentes' | 'confirmados'
+  const [unlinked, setUnlinked] = useState([]);
+  const [confirmed, setConfirmed] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [clientsList, setClientsList] = useState([]);
+  const [selectedClients, setSelectedClients] = useState({}); // { txId: clientId }
+  const [actionLoading, setActionLoading] = useState(false);
+
+  const loadData = useCallback(async () => {
+    setLoading(true);
+    const [unlRes, confRes, cliRes] = await Promise.all([
+      fetchUnlinkedTransactions(from, to, 100, 0),
+      fetchCommercialLinks(100, 0),
+      fetchClients(),
+    ]);
+
+    setUnlinked(unlRes.data || []);
+    setConfirmed(confRes.data || []);
+    setClientsList(cliRes.data || []);
+    setLoading(false);
+  }, [from, to]);
+
+  useEffect(() => { loadData(); }, [loadData]);
+
+  const handleLink = async (tx) => {
+    const clientId = selectedClients[tx.transaction_id] || tx.suggested_client_id;
+    if (!clientId) {
+      alert('Selecione um paciente para associar a esta transação.');
+      return;
+    }
+
+    setActionLoading(true);
+    const authorName = user?.user_metadata?.full_name || user?.email || 'Gestor';
+    const { error } = await linkCommercialRecord({
+      sourceTable: 'sheet_transactions',
+      sourceId: tx.transaction_id,
+      clientId: Number(clientId),
+      authorId: user?.id,
+      authorName,
+      note: `Conciliado manualmente para ${tx.client_text}`,
+    });
+
+    if (error) {
+      alert('Erro ao vincular: ' + error.message);
+    } else {
+      await loadData();
+      if (onRefreshMetrics) onRefreshMetrics();
+    }
+    setActionLoading(false);
+  };
+
+  const handleUnlink = async (linkId) => {
+    if (!confirm('Deseja realmente remover esta associação comercial?')) return;
+    setActionLoading(true);
+    const { error } = await unlinkCommercialRecord(linkId);
+    if (error) {
+      alert('Erro ao desvincular: ' + error.message);
+    } else {
+      await loadData();
+      if (onRefreshMetrics) onRefreshMetrics();
+    }
+    setActionLoading(false);
+  };
+
   return (
-    <div style={{
-      background: 'var(--bg-card)',
-      border: '1px solid #D9770644',
-      borderRadius: 12,
-      padding: '32px',
-      textAlign: 'center',
-      maxWidth: 520,
-      margin: '60px auto',
-    }}>
-      <AlertTriangle size={40} style={{ color: '#D97706', marginBottom: 16 }} />
-      <h3 style={{ margin: '0 0 12px', color: 'var(--text-dark)', fontSize: 18 }}>
-        Configuração do banco pendente
-      </h3>
-      <p style={{ margin: '0 0 20px', color: 'var(--text-muted)', fontSize: 14, lineHeight: 1.6 }}>
-        As tabelas e funções da Inteligência Comercial não foram encontradas.
-        Execute <code style={{ background: 'var(--bg-main)', padding: '2px 6px', borderRadius: 4 }}>
-          marketing_inteligencia_migration.sql
-        </code> no SQL Editor do Supabase e recarregue.
-      </p>
-      {reason === 'tables_missing' && (
-        <p style={{ margin: 0, fontSize: 12, color: 'var(--text-muted)' }}>
-          O restante do ERP continua funcionando normalmente.
-        </p>
-      )}
+    <div className="modal-overlay" onClick={onClose} style={{ zIndex: 1200 }}>
+      <div
+        className="modal"
+        onClick={e => e.stopPropagation()}
+        style={{ maxWidth: 940, width: '95%', maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}
+      >
+        <div className="modal-header">
+          <div>
+            <span className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <DollarSign size={18} style={{ color: '#10B981' }} />
+              Conciliação Financeira Comercial
+            </span>
+            <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--text-muted)' }}>
+              Associação manual confirmada entre lançamentos da planilha e pacientes do cadastro.
+            </p>
+          </div>
+          <button className="modal-close" onClick={onClose}><X size={18} /></button>
+        </div>
+
+        {/* Abas da conciliação */}
+        <div style={{ display: 'flex', gap: 8, padding: '0 20px', borderBottom: '1px solid var(--border)' }}>
+          <button
+            onClick={() => setTab('pendentes')}
+            style={{
+              padding: '10px 16px', background: 'none', border: 'none',
+              borderBottom: tab === 'pendentes' ? '2px solid #10B981' : '2px solid transparent',
+              color: tab === 'pendentes' ? '#10B981' : 'var(--text-muted)',
+              fontWeight: tab === 'pendentes' ? 600 : 400,
+              fontSize: 13, cursor: 'pointer',
+            }}
+          >
+            Lançamentos pendentes ({unlinked.length})
+          </button>
+          <button
+            onClick={() => setTab('confirmados')}
+            style={{
+              padding: '10px 16px', background: 'none', border: 'none',
+              borderBottom: tab === 'confirmados' ? '2px solid #10B981' : '2px solid transparent',
+              color: tab === 'confirmados' ? '#10B981' : 'var(--text-muted)',
+              fontWeight: tab === 'confirmados' ? 600 : 400,
+              fontSize: 13, cursor: 'pointer',
+            }}
+          >
+            Vínculos confirmados ({confirmed.length})
+          </button>
+        </div>
+
+        <div style={{ flex: 1, overflowY: 'auto', padding: '16px 20px' }}>
+          {loading ? (
+            <p style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>Carregando dados financeiros…</p>
+          ) : tab === 'pendentes' ? (
+            unlinked.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '40px 20px' }}>
+                <CheckCircle size={36} style={{ color: '#10B981', margin: '0 auto 12px' }} />
+                <p style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-dark)', margin: 0 }}>Tudo conciliado!</p>
+                <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '4px 0 0' }}>
+                  Não há lançamentos financeiros pendentes de associação para o período de {fmtDate(from)} a {fmtDate(to)}.
+                </p>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {unlinked.map(tx => {
+                  const currentSelected = selectedClients[tx.transaction_id] || tx.suggested_client_id;
+                  return (
+                    <div
+                      key={tx.transaction_id}
+                      style={{
+                        background: 'var(--bg-main)',
+                        border: '1px solid var(--border)',
+                        borderRadius: 10,
+                        padding: '14px 18px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        flexWrap: 'wrap',
+                        gap: 12,
+                      }}
+                    >
+                      <div style={{ flex: 1, minWidth: 240 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <span style={{ fontWeight: 600, color: 'var(--text-dark)', fontSize: 14 }}>
+                            {tx.client_text || '(Sem nome na planilha)'}
+                          </span>
+                          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                            • {fmtDate(tx.date_ref)}
+                          </span>
+                          <span style={{
+                            fontSize: 11, padding: '2px 8px', borderRadius: 10,
+                            background: '#10B98118', color: '#10B981', fontWeight: 600,
+                          }}>
+                            {fmtBRL(tx.gross)}
+                          </span>
+                        </div>
+                        <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--text-muted)' }}>
+                          Procedimento: {tx.procedure || '—'} • Método: {tx.payment_method || '—'} • Profissional: {tx.professional || '—'}
+                        </p>
+                      </div>
+
+                      {/* Seleção do Paciente */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                          <label style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 600 }}>Associar a paciente:</label>
+                          <select
+                            className="form-select"
+                            style={{ fontSize: 12, padding: '5px 10px', minWidth: 200 }}
+                            value={currentSelected || ''}
+                            onChange={e => setSelectedClients(prev => ({ ...prev, [tx.transaction_id]: e.target.value }))}
+                          >
+                            <option value="">Selecione o paciente…</option>
+                            {tx.suggested_client_id && (
+                              <option value={tx.suggested_client_id}>
+                                ⭐ Sugestão: {tx.suggested_client_name} (ID {tx.suggested_client_id})
+                              </option>
+                            )}
+                            {clientsList
+                              .filter(c => c.id !== tx.suggested_client_id)
+                              .map(c => (
+                                <option key={c.id} value={c.id}>
+                                  {c.name} {c.phone ? `(${c.phone})` : ''}
+                                </option>
+                              ))}
+                          </select>
+                        </div>
+
+                        <button
+                          className="btn btn-primary"
+                          style={{ alignSelf: 'flex-end', padding: '6px 14px', fontSize: 12 }}
+                          disabled={actionLoading || !currentSelected}
+                          onClick={() => handleLink(tx)}
+                        >
+                          <Check size={14} style={{ marginRight: 4 }} /> Confirmar Vínculo
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )
+          ) : (
+            confirmed.length === 0 ? (
+              <p style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>Nenhum vínculo confirmado ativo.</p>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {confirmed.map(link => (
+                  <div
+                    key={link.id}
+                    style={{
+                      background: 'var(--bg-main)', border: '1px solid var(--border)',
+                      borderRadius: 10, padding: '12px 16px', display: 'flex',
+                      alignItems: 'center', justifyContent: 'space-between',
+                    }}
+                  >
+                    <div>
+                      <span style={{ fontWeight: 600, color: 'var(--text-dark)', fontSize: 13 }}>
+                        {link.clients?.name || `Paciente #${link.client_id}`}
+                      </span>
+                      <span style={{ fontSize: 12, color: 'var(--text-muted)', marginLeft: 8 }}>
+                        (Origem ID: {link.source_id.slice(0, 8)}…)
+                      </span>
+                      <p style={{ margin: '3px 0 0', fontSize: 11, color: 'var(--text-muted)' }}>
+                        Confirmado por {link.author_name || 'Gestão'} em {fmtDate(link.confirmed_at)} {link.note ? `• ${link.note}` : ''}
+                      </p>
+                    </div>
+                    <button
+                      className="btn btn-ghost"
+                      style={{ color: '#DC2626', fontSize: 12, padding: '4px 10px' }}
+                      disabled={actionLoading}
+                      onClick={() => handleUnlink(link.id)}
+                    >
+                      Desvincular
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )
+          )}
+        </div>
+
+        <div style={{ padding: '12px 20px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'flex-end' }}>
+          <button className="btn btn-ghost" onClick={onClose}>Concluir</button>
+        </div>
+      </div>
     </div>
   );
 }
 
-// ─── Visão Geral ─────────────────────────────────────────────────────────────
+// ─── Modal de Configurações Comerciais (Metas & North Star) ───────────────────
 
-function VisaoGeral({ periodPreset, onPeriodChange }) {
+function CommercialSettingsModal({ onClose, onSaved }) {
+  const { user } = useAuth();
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState({
+    meta_mensal_atendimentos: '',
+    meta_mensal_interessados: '',
+    definicao_metrica_principal: '',
+    okr_kr_ref: '',
+    periodo_padrao_dias: 30,
+  });
+
+  useEffect(() => {
+    fetchCommercialSettings().then(({ data }) => {
+      if (data) {
+        setForm({
+          meta_mensal_atendimentos: data.meta_mensal_atendimentos ?? '',
+          meta_mensal_interessados: data.meta_mensal_interessados ?? '',
+          definicao_metrica_principal: data.definicao_metrica_principal || '',
+          okr_kr_ref: data.okr_kr_ref || '',
+          periodo_padrao_dias: data.periodo_padrao_dias || 30,
+        });
+      }
+      setLoading(false);
+    });
+  }, []);
+
+  const handleSave = async () => {
+    setSaving(true);
+    const { data, error } = await saveCommercialSettings(form, user?.id);
+    if (error) {
+      alert('Erro ao salvar configurações: ' + error.message);
+    } else {
+      if (onSaved) onSaved(data);
+      onClose();
+    }
+    setSaving(false);
+  };
+
+  return (
+    <div className="modal-overlay" onClick={onClose} style={{ zIndex: 1200 }}>
+      <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 560, width: '92%' }}>
+        <div className="modal-header">
+          <span className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Settings size={18} style={{ color: '#8B5CF6' }} />
+            Configurações Comerciais e Metas
+          </span>
+          <button className="modal-close" onClick={onClose}><X size={18} /></button>
+        </div>
+
+        {loading ? (
+          <p style={{ padding: '30px', textAlign: 'center', color: 'var(--text-muted)' }}>Carregando…</p>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14, padding: '16px 20px' }}>
+            <p style={{ margin: 0, fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.5 }}>
+              Metas e definições operacionais registradas pela gestão. Não alteram OKRs automaticamente.
+            </p>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div>
+                <label style={{ fontSize: 12, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>
+                  Meta mensal de atendimentos
+                </label>
+                <input
+                  type="number"
+                  className="form-input"
+                  placeholder="Ex: 80"
+                  value={form.meta_mensal_atendimentos}
+                  onChange={e => setForm(f => ({ ...f, meta_mensal_atendimentos: e.target.value }))}
+                />
+              </div>
+              <div>
+                <label style={{ fontSize: 12, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>
+                  Meta mensal de interessados (leads)
+                </label>
+                <input
+                  type="number"
+                  className="form-input"
+                  placeholder="Ex: 120"
+                  value={form.meta_mensal_interessados}
+                  onChange={e => setForm(f => ({ ...f, meta_mensal_interessados: e.target.value }))}
+                />
+              </div>
+            </div>
+
+            <div>
+              <label style={{ fontSize: 12, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>
+                Definição da Métrica Principal (North Star)
+              </label>
+              <textarea
+                className="form-input"
+                rows={2}
+                placeholder="Ex: Clientes atendidos com alto nível de satisfação e retorno biológico planejado."
+                value={form.definicao_metrica_principal}
+                onChange={e => setForm(f => ({ ...f, definicao_metrica_principal: e.target.value }))}
+              />
+            </div>
+
+            <div>
+              <label style={{ fontSize: 12, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>
+                Referência a Objetivo / KR existente (OKR)
+              </label>
+              <input
+                className="form-input"
+                placeholder="Ex: KR-2026-Q4: Crescimento sustentável de novos atendimentos"
+                value={form.okr_kr_ref}
+                onChange={e => setForm(f => ({ ...f, okr_kr_ref: e.target.value }))}
+              />
+            </div>
+
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 10 }}>
+              <button className="btn btn-ghost" onClick={onClose}>Cancelar</button>
+              <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
+                {saving ? 'Salvando…' : 'Salvar Metas'}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Modal para Criar Ideia a Partir de Segmento ──────────────────────────────
+
+function CreateIdeaFromSegmentModal({ segment, onClose, onSuccess }) {
+  const { user } = useAuth();
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState({
+    titulo: `Ação para: ${segment.name}`,
+    descricao: segment.description || `Ação voltada ao público do segmento "${segment.name}" (${segment.conditions?.length || 0} critérios).`,
+    canal: 'Instagram',
+    tipo: 'conteudo',
+    servico_tema: '',
+    objetivo: 'Atrair e engajar este segmento específico',
+    publico: segment.name,
+    regiao: '',
+  });
+
+  const handleCreate = async () => {
+    if (!form.titulo.trim()) {
+      alert('Informe o título da ideia.');
+      return;
+    }
+    setSaving(true);
+    const { data, error } = await insertIdea({
+      ...form,
+      tags: ['inteligencia_comercial', segment.entity_base],
+    }, user);
+
+    if (error) {
+      alert('Erro ao criar ideia: ' + error.message);
+    } else {
+      if (onSuccess) onSuccess(data);
+      onClose();
+    }
+    setSaving(false);
+  };
+
+  return (
+    <div className="modal-overlay" onClick={onClose} style={{ zIndex: 1200 }}>
+      <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 560, width: '92%' }}>
+        <div className="modal-header">
+          <span className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <BookOpen size={18} style={{ color: '#8B5CF6' }} />
+            Criar Ideia na Lousa a partir do Público
+          </span>
+          <button className="modal-close" onClick={onClose}><X size={18} /></button>
+        </div>
+
+        <div style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <p style={{ margin: 0, fontSize: 12, color: 'var(--text-muted)' }}>
+            Cria uma nova ideia em <strong>Ideias e Planejamento</strong> com as hipóteses e critérios deste público já preenchidos.
+          </p>
+
+          <div>
+            <label style={{ fontSize: 12, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Título da Ideia *</label>
+            <input className="form-input" value={form.titulo} onChange={e => setForm(f => ({ ...f, titulo: e.target.value }))} />
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+            <div>
+              <label style={{ fontSize: 12, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Canal Principal</label>
+              <select className="form-select" value={form.canal} onChange={e => setForm(f => ({ ...f, canal: e.target.value }))}>
+                <option value="Instagram">Instagram</option>
+                <option value="WhatsApp">WhatsApp</option>
+                <option value="Live">Live</option>
+                <option value="Stories">Stories</option>
+                <option value="Reels">Reels</option>
+                <option value="Outro">Outro</option>
+              </select>
+            </div>
+            <div>
+              <label style={{ fontSize: 12, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Tipo</label>
+              <select className="form-select" value={form.tipo} onChange={e => setForm(f => ({ ...f, tipo: e.target.value }))}>
+                <option value="conteudo">Conteúdo</option>
+                <option value="promocao">Ação Especial</option>
+                <option value="live">Live</option>
+                <option value="campanha">Campanha</option>
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label style={{ fontSize: 12, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Hipótese / Descrição da Ação</label>
+            <textarea className="form-input" rows={2} value={form.descricao} onChange={e => setForm(f => ({ ...f, descricao: e.target.value }))} />
+          </div>
+
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 8 }}>
+            <button className="btn btn-ghost" onClick={onClose}>Cancelar</button>
+            <button className="btn btn-primary" onClick={handleCreate} disabled={saving}>
+              {saving ? 'Criando…' : 'Criar Ideia na Lousa'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Modal para Vincular Público a Campanha com Snapshot ──────────────────────
+
+function LinkCampaignModal({ segment, onClose, onSuccess }) {
+  const [campaigns, setCampaigns] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [selectedCampaignId, setSelectedCampaignId] = useState('');
+  const [estimatedCount, setEstimatedCount] = useState(null);
+
+  useEffect(() => {
+    Promise.all([
+      fetchCampaigns(),
+      previewSegment(segment.entity_base, segment.conditions, 1, segment.janela_dias),
+    ]).then(([campRes, prevRes]) => {
+      setCampaigns(campRes.data || []);
+      if (prevRes.data?.count !== undefined) {
+        setEstimatedCount(prevRes.data.count);
+      }
+      setLoading(false);
+    });
+  }, [segment]);
+
+  const handleLink = async () => {
+    if (!selectedCampaignId) {
+      alert('Selecione uma campanha para vincular este público.');
+      return;
+    }
+    setSaving(true);
+    const { data, error } = await saveCampaignBrief({
+      campaign_id: Number(selectedCampaignId),
+      segment_id: segment.id,
+      segment_version: segment.version,
+      conditions_snapshot: segment.conditions,
+      estimated_count: estimatedCount,
+      snapshot_date: new Date().toISOString(),
+      publico_descricao: `Segmento: ${segment.name} (v${segment.version}) — estimado em ${estimatedCount ?? '—'} registros no momento do vínculo.`,
+    });
+
+    if (error) {
+      alert('Erro ao vincular: ' + error.message);
+    } else {
+      if (onSuccess) onSuccess(data);
+      onClose();
+    }
+    setSaving(false);
+  };
+
+  return (
+    <div className="modal-overlay" onClick={onClose} style={{ zIndex: 1200 }}>
+      <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 540, width: '92%' }}>
+        <div className="modal-header">
+          <span className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Link2 size={18} style={{ color: '#8B5CF6' }} />
+            Vincular Público à Campanha
+          </span>
+          <button className="modal-close" onClick={onClose}><X size={18} /></button>
+        </div>
+
+        <div style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <p style={{ margin: 0, fontSize: 12, color: 'var(--text-muted)' }}>
+            Vincula o segmento <strong>{segment.name}</strong> a uma campanha existente, gravando um
+            snapshot imutável dos critérios e tamanho da amostra ({estimatedCount ?? '…'} pessoas).
+          </p>
+
+          {loading ? (
+            <p style={{ color: 'var(--text-muted)', textAlign: 'center', padding: '20px' }}>Carregando campanhas…</p>
+          ) : campaigns.length === 0 ? (
+            <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>Nenhuma campanha disponível para vínculo.</p>
+          ) : (
+            <div>
+              <label style={{ fontSize: 12, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>
+                Selecione a Campanha *
+              </label>
+              <select
+                className="form-select"
+                value={selectedCampaignId}
+                onChange={e => setSelectedCampaignId(e.target.value)}
+              >
+                <option value="">Selecione uma campanha…</option>
+                {campaigns.map(c => (
+                  <option key={c.id} value={c.id}>
+                    {c.nome} ({c.canal} • {c.status})
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 10 }}>
+            <button className="btn btn-ghost" onClick={onClose}>Cancelar</button>
+            <button className="btn btn-primary" onClick={handleLink} disabled={saving || !selectedCampaignId}>
+              {saving ? 'Vinculando…' : 'Confirmar Vínculo'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Visão 1: Visão Geral ─────────────────────────────────────────────────────
+
+function VisaoGeral({ periodPreset, onPeriodChange, onSwitchTab }) {
   const [metrics, setMetrics] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [drilldown, setDrilldown] = useState(null);
+  const [showReconciliation, setShowReconciliation] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
 
   const { from, to } = useMemo(() => getDateRange(periodPreset), [periodPreset]);
 
@@ -300,30 +916,104 @@ function VisaoGeral({ periodPreset, onPeriodChange }) {
 
   const m = metrics || {};
 
+  // Detalhamento de Clientes Atendidos
+  const openAttendedDrilldown = async () => {
+    setDrilldown({ title: 'Clientes Atendidos no Período', subtitle: `Período: ${fmtDate(from)} a ${fmtDate(to)}`, loading: true, items: [] });
+    const { data } = await supabase
+      .from('appointments')
+      .select('id, client_id, client_name, client_phone, procedure, appointment_date, status')
+      .eq('status', 'finalizado')
+      .gte('appointment_date', from)
+      .lte('appointment_date', to)
+      .order('appointment_date', { ascending: false });
+
+    // Deduplica por client_id ou nome
+    const uniqueClients = [];
+    const seen = new Set();
+    (data || []).forEach(a => {
+      const key = a.client_id || a.client_name;
+      if (!seen.has(key)) {
+        seen.add(key);
+        uniqueClients.push(a);
+      }
+    });
+
+    setDrilldown({
+      title: 'Clientes Únicos Atendidos no Período',
+      subtitle: `${uniqueClients.length} cliente(s) distinto(s) com atendimento finalizado entre ${fmtDate(from)} e ${fmtDate(to)}`,
+      loading: false,
+      items: uniqueClients,
+      columns: [
+        { key: 'client_name', label: 'Paciente' },
+        { key: 'client_phone', label: 'Telefone' },
+        { key: 'procedure', label: 'Último Procedimento no Período' },
+        { key: 'appointment_date', label: 'Data', render: it => fmtDate(it.appointment_date) },
+      ],
+    });
+  };
+
+  // Detalhamento de Interessados
+  const openLeadsDrilldown = async () => {
+    setDrilldown({ title: 'Novos Interessados no Período', subtitle: `Período: ${fmtDate(from)} a ${fmtDate(to)}`, loading: true, items: [] });
+    const { data } = await supabase
+      .from('crm_leads')
+      .select('id, nome, telefone, origem, servico_interesse, status, created_at, appointment_id')
+      .gte('created_at', from + 'T00:00:00Z')
+      .lte('created_at', to + 'T23:59:59Z')
+      .order('created_at', { ascending: false });
+
+    setDrilldown({
+      title: 'Interessados Registrados no CRM',
+      subtitle: `${data?.length || 0} lead(s) criado(s) no período`,
+      loading: false,
+      items: data || [],
+      columns: [
+        { key: 'nome', label: 'Nome' },
+        { key: 'origem', label: 'Origem', render: it => it.origem || 'Não informada' },
+        { key: 'servico_interesse', label: 'Interesse' },
+        { key: 'status', label: 'Etapa do CRM' },
+        { key: 'appointment_id', label: 'Agendamento', render: it => it.appointment_id ? 'Vinculado' : 'Sem agendamento' },
+        { key: 'created_at', label: 'Data de Entrada', render: it => fmtDate(it.created_at) },
+      ],
+    });
+  };
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
 
-      {/* Período */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-        <span style={{ fontSize: 12, color: 'var(--text-muted)', marginRight: 4 }}>Período:</span>
-        {PERIOD_PRESETS.map(p => (
-          <button
-            key={p.key}
-            onClick={() => onPeriodChange(p.key)}
-            style={{
-              padding: '5px 14px', borderRadius: 20, fontSize: 12, fontWeight: 500,
-              border: periodPreset === p.key ? '1px solid #8B5CF6' : '1px solid var(--border)',
-              background: periodPreset === p.key ? '#8B5CF620' : 'transparent',
-              color: periodPreset === p.key ? '#8B5CF6' : 'var(--text-muted)',
-              cursor: 'pointer',
-            }}
-          >{p.label}</button>
-        ))}
-        <span style={{ fontSize: 11, color: 'var(--text-muted)', marginLeft: 4 }}>
-          {fmtDate(from)} – {fmtDate(to)}
-        </span>
-        <button onClick={load} style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}>
-          <RefreshCw size={14} style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
+      {/* Barra de Período e Ações */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Período:</span>
+          {PERIOD_PRESETS.map(p => (
+            <button
+              key={p.key}
+              onClick={() => onPeriodChange(p.key)}
+              style={{
+                padding: '5px 14px', borderRadius: 20, fontSize: 12, fontWeight: 500,
+                border: periodPreset === p.key ? '1px solid #8B5CF6' : '1px solid var(--border)',
+                background: periodPreset === p.key ? '#8B5CF620' : 'transparent',
+                color: periodPreset === p.key ? '#8B5CF6' : 'var(--text-muted)',
+                cursor: 'pointer',
+              }}
+            >
+              {p.label}
+            </button>
+          ))}
+          <span style={{ fontSize: 11, color: 'var(--text-muted)', marginLeft: 4 }}>
+            ({fmtDate(from)} – {fmtDate(to)})
+          </span>
+          <button onClick={load} title="Atualizar dados" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}>
+            <RefreshCw size={14} style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
+          </button>
+        </div>
+
+        <button
+          className="btn btn-ghost"
+          style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}
+          onClick={() => setShowSettings(true)}
+        >
+          <Settings size={14} /> Metas e Definições
         </button>
       </div>
 
@@ -333,7 +1023,7 @@ function VisaoGeral({ periodPreset, onPeriodChange }) {
         </div>
       )}
 
-      {/* Indicadores principais */}
+      {/* 4 Indicadores Principais */}
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
         <MetricCard
           label="Clientes atendidos"
@@ -343,6 +1033,7 @@ function VisaoGeral({ periodPreset, onPeriodChange }) {
           icon={Users}
           color="#8B5CF6"
           loading={loading}
+          onClick={openAttendedDrilldown}
         />
         <MetricCard
           label="Clientes que retornaram"
@@ -352,28 +1043,49 @@ function VisaoGeral({ periodPreset, onPeriodChange }) {
           icon={RefreshCw}
           color="#10B981"
           loading={loading}
+          onClick={() => {
+            if (onSwitchTab) onSwitchTab('clientes-publicos', 'sem_retorno');
+          }}
         />
         <MetricCard
           label="Interessados registrados"
           value={m.interessados}
           sublabel={m.conversao_agendamento != null
-            ? `${m.leads_com_agendamento} com agendamento (${m.conversao_agendamento}%)`
+            ? `${m.leads_com_agendamento} com agendamento válido (${m.conversao_agendamento}%)`
             : `${m.leads_com_agendamento ?? '—'} com agendamento vinculado`}
-          note="Leads criados no CRM no período. Conversão: coorte com appointment_id."
+          note="Leads criados no CRM no período. Conversão: coorte com agendamento não cancelado."
           icon={UserPlus}
           color="#3B82F6"
           loading={loading}
+          onClick={openLeadsDrilldown}
         />
-        <MetricCard
-          label="Recebimentos confirmados"
-          unavailable
-          note="sheet_transactions.client é texto sem FK para clients."
-          icon={TrendingUp}
-          loading={loading}
-        />
+
+        {/* Recebimentos confirmados e conciliados */}
+        {m.receita_status === 'disponivel' || m.receita_status === 'parcial' ? (
+          <MetricCard
+            label="Recebimentos confirmados"
+            value={fmtBRL(m.receita_liquida_vinculada)}
+            sublabel={m.ticket_medio_vinculado ? `Ticket médio: ${fmtBRL(m.ticket_medio_vinculado)}` : 'Valores conciliados'}
+            note={m.receita_nota}
+            icon={TrendingUp}
+            color="#059669"
+            loading={loading}
+            badge={`${m.saude_base?.cobertura_financeira_pct || 0}% conciliado`}
+            onClick={() => setShowReconciliation(true)}
+          />
+        ) : (
+          <MetricCard
+            label="Recebimentos confirmados"
+            unavailable
+            note={m.receita_nota || 'sheet_transactions.client é texto sem FK. Associe na conciliação para habilitar valores.'}
+            icon={TrendingUp}
+            loading={loading}
+            onClick={() => setShowReconciliation(true)}
+          />
+        )}
       </div>
 
-      {/* Oportunidades agora (retrato atual, não período) */}
+      {/* Retrato da Operação: Onde focar agora */}
       <div>
         <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '0 0 10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5 }}>
           Agora — retrato da operação
@@ -381,372 +1093,782 @@ function VisaoGeral({ periodPreset, onPeriodChange }) {
         <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
           <ActionCard
             label="retornos pendentes"
-            description="Próxima ação vencida, não concluída, lead aberto"
+            description="Próxima ação vencida, não concluída em lead aberto (exclui arquivados)"
             count={loading ? null : (m.retornos_pendentes ?? 0)}
             color="#DC2626"
             icon={AlertTriangle}
             loading={loading}
-            actionLabel="Ver no CRM →"
-            onAction={() => window.location.href = '/crm'}
+            actionLabel="Abrir CRM atrasados →"
+            onAction={() => window.location.href = '/crm?filtro=atrasados'}
           />
           <ActionCard
             label="sem próximo passo"
-            description="Lead aberto sem próxima ação definida"
-            count={loading ? null : (m.leads_sem_proximo_passo ?? 0)}
+            description="Lead aberto sem próxima ação definida no CRM"
+            count={loading ? null : (m.interessados_sem_acao ?? 0)}
             color="#D97706"
             icon={Clock}
             loading={loading}
-            actionLabel="Ver no CRM →"
-            onAction={() => window.location.href = '/crm'}
+            actionLabel="Abrir CRM sem ação →"
+            onAction={() => window.location.href = '/crm?filtro=sem_acao'}
           />
-          <div style={{
-            background: 'var(--bg-card)',
-            border: '1px dashed var(--border)',
-            borderRadius: 12,
-            padding: '18px 20px',
-            flex: 1, minWidth: 200,
-            display: 'flex', alignItems: 'center', gap: 12,
-          }}>
-            <CheckCircle size={20} style={{ color: 'var(--text-muted)' }} />
-            <span style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.4 }}>
-              Configure segmentos de retorno em <strong>Clientes e Públicos</strong> para criar um terceiro cartão personalizado.
-            </span>
-          </div>
+          <ActionCard
+            label="revisar relacionamento"
+            description="Clientes inativos ou sem retorno recente para reativação"
+            count={m.clientes_atendidos ? Math.max(0, (m.clientes_atendidos - (m.clientes_retorno || 0))) : 0}
+            color="#8B5CF6"
+            icon={CheckCircle}
+            loading={loading}
+            actionLabel="Revisar Clientes →"
+            onAction={() => {
+              if (onSwitchTab) onSwitchTab('clientes-publicos', 'sem_retorno');
+            }}
+          />
         </div>
       </div>
 
-      {/* Recebimentos — card de ausência */}
-      <RevenueUnavailableCard />
+      {/* Faixa de Qualidade dos Dados e Cobertura */}
+      <div style={{
+        background: 'var(--bg-card)',
+        border: '1px solid var(--border)',
+        borderRadius: 12,
+        padding: '16px 20px',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        flexWrap: 'wrap',
+        gap: 16,
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flex: 1, minWidth: 260 }}>
+          <Info size={18} style={{ color: '#8B5CF6', flexShrink: 0 }} />
+          <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+            <strong style={{ color: 'var(--text-dark)' }}>Saúde da Base e Conciliação:</strong>
+            {' '}{m.saude_base?.total_appointments ?? 0} atendimentos finalizados ({m.saude_base?.pct_com_client ?? 0}% com paciente vinculado).
+            {' '}• {m.saude_base?.transacoes_vinculadas ?? 0} de {m.saude_base?.transacoes_total ?? 0} lançamentos conciliados ({m.saude_base?.cobertura_financeira_pct ?? 0}%).
+          </div>
+        </div>
 
-      {/* Qualidade dos dados */}
-      <CoverageStrip cobertura={m.cobertura} loading={loading} />
+        <button
+          className="btn btn-primary"
+          style={{ fontSize: 12, padding: '7px 16px', display: 'flex', alignItems: 'center', gap: 6 }}
+          onClick={() => setShowReconciliation(true)}
+        >
+          <DollarSign size={14} /> Conciliação Financeira
+        </button>
+      </div>
+
+      {/* Modais de drilldown e conciliação */}
+      {drilldown && (
+        <RecordsModal
+          title={drilldown.title}
+          subtitle={drilldown.subtitle}
+          items={drilldown.items}
+          loading={drilldown.loading}
+          columns={drilldown.columns}
+          onClose={() => setDrilldown(null)}
+        />
+      )}
+
+      {showReconciliation && (
+        <FinancialReconciliationModal
+          from={from}
+          to={to}
+          onClose={() => setShowReconciliation(false)}
+          onRefreshMetrics={load}
+        />
+      )}
+
+      {showSettings && (
+        <CommercialSettingsModal
+          onClose={() => setShowSettings(false)}
+          onSaved={load}
+        />
+      )}
 
     </div>
   );
 }
 
-// ─── Visão: Clientes e Públicos ──────────────────────────────────────────────
+// ─── Visão 2: Clientes e Públicos ─────────────────────────────────────────────
 
-function ClientesPublicos({ periodPreset }) {
-  const { user } = useAuth();
-  const [subTab, setSubTab] = useState('rfm');
+function ClientesPublicos({ periodPreset, initialRfmFilter = 'atendidos_periodo' }) {
+  const { user, canEdit } = useAuth();
+  const [subTab, setSubTab] = useState('rfm'); // 'rfm' | 'segmentos' | 'icp'
+
+  // RFM states
   const [rfmData, setRfmData] = useState([]);
   const [rfmLoading, setRfmLoading] = useState(false);
   const [rfmError, setRfmError] = useState(null);
+  const [rfmFilterMode, setRfmFilterMode] = useState(initialRfmFilter);
+  const [rfmPage, setRfmPage] = useState(1);
+  const [rfmPageSize] = useState(25);
+  const [rfmTotalCount, setRfmTotalCount] = useState(0);
 
+  // Segmentos states
   const [segments, setSegments] = useState([]);
   const [segLoading, setSegLoading] = useState(false);
   const [showSegEditor, setShowSegEditor] = useState(false);
   const [editingSeg, setEditingSeg] = useState(null);
+  const [segConflictError, setSegConflictError] = useState(null);
 
+  // Ações de Ideia e Campanha
+  const [ideaModalSegment, setIdeaModalSegment] = useState(null);
+  const [campaignModalSegment, setCampaignModalSegment] = useState(null);
+  const [feedbackToast, setFeedbackToast] = useState(null);
+
+  // ICP states
   const [icpProfiles, setIcpProfiles] = useState([]);
   const [icpLoading, setIcpLoading] = useState(false);
   const [showIcpForm, setShowIcpForm] = useState(false);
-  const [icpForm, setIcpForm] = useState({ name: '', necessidades: '', servicos_interesse: [], regiao: '', criterios_relacionamento: '', responsavel: '', status: 'hipotese' });
+  const [editingIcp, setEditingIcp] = useState(null);
+  const [icpForm, setIcpForm] = useState({
+    name: '', necessidades: '', servicos_interesse: '', regiao: '',
+    criterios_relacionamento: '', responsavel: '', segment_id: '', status: 'hipotese',
+  });
 
   const { from, to } = useMemo(() => getDateRange(periodPreset), [periodPreset]);
 
-  // Carregar RFM
-  useEffect(() => {
-    if (subTab !== 'rfm') return;
+  // Carrega RFM com suporte a paginação e modo de filtro
+  const loadRFM = useCallback(async () => {
     setRfmLoading(true);
-    fetchClientRFM(from, to, 50, 0).then(({ data, error }) => {
-      if (error) setRfmError(error?.message || 'Erro ao carregar dados');
-      else { setRfmData(data || []); setRfmError(null); }
-      setRfmLoading(false);
-    });
-  }, [subTab, from, to]);
+    setRfmError(null);
+    const offset = (rfmPage - 1) * rfmPageSize;
+    const { data, error } = await fetchClientRFM(from, to, rfmPageSize, offset, rfmFilterMode);
+    if (error) {
+      setRfmError(error.message || 'Erro ao carregar dados RFM');
+    } else {
+      setRfmData(data || []);
+      if (data && data[0] && data[0].total_count !== undefined) {
+        setRfmTotalCount(Number(data[0].total_count));
+      } else {
+        setRfmTotalCount((data || []).length);
+      }
+    }
+    setRfmLoading(false);
+  }, [from, to, rfmPage, rfmPageSize, rfmFilterMode]);
 
-  // Carregar segmentos
   useEffect(() => {
-    if (subTab !== 'segmentos') return;
+    if (subTab === 'rfm') loadRFM();
+  }, [subTab, loadRFM]);
+
+  // Carrega segmentos
+  const loadSegments = useCallback(async () => {
     setSegLoading(true);
-    fetchSegments().then(({ data }) => {
-      setSegments(data || []);
-      setSegLoading(false);
-    });
-  }, [subTab]);
+    const { data, error } = await fetchSegments();
+    if (!error) setSegments(data || []);
+    setSegLoading(false);
+  }, []);
 
-  // Carregar ICP
   useEffect(() => {
-    if (subTab !== 'icp') return;
+    if (subTab === 'segmentos') loadSegments();
+  }, [subTab, loadSegments]);
+
+  // Carrega ICP
+  const loadICP = useCallback(async () => {
     setIcpLoading(true);
-    fetchIcpProfiles().then(({ data }) => {
-      setIcpProfiles(data || []);
-      setIcpLoading(false);
-    });
-  }, [subTab]);
+    const { data, error } = await fetchIcpProfiles();
+    if (!error) setIcpProfiles(data || []);
+    setIcpLoading(false);
+  }, []);
 
-  const handleArchiveSeg = async (id) => {
-    await archiveSegment(id);
-    setSegments(prev => prev.filter(s => s.id !== id));
-  };
+  useEffect(() => {
+    if (subTab === 'icp') loadICP();
+  }, [subTab, loadICP]);
 
-  const handleSaveIcp = async () => {
-    const { data, error } = await saveIcpProfile(icpForm);
-    if (!error && data) {
-      setIcpProfiles(prev => [data, ...prev]);
-      setShowIcpForm(false);
-      setIcpForm({ name: '', necessidades: '', servicos_interesse: [], regiao: '', criterios_relacionamento: '', responsavel: '', status: 'hipotese' });
+  const handleArchiveSeg = async (seg) => {
+    if (!confirm(`Deseja arquivar o segmento "${seg.name}"?`)) return;
+    const { error } = await archiveSegment(seg.id, seg.version);
+    if (error) {
+      alert(error.message || 'Erro ao arquivar segmento');
+    } else {
+      setSegments(prev => prev.filter(s => s.id !== seg.id));
     }
   };
 
+  const handleSaveIcp = async () => {
+    if (!icpForm.name.trim()) {
+      alert('Informe o nome do perfil.');
+      return;
+    }
+    const servicosArray = typeof icpForm.servicos_interesse === 'string'
+      ? icpForm.servicos_interesse.split(',').map(s => s.trim()).filter(Boolean)
+      : icpForm.servicos_interesse;
+
+    const payload = {
+      ...icpForm,
+      servicos_interesse: servicosArray,
+      segment_id: icpForm.segment_id || null,
+    };
+
+    let res;
+    if (editingIcp) {
+      res = await updateIcpProfile(editingIcp.id, payload);
+    } else {
+      res = await saveIcpProfile(payload);
+    }
+
+    if (res.error) {
+      alert('Erro ao salvar ICP: ' + res.error.message);
+    } else {
+      loadICP();
+      setShowIcpForm(false);
+      setEditingIcp(null);
+      setIcpForm({ name: '', necessidades: '', servicos_interesse: '', regiao: '', criterios_relacionamento: '', responsavel: '', segment_id: '', status: 'hipotese' });
+    }
+  };
+
+  const handleValidateIcp = async (icp) => {
+    if (!confirm(`Confirmar validação do perfil ICP "${icp.name}" pela gestão?`)) return;
+    const authorName = user?.user_metadata?.full_name || user?.email || 'Gestão';
+    const { error } = await validateIcpProfile(icp.id, user?.id, authorName);
+    if (error) {
+      alert('Erro ao validar ICP: ' + error.message);
+    } else {
+      loadICP();
+      setFeedbackToast('Perfil ICP validado formalmente pela gestão!');
+      setTimeout(() => setFeedbackToast(null), 4000);
+    }
+  };
+
+  const totalPages = Math.ceil(rfmTotalCount / rfmPageSize) || 1;
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+      {feedbackToast && (
+        <div style={{ background: '#10B98118', border: '1px solid #10B98144', borderRadius: 8, padding: '10px 16px', color: '#10B981', fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <CheckCircle size={16} /> {feedbackToast}
+        </div>
+      )}
+
       {/* Sub-tabs */}
-      <div style={{ display: 'flex', gap: 4, borderBottom: '1px solid var(--border)', paddingBottom: 0 }}>
+      <div style={{ display: 'flex', gap: 4, borderBottom: '1px solid var(--border)' }}>
         {[
-          { key: 'rfm', label: 'Ficha RFM' },
-          { key: 'segmentos', label: 'Segmentos' },
-          { key: 'icp', label: 'Perfis ICP' },
+          { key: 'rfm', label: 'Ficha RFM de Atendimento' },
+          { key: 'segmentos', label: 'Públicos e Segmentos' },
+          { key: 'icp', label: 'Perfis de Clientes (ICP)' },
         ].map(t => (
           <button
             key={t.key}
             onClick={() => setSubTab(t.key)}
             style={{
-              padding: '8px 16px', background: 'none',
+              padding: '9px 18px', background: 'none',
               border: 'none', borderBottom: subTab === t.key ? '2px solid #8B5CF6' : '2px solid transparent',
               color: subTab === t.key ? '#8B5CF6' : 'var(--text-muted)',
               fontWeight: subTab === t.key ? 600 : 400,
               fontSize: 13, cursor: 'pointer',
               marginBottom: -1,
             }}
-          >{t.label}</button>
+          >
+            {t.label}
+          </button>
         ))}
       </div>
 
-      {/* ── Ficha RFM ── */}
+      {/* ── Sub-Aba: Ficha RFM ── */}
       {subTab === 'rfm' && (
-        <div>
-          <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 12 }}>
-            <p style={{ margin: 0, fontSize: 13, color: 'var(--text-muted)', flex: 1 }}>
-              Recência e frequência de atendimento. <strong>Período:</strong> {fmtDate(from)} – {fmtDate(to)}.
-              Valor (V do RFM) indisponível: <code>sheet_transactions.client</code> é texto sem FK.
-            </p>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Filtrar população:</span>
+              {[
+                { key: 'atendidos_periodo', label: 'Atendidos no período' },
+                { key: 'sem_retorno',       label: 'Sem retorno no período' },
+                { key: 'todos',             label: 'Todos com histórico' },
+              ].map(f => (
+                <button
+                  key={f.key}
+                  onClick={() => { setRfmFilterMode(f.key); setRfmPage(1); }}
+                  style={{
+                    padding: '4px 12px', borderRadius: 16, fontSize: 12,
+                    border: rfmFilterMode === f.key ? '1px solid #8B5CF6' : '1px solid var(--border)',
+                    background: rfmFilterMode === f.key ? '#8B5CF618' : 'transparent',
+                    color: rfmFilterMode === f.key ? '#8B5CF6' : 'var(--text-muted)',
+                    cursor: 'pointer', fontWeight: 500,
+                  }}
+                >
+                  {f.label}
+                </button>
+              ))}
+            </div>
+
+            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+              Data de corte: <strong>{fmtDate(to)}</strong>
+            </span>
           </div>
+
           {rfmLoading ? (
-            <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>Carregando…</p>
+            <p style={{ color: 'var(--text-muted)', padding: '30px 0', textAlign: 'center' }}>Carregando ficha RFM…</p>
           ) : rfmError ? (
-            <p style={{ color: '#DC2626', fontSize: 13 }}>{rfmError}</p>
+            <div style={{ background: '#DC262618', padding: 12, borderRadius: 8, color: '#DC2626', fontSize: 13 }}>
+              {rfmError}
+            </div>
           ) : rfmData.length === 0 ? (
-            <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>
-              Nenhum cliente com atendimento finalizado no período selecionado.
+            <p style={{ color: 'var(--text-muted)', padding: '30px 0', textAlign: 'center' }}>
+              Nenhum cliente atende ao filtro no período selecionado.
             </p>
           ) : (
-            <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-                <thead>
-                  <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                    {['Cliente', 'Origem', 'Primeiro atend.', 'Último atend.', 'Dias sem atend.', 'Atend. no período', 'Total histórico'].map(h => (
-                      <th key={h} style={{ padding: '8px 12px', textAlign: 'left', color: 'var(--text-muted)', fontWeight: 600, whiteSpace: 'nowrap' }}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {rfmData.map((r, i) => (
-                    <tr key={r.client_id} style={{ borderBottom: '1px solid var(--border)', background: i % 2 === 0 ? 'transparent' : 'var(--bg-main)' }}>
-                      <td style={{ padding: '8px 12px', color: 'var(--text-dark)', fontWeight: 500 }}>{r.client_name}</td>
-                      <td style={{ padding: '8px 12px', color: 'var(--text-muted)' }}>
-                        {r.client_source
-                          ? <span style={{ background: '#8B5CF618', color: '#8B5CF6', padding: '2px 8px', borderRadius: 10, fontSize: 11 }}>{r.client_source}</span>
-                          : <span style={{ color: 'var(--text-muted)', fontStyle: 'italic', fontSize: 11 }}>Não informada</span>
-                        }
-                      </td>
-                      <td style={{ padding: '8px 12px', color: 'var(--text-muted)' }}>{fmtDate(r.primeiro_atendimento)}</td>
-                      <td style={{ padding: '8px 12px', color: 'var(--text-muted)' }}>{fmtDate(r.ultimo_atendimento)}</td>
-                      <td style={{ padding: '8px 12px' }}>
-                        <span style={{
-                          color: r.dias_sem_atendimento > 60 ? '#DC2626' : r.dias_sem_atendimento > 30 ? '#D97706' : '#10B981',
-                          fontWeight: 600,
-                        }}>{r.dias_sem_atendimento}d</span>
-                      </td>
-                      <td style={{ padding: '8px 12px', color: 'var(--text-dark)', textAlign: 'center' }}>{r.atendimentos_periodo}</td>
-                      <td style={{ padding: '8px 12px', color: 'var(--text-muted)', textAlign: 'center' }}>{r.atendimentos_total}</td>
+            <>
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                  <thead>
+                    <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                      {['Paciente', 'Origem', 'Primeiro atend.', 'Último atend. (corte)', 'Dias sem atend.', 'Atend. no período', 'Atend. total', 'Valor no período', 'Valor histórico'].map(h => (
+                        <th key={h} style={{ padding: '8px 12px', textAlign: 'left', color: 'var(--text-muted)', fontWeight: 600, whiteSpace: 'nowrap' }}>
+                          {h}
+                        </th>
+                      ))}
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {rfmData.map((r, i) => (
+                      <tr key={r.client_id} style={{ borderBottom: '1px solid var(--border)', background: i % 2 === 0 ? 'transparent' : 'var(--bg-main)' }}>
+                        <td style={{ padding: '9px 12px', color: 'var(--text-dark)', fontWeight: 600 }}>{r.client_name}</td>
+                        <td style={{ padding: '9px 12px' }}>
+                          {r.client_source ? (
+                            <span style={{ background: '#8B5CF618', color: '#8B5CF6', padding: '2px 8px', borderRadius: 10, fontSize: 11 }}>
+                              {r.client_source}
+                            </span>
+                          ) : (
+                            <span style={{ color: 'var(--text-muted)', fontStyle: 'italic', fontSize: 11 }}>Não informada</span>
+                          )}
+                        </td>
+                        <td style={{ padding: '9px 12px', color: 'var(--text-muted)' }}>{fmtDate(r.primeiro_atendimento)}</td>
+                        <td style={{ padding: '9px 12px', color: 'var(--text-muted)' }}>{fmtDate(r.ultimo_atendimento)}</td>
+                        <td style={{ padding: '9px 12px' }}>
+                          <span style={{
+                            color: r.dias_sem_atendimento > 90 ? '#DC2626' : r.dias_sem_atendimento > 45 ? '#D97706' : '#10B981',
+                            fontWeight: 600,
+                          }}>
+                            {r.dias_sem_atendimento != null ? `${r.dias_sem_atendimento}d` : '—'}
+                          </span>
+                        </td>
+                        <td style={{ padding: '9px 12px', color: 'var(--text-dark)', textAlign: 'center', fontWeight: 600 }}>
+                          {r.atendimentos_periodo}
+                        </td>
+                        <td style={{ padding: '9px 12px', color: 'var(--text-muted)', textAlign: 'center' }}>
+                          {r.atendimentos_total}
+                        </td>
+                        <td style={{ padding: '9px 12px', color: Number(r.valor_periodo) > 0 ? '#10B981' : 'var(--text-muted)' }}>
+                          {Number(r.valor_periodo) > 0 ? fmtBRL(r.valor_periodo) : '—'}
+                        </td>
+                        <td style={{ padding: '9px 12px', color: Number(r.valor_total) > 0 ? 'var(--text-dark)' : 'var(--text-muted)' }}>
+                          {Number(r.valor_total) > 0 ? fmtBRL(r.valor_total) : '—'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Paginação */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 10, flexWrap: 'wrap', gap: 10 }}>
+                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                  Total: {rfmTotalCount} cliente(s) • Página {rfmPage} de {totalPages}
+                </span>
+
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button
+                    className="btn btn-ghost"
+                    style={{ fontSize: 12, padding: '4px 10px' }}
+                    disabled={rfmPage <= 1}
+                    onClick={() => setRfmPage(p => Math.max(1, p - 1))}
+                  >
+                    <ChevronLeft size={14} /> Anterior
+                  </button>
+                  <button
+                    className="btn btn-ghost"
+                    style={{ fontSize: 12, padding: '4px 10px' }}
+                    disabled={rfmPage >= totalPages}
+                    onClick={() => setRfmPage(p => p + 1)}
+                  >
+                    Próxima <ChevronRight size={14} />
+                  </button>
+                </div>
+              </div>
+            </>
           )}
         </div>
       )}
 
-      {/* ── Segmentos ── */}
+      {/* ── Sub-Aba: Públicos e Segmentos ── */}
       {subTab === 'segmentos' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <p style={{ margin: 0, fontSize: 13, color: 'var(--text-muted)' }}>
-              Segmentos salvos com critérios versionados. Pertencer a um segmento não equivale a autorizar envio.
-            </p>
-            <button
-              onClick={() => { setEditingSeg(null); setShowSegEditor(true); }}
-              style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 16px', background: '#8B5CF6', border: 'none', borderRadius: 8, color: '#fff', fontSize: 13, fontWeight: 500, cursor: 'pointer' }}
-            >
-              <Plus size={14} /> Novo segmento
-            </button>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
+            <div>
+              <p style={{ margin: 0, fontSize: 13, color: 'var(--text-muted)' }}>
+                Segmentos versionados com critérios por serviço, frequência e recência.
+              </p>
+              <p style={{ margin: '2px 0 0', fontSize: 11, color: 'var(--text-muted)' }}>
+                Pertencer a um segmento não equivale a autorizar envio. Ações não disparam mensagens automaticamente.
+              </p>
+            </div>
+            {canEdit('marketing') && (
+              <button
+                className="btn btn-primary"
+                style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}
+                onClick={() => { setEditingSeg(null); setShowSegEditor(true); setSegConflictError(null); }}
+              >
+                <Plus size={14} /> Criar Novo Público
+              </button>
+            )}
           </div>
+
+          {segConflictError && (
+            <div style={{ background: '#DC262618', border: '1px solid #DC262644', borderRadius: 8, padding: '10px 16px', color: '#DC2626', fontSize: 13 }}>
+              {segConflictError}
+            </div>
+          )}
 
           {showSegEditor && (
             <SegmentEditor
               initial={editingSeg}
-              segments={segments}
               onSave={async (seg) => {
-                const authorName = user?.user_metadata?.full_name || user?.email;
+                setSegConflictError(null);
+                const authorName = user?.user_metadata?.full_name || user?.email || 'Gestão';
                 let res;
                 if (editingSeg?.id) {
                   res = await updateSegment(editingSeg.id, seg, editingSeg.version);
                 } else {
                   res = await saveSegment(seg, user?.id, authorName);
                 }
+
                 if (res.error) {
-                  alert(res.error.message || 'Erro ao salvar segmento');
+                  if (res.error.code === 'CONFLICT') {
+                    setSegConflictError(res.error.message);
+                  } else {
+                    alert('Erro ao salvar segmento: ' + res.error.message);
+                  }
                   return;
                 }
-                fetchSegments().then(({ data }) => setSegments(data || []));
+                loadSegments();
                 setShowSegEditor(false);
                 setEditingSeg(null);
               }}
-              onClose={() => { setShowSegEditor(false); setEditingSeg(null); }}
+              onClose={() => { setShowSegEditor(false); setEditingSeg(null); setSegConflictError(null); }}
             />
           )}
 
           {segLoading ? (
-            <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>Carregando…</p>
+            <p style={{ color: 'var(--text-muted)', padding: '30px', textAlign: 'center' }}>Carregando segmentos…</p>
           ) : segments.length === 0 ? (
-            <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>Nenhum segmento salvo ainda.</p>
+            <p style={{ color: 'var(--text-muted)', padding: '30px', textAlign: 'center' }}>Nenhum segmento salvo ainda.</p>
           ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               {segments.map(seg => (
-                <div key={seg.id} style={{
-                  background: 'var(--bg-card)',
-                  border: '1px solid var(--border)',
-                  borderRadius: 10,
-                  padding: '14px 18px',
-                  display: 'flex', alignItems: 'center', gap: 12,
-                }}>
-                  <Layers size={16} style={{ color: '#8B5CF6', flexShrink: 0 }} />
-                  <div style={{ flex: 1 }}>
+                <div
+                  key={seg.id}
+                  style={{
+                    background: 'var(--bg-card)',
+                    border: '1px solid var(--border)',
+                    borderRadius: 12,
+                    padding: '16px 20px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    flexWrap: 'wrap',
+                    gap: 14,
+                  }}
+                >
+                  <div style={{ flex: 1, minWidth: 260 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <Layers size={16} style={{ color: '#8B5CF6' }} />
                       <span style={{ fontWeight: 600, color: 'var(--text-dark)', fontSize: 14 }}>{seg.name}</span>
                       <span style={{
-                        fontSize: 10, padding: '2px 8px', borderRadius: 10,
+                        fontSize: 10, padding: '2px 8px', borderRadius: 10, fontWeight: 700,
                         background: seg.entity_base === 'lead' ? '#3B82F618' : '#10B98118',
                         color: seg.entity_base === 'lead' ? '#3B82F6' : '#10B981',
-                        fontWeight: 600, textTransform: 'uppercase',
-                      }}>{seg.entity_base}</span>
+                        textTransform: 'uppercase',
+                      }}>
+                        {seg.entity_base === 'lead' ? 'Interessados' : 'Clientes'}
+                      </span>
                       <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>v{seg.version}</span>
                     </div>
+
                     {seg.description && (
-                      <p style={{ margin: '2px 0 0', fontSize: 12, color: 'var(--text-muted)' }}>{seg.description}</p>
+                      <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--text-muted)' }}>{seg.description}</p>
                     )}
-                    <p style={{ margin: '4px 0 0', fontSize: 11, color: 'var(--text-muted)' }}>
-                      {seg.conditions?.length ?? 0} condição(ões) · autor: {seg.author_name || '—'}
-                    </p>
+
+                    <div style={{ display: 'flex', gap: 12, marginTop: 6, fontSize: 11, color: 'var(--text-muted)' }}>
+                      <span>{seg.conditions?.length || 0} critério(s)</span>
+                      {seg.janela_dias && <span>Janela: {seg.janela_dias} dias</span>}
+                      <span>Criado por {seg.author_name || 'Gestor'}</span>
+                    </div>
                   </div>
-                  <div style={{ display: 'flex', gap: 6 }}>
+
+                  {/* Ações do Segmento */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                     <button
-                      onClick={() => { setEditingSeg(seg); setShowSegEditor(true); }}
-                      style={{ padding: '5px 10px', background: 'none', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-muted)', fontSize: 12, cursor: 'pointer' }}
-                    >Editar</button>
+                      className="btn btn-ghost"
+                      style={{ fontSize: 12, padding: '5px 10px', display: 'flex', alignItems: 'center', gap: 4 }}
+                      onClick={() => setIdeaModalSegment(seg)}
+                    >
+                      <BookOpen size={13} style={{ color: '#8B5CF6' }} /> Criar Ideia
+                    </button>
+
                     <button
-                      onClick={() => handleArchiveSeg(seg.id)}
-                      style={{ padding: '5px 10px', background: 'none', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-muted)', fontSize: 12, cursor: 'pointer' }}
-                    ><Archive size={12} /></button>
+                      className="btn btn-ghost"
+                      style={{ fontSize: 12, padding: '5px 10px', display: 'flex', alignItems: 'center', gap: 4 }}
+                      onClick={() => setCampaignModalSegment(seg)}
+                    >
+                      <Link2 size={13} style={{ color: '#3B82F6' }} /> Vincular Campanha
+                    </button>
+
+                    {canEdit('marketing') && (
+                      <>
+                        <button
+                          className="btn btn-ghost"
+                          style={{ fontSize: 12, padding: '5px 10px' }}
+                          onClick={() => { setEditingSeg(seg); setShowSegEditor(true); }}
+                        >
+                          <Edit3 size={13} />
+                        </button>
+                        <button
+                          className="btn btn-ghost"
+                          style={{ fontSize: 12, padding: '5px 10px', color: '#DC2626' }}
+                          onClick={() => handleArchiveSeg(seg)}
+                          title="Arquivar segmento"
+                        >
+                          <Archive size={13} />
+                        </button>
+                      </>
+                    )}
                   </div>
                 </div>
               ))}
             </div>
           )}
+
+          {/* Modal de Criar Ideia */}
+          {ideaModalSegment && (
+            <CreateIdeaFromSegmentModal
+              segment={ideaModalSegment}
+              onClose={() => setIdeaModalSegment(null)}
+              onSuccess={(novaIdeia) => {
+                setFeedbackToast(`Ideia "${novaIdeia.titulo}" criada na lousa com sucesso!`);
+                setTimeout(() => setFeedbackToast(null), 4000);
+              }}
+            />
+          )}
+
+          {/* Modal de Vincular Campanha */}
+          {campaignModalSegment && (
+            <LinkCampaignModal
+              segment={campaignModalSegment}
+              onClose={() => setCampaignModalSegment(null)}
+              onSuccess={() => {
+                setFeedbackToast(`Público vinculado à campanha com snapshot gravado com sucesso!`);
+                setTimeout(() => setFeedbackToast(null), 4000);
+              }}
+            />
+          )}
+
         </div>
       )}
 
-      {/* ── Perfis ICP ── */}
+      {/* ── Sub-Aba: Perfis ICP ── */}
       {subTab === 'icp' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <p style={{ margin: 0, fontSize: 13, color: 'var(--text-muted)' }}>
-              Hipóteses de público ideal sustentadas por segmento e evidência. A gestão valida.
-            </p>
-            <button
-              onClick={() => setShowIcpForm(true)}
-              style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 16px', background: '#8B5CF6', border: 'none', borderRadius: 8, color: '#fff', fontSize: 13, fontWeight: 500, cursor: 'pointer' }}
-            >
-              <Plus size={14} /> Novo perfil
-            </button>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
+            <div>
+              <p style={{ margin: 0, fontSize: 13, color: 'var(--text-muted)' }}>
+                Perfis que queremos atender melhor. Sustentados por evidência de grupos reais e validação explícita.
+              </p>
+              <p style={{ margin: '2px 0 0', fontSize: 11, color: 'var(--text-muted)' }}>
+                Não inferimos diagnósticos ou capacidade financeira. O perfil apoia o foco do atendimento e campanhas.
+              </p>
+            </div>
+            {canEdit('marketing') && (
+              <button
+                className="btn btn-primary"
+                style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}
+                onClick={() => {
+                  setEditingIcp(null);
+                  setIcpForm({ name: '', necessidades: '', servicos_interesse: '', regiao: '', criterios_relacionamento: '', responsavel: '', segment_id: '', status: 'hipotese' });
+                  setShowIcpForm(true);
+                }}
+              >
+                <Plus size={14} /> Novo Perfil ICP
+              </button>
+            )}
           </div>
 
           {showIcpForm && (
             <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 12, padding: 20, display: 'flex', flexDirection: 'column', gap: 12 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <h4 style={{ margin: 0, color: 'var(--text-dark)' }}>Novo perfil ICP</h4>
+                <h4 style={{ margin: 0, color: 'var(--text-dark)' }}>{editingIcp ? 'Editar' : 'Novo'} Perfil ICP</h4>
                 <button onClick={() => setShowIcpForm(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}><X size={18} /></button>
               </div>
-              {[
-                { key: 'name', label: 'Nome do perfil *', placeholder: 'Ex: Mulheres 30-45 de Pinheiros' },
-                { key: 'necessidades', label: 'Necessidades declaradas', placeholder: 'O que buscam?' },
-                { key: 'regiao', label: 'Região', placeholder: 'Bairro, cidade ou área' },
-                { key: 'criterios_relacionamento', label: 'Critérios de relacionamento', placeholder: 'Frequência, serviços, etc.' },
-                { key: 'responsavel', label: 'Responsável', placeholder: '' },
-              ].map(f => (
-                <div key={f.key}>
-                  <label style={{ fontSize: 12, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>{f.label}</label>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div>
+                  <label style={{ fontSize: 12, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Nome do Perfil *</label>
                   <input
                     className="form-input"
-                    placeholder={f.placeholder}
-                    value={icpForm[f.key] || ''}
-                    onChange={e => setIcpForm(prev => ({ ...prev, [f.key]: e.target.value }))}
+                    placeholder="Ex: Pacientes de Manutenção Facial"
+                    value={icpForm.name}
+                    onChange={e => setIcpForm(f => ({ ...f, name: e.target.value }))}
                   />
                 </div>
-              ))}
-              <div>
-                <label style={{ fontSize: 12, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Status</label>
-                <select className="form-select" value={icpForm.status} onChange={e => setIcpForm(prev => ({ ...prev, status: e.target.value }))}>
-                  <option value="hipotese">Hipótese (ainda não validado)</option>
-                  <option value="validado">Validado pela gestão</option>
-                </select>
+                <div>
+                  <label style={{ fontSize: 12, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Região / Bairros</label>
+                  <input
+                    className="form-input"
+                    placeholder="Ex: Pinheiros, Jardins, Itaim"
+                    value={icpForm.regiao}
+                    onChange={e => setIcpForm(f => ({ ...f, regiao: e.target.value }))}
+                  />
+                </div>
               </div>
-              <button
-                onClick={handleSaveIcp}
-                disabled={!icpForm.name}
-                style={{ padding: '8px 20px', background: '#8B5CF6', border: 'none', borderRadius: 8, color: '#fff', fontWeight: 600, cursor: icpForm.name ? 'pointer' : 'not-allowed', opacity: icpForm.name ? 1 : 0.5, alignSelf: 'flex-start' }}
-              ><Save size={14} style={{ marginRight: 6 }} />Salvar perfil</button>
+
+              <div>
+                <label style={{ fontSize: 12, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Necessidades e Dores Declaradas</label>
+                <textarea
+                  className="form-input"
+                  rows={2}
+                  placeholder="Ex: Buscam rejuvenescimento natural sem alterar expressões faciais."
+                  value={icpForm.necessidades}
+                  onChange={e => setIcpForm(f => ({ ...f, necessidades: e.target.value }))}
+                />
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div>
+                  <label style={{ fontSize: 12, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Serviços de Interesse (separados por vírgula)</label>
+                  <input
+                    className="form-input"
+                    placeholder="Botox, Limpeza, Bioestimulador"
+                    value={typeof icpForm.servicos_interesse === 'string' ? icpForm.servicos_interesse : (icpForm.servicos_interesse || []).join(', ')}
+                    onChange={e => setIcpForm(f => ({ ...f, servicos_interesse: e.target.value }))}
+                  />
+                </div>
+                <div>
+                  <label style={{ fontSize: 12, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Público de Referência (Segmento)</label>
+                  <select
+                    className="form-select"
+                    value={icpForm.segment_id}
+                    onChange={e => setIcpForm(f => ({ ...f, segment_id: e.target.value }))}
+                  >
+                    <option value="">Nenhum (definição independente)</option>
+                    {segments.map(s => (
+                      <option key={s.id} value={s.id}>
+                        {s.name} ({s.entity_base})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 8 }}>
+                <button className="btn btn-ghost" onClick={() => setShowIcpForm(false)}>Cancelar</button>
+                <button className="btn btn-primary" onClick={handleSaveIcp}>Salvar Perfil</button>
+              </div>
             </div>
           )}
 
           {icpLoading ? (
-            <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>Carregando…</p>
+            <p style={{ color: 'var(--text-muted)', padding: '30px', textAlign: 'center' }}>Carregando perfis ICP…</p>
           ) : icpProfiles.length === 0 ? (
-            <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>Nenhum perfil ICP cadastrado ainda.</p>
+            <p style={{ color: 'var(--text-muted)', padding: '30px', textAlign: 'center' }}>Nenhum perfil ICP cadastrado ainda.</p>
           ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {icpProfiles.map(p => (
-                <div key={p.id} style={{
-                  background: 'var(--bg-card)', border: '1px solid var(--border)',
-                  borderRadius: 10, padding: '16px 20px',
-                }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
-                    <Star size={16} style={{ color: p.status === 'validado' ? '#10B981' : '#D97706' }} />
-                    <span style={{ fontWeight: 600, color: 'var(--text-dark)' }}>{p.name}</span>
-                    <span style={{
-                      fontSize: 11, padding: '2px 8px', borderRadius: 10, fontWeight: 600,
-                      background: p.status === 'validado' ? '#10B98118' : '#D9770618',
-                      color: p.status === 'validado' ? '#10B981' : '#D97706',
-                    }}>{p.status === 'validado' ? 'Validado pela gestão' : 'Hipótese'}</span>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              {icpProfiles.map(p => {
+                const isValidated = p.status === 'validado';
+                return (
+                  <div
+                    key={p.id}
+                    style={{
+                      background: 'var(--bg-card)',
+                      border: `1px solid ${isValidated ? '#10B98133' : '#D9770633'}`,
+                      borderRadius: 12,
+                      padding: '18px 20px',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 8,
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <Star size={18} style={{ color: isValidated ? '#10B981' : '#D97706' }} />
+                        <span style={{ fontWeight: 700, color: 'var(--text-dark)', fontSize: 15 }}>{p.name}</span>
+                        <span style={{
+                          fontSize: 11, padding: '2px 10px', borderRadius: 12, fontWeight: 700,
+                          background: isValidated ? '#10B98118' : '#D9770618',
+                          color: isValidated ? '#10B981' : '#D97706',
+                          display: 'flex', alignItems: 'center', gap: 4,
+                        }}>
+                          {isValidated ? <><ShieldCheck size={12} /> Validado pela gestão</> : 'Hipótese'}
+                        </span>
+                      </div>
+
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        {!isValidated && canEdit('marketing') && (
+                          <button
+                            className="btn btn-primary"
+                            style={{ fontSize: 11, padding: '4px 10px', background: '#10B981', borderColor: '#10B981' }}
+                            onClick={() => handleValidateIcp(p)}
+                          >
+                            <Check size={13} style={{ marginRight: 4 }} /> Validar pela Gestão
+                          </button>
+                        )}
+                        {canEdit('marketing') && (
+                          <button
+                            className="btn btn-ghost"
+                            style={{ fontSize: 11, padding: '4px 8px' }}
+                            onClick={() => {
+                              setEditingIcp(p);
+                              setIcpForm({
+                                name: p.name,
+                                necessidades: p.necessidades || '',
+                                servicos_interesse: (p.servicos_interesse || []).join(', '),
+                                regiao: p.regiao || '',
+                                criterios_relacionamento: p.criterios_relacionamento || '',
+                                responsavel: p.responsavel || '',
+                                segment_id: p.segment_id || '',
+                                status: p.status || 'hipotese',
+                              });
+                              setShowIcpForm(true);
+                            }}
+                          >
+                            Editar
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {p.necessidades && (
+                      <p style={{ margin: '4px 0 0', fontSize: 13, color: 'var(--text-dark)' }}>
+                        <strong>Necessidades:</strong> {p.necessidades}
+                      </p>
+                    )}
+
+                    <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
+                      {p.regiao && <span><strong>Região:</strong> {p.regiao}</span>}
+                      {p.servicos_interesse?.length > 0 && (
+                        <span><strong>Serviços:</strong> {p.servicos_interesse.join(', ')}</span>
+                      )}
+                      {p.marketing_segments && (
+                        <span><strong>Segmento base:</strong> {p.marketing_segments.name} (v{p.marketing_segments.version})</span>
+                      )}
+                    </div>
+
+                    {isValidated && (
+                      <p style={{ margin: '4px 0 0', fontSize: 11, color: '#10B981' }}>
+                        Validado por {p.validator_name || 'Gestão'} em {fmtDate(p.validated_at)}
+                      </p>
+                    )}
                   </div>
-                  {p.necessidades && <p style={{ margin: '0 0 4px', fontSize: 13, color: 'var(--text-muted)' }}><strong>Necessidades:</strong> {p.necessidades}</p>}
-                  {p.regiao && <p style={{ margin: '0 0 4px', fontSize: 13, color: 'var(--text-muted)' }}><strong>Região:</strong> {p.regiao}</p>}
-                  {p.responsavel && <p style={{ margin: 0, fontSize: 13, color: 'var(--text-muted)' }}><strong>Responsável:</strong> {p.responsavel}</p>}
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
       )}
+
     </div>
   );
 }
 
-// ─── Editor de Segmentos ─────────────────────────────────────────────────────
+// ─── Editor de Segmentos ──────────────────────────────────────────────────────
 
 function SegmentEditor({ initial, onSave, onClose }) {
   const [form, setForm] = useState({
@@ -764,16 +1886,24 @@ function SegmentEditor({ initial, onSave, onClose }) {
   const fields = form.entity_base === 'lead' ? SEGMENT_FIELDS_LEAD : SEGMENT_FIELDS_CLIENT;
 
   const addCondition = () => {
+    const firstField = fields[0];
+    const op = (OPERATORS_BY_TYPE[firstField.type] || OPERATORS_BY_TYPE.text)[0].value;
     setForm(f => ({
       ...f,
-      conditions: [...f.conditions, { field: fields[0].value, operator: 'eq', value: '' }],
+      conditions: [...f.conditions, { field: firstField.value, operator: op, value: '' }],
     }));
   };
 
   const updateCondition = (i, key, val) => {
     setForm(f => {
       const conds = [...f.conditions];
-      conds[i] = { ...conds[i], [key]: val };
+      if (key === 'field') {
+        const fieldMeta = fields.find(fi => fi.value === val);
+        const ops = OPERATORS_BY_TYPE[fieldMeta?.type] || OPERATORS_BY_TYPE.text;
+        conds[i] = { field: val, operator: ops[0].value, value: '' };
+      } else {
+        conds[i] = { ...conds[i], [key]: val };
+      }
       return { ...f, conditions: conds };
     });
   };
@@ -785,23 +1915,35 @@ function SegmentEditor({ initial, onSave, onClose }) {
   const runPreview = async () => {
     setPrevLoading(true);
     setPrevError(null);
-    const { data, error } = await previewSegment(form.entity_base, form.conditions, 10);
-    if (error) { setPrevError(error?.message || 'Erro'); }
-    else if (data?.error) { setPrevError(data.error); }
-    else { setPreview(data); }
+    const { data, error } = await previewSegment(form.entity_base, form.conditions, 10, form.janela_dias);
+    if (error) {
+      setPrevError(error?.message || 'Erro ao calcular prévia');
+    } else if (data?.error) {
+      setPrevError(data.error);
+    } else {
+      setPreview(data);
+    }
     setPrevLoading(false);
   };
 
   const handleSave = async () => {
-    if (!form.name) return;
+    if (!form.name.trim()) return;
     setSaving(true);
-    await onSave({ ...form, janela_dias: form.janela_dias ? Number(form.janela_dias) : null });
+    await onSave({
+      ...form,
+      janela_dias: form.janela_dias ? Number(form.janela_dias) : null,
+    });
     setSaving(false);
   };
 
-  const operatorsFor = (field) => {
-    if (field === 'proxima_acao_prazo') return OPERATORS_DATE;
-    return OPERATORS_TEXT;
+  const getOperatorsForField = (fieldName) => {
+    const meta = fields.find(f => f.value === fieldName);
+    return OPERATORS_BY_TYPE[meta?.type] || OPERATORS_BY_TYPE.text;
+  };
+
+  const isFieldBoolean = (fieldName) => {
+    const meta = fields.find(f => f.value === fieldName);
+    return meta?.type === 'boolean';
   };
 
   const needsValue = (op) => !['is_null', 'not_null'].includes(op);
@@ -815,114 +1957,148 @@ function SegmentEditor({ initial, onSave, onClose }) {
       display: 'flex', flexDirection: 'column', gap: 14,
     }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h4 style={{ margin: 0, color: 'var(--text-dark)' }}>{initial ? 'Editar' : 'Novo'} segmento</h4>
+        <h4 style={{ margin: 0, color: 'var(--text-dark)' }}>{initial ? 'Editar' : 'Novo'} Segmento de Público</h4>
         <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}><X size={18} /></button>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
         <div>
-          <label style={{ fontSize: 12, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Nome *</label>
-          <input className="form-input" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="Ex: Interessados sem agendamento" />
+          <label style={{ fontSize: 12, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Nome do Segmento *</label>
+          <input className="form-input" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="Ex: Pacientes de Botox sem retorno há 90 dias" />
         </div>
         <div>
           <label style={{ fontSize: 12, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Entidade-base</label>
           <select className="form-select" value={form.entity_base} onChange={e => setForm(f => ({ ...f, entity_base: e.target.value, conditions: [] }))}>
-            <option value="lead">Interessado (lead)</option>
-            <option value="cliente">Cliente</option>
+            <option value="lead">Interessados (Leads do CRM)</option>
+            <option value="cliente">Pacientes (Clientes da Clínica)</option>
           </select>
         </div>
-        <div style={{ gridColumn: '1/-1' }}>
-          <label style={{ fontSize: 12, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Descrição</label>
-          <input className="form-input" value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} placeholder="Finalidade deste segmento" />
+        <div>
+          <label style={{ fontSize: 12, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Descrição / Finalidade</label>
+          <input className="form-input" value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} placeholder="Objetivo e hipótese deste público" />
+        </div>
+        <div>
+          <label style={{ fontSize: 12, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Janela Temporal de Acompanhamento (dias opcionais)</label>
+          <input type="number" className="form-input" value={form.janela_dias} onChange={e => setForm(f => ({ ...f, janela_dias: e.target.value }))} placeholder="Ex: 30, 90, 365" />
         </div>
       </div>
 
       {/* Condições */}
       <div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-          <span style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 600 }}>Condições (combinadas por E)</span>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+          <span style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 600 }}>Critérios (combinados por E):</span>
           <button
             onClick={addCondition}
-            style={{ padding: '3px 10px', background: 'none', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text-muted)', fontSize: 12, cursor: 'pointer' }}
-          >+ Adicionar</button>
+            className="btn btn-ghost"
+            style={{ fontSize: 12, padding: '3px 10px' }}
+          >
+            + Adicionar Critério
+          </button>
         </div>
 
-        {form.conditions.length === 0 && (
-          <p style={{ fontSize: 12, color: 'var(--text-muted)', fontStyle: 'italic' }}>
-            Nenhuma condição — o segmento inclui todos os registros da entidade-base.
-            Campo desconhecido nunca satisfaz uma condição por acidente.
+        {form.conditions.length === 0 ? (
+          <p style={{ fontSize: 12, color: 'var(--text-muted)', fontStyle: 'italic', margin: '4px 0' }}>
+            Nenhum critério aplicado — o segmento englobará todos os registros da base.
           </p>
-        )}
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {form.conditions.map((cond, i) => {
+              const ops = getOperatorsForField(cond.field);
+              const isBool = isFieldBoolean(cond.field);
 
-        {form.conditions.map((cond, i) => (
-          <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
-            <select
-              className="form-select"
-              value={cond.field}
-              onChange={e => updateCondition(i, 'field', e.target.value)}
-              style={{ flex: 1.5 }}
-            >
-              {fields.map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
-            </select>
-            <select
-              className="form-select"
-              value={cond.operator}
-              onChange={e => updateCondition(i, 'operator', e.target.value)}
-              style={{ flex: 1 }}
-            >
-              {operatorsFor(cond.field).map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-            </select>
-            {needsValue(cond.operator) && (
-              <input
-                className="form-input"
-                value={cond.value || ''}
-                onChange={e => updateCondition(i, 'value', e.target.value)}
-                placeholder="Valor"
-                style={{ flex: 1.5 }}
-              />
-            )}
-            <button
-              onClick={() => removeCondition(i)}
-              style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#DC2626', padding: '0 4px' }}
-            ><X size={14} /></button>
+              return (
+                <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <select
+                    className="form-select"
+                    value={cond.field}
+                    onChange={e => updateCondition(i, 'field', e.target.value)}
+                    style={{ flex: 1.5 }}
+                  >
+                    {fields.map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
+                  </select>
+
+                  <select
+                    className="form-select"
+                    value={cond.operator}
+                    onChange={e => updateCondition(i, 'operator', e.target.value)}
+                    style={{ flex: 1 }}
+                  >
+                    {ops.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                  </select>
+
+                  {needsValue(cond.operator) && (
+                    isBool ? (
+                      <select
+                        className="form-select"
+                        value={cond.value || 'true'}
+                        onChange={e => updateCondition(i, 'value', e.target.value)}
+                        style={{ flex: 1.5 }}
+                      >
+                        <option value="true">Sim (Verdadeiro)</option>
+                        <option value="false">Não (Falso)</option>
+                      </select>
+                    ) : (
+                      <input
+                        className="form-input"
+                        value={cond.value || ''}
+                        onChange={e => updateCondition(i, 'value', e.target.value)}
+                        placeholder="Valor do critério"
+                        style={{ flex: 1.5 }}
+                      />
+                    )
+                  )}
+
+                  <button
+                    onClick={() => removeCondition(i)}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#DC2626', padding: '0 4px' }}
+                    title="Remover critério"
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
+              );
+            })}
           </div>
-        ))}
+        )}
       </div>
 
       {/* Prévia */}
-      <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 4 }}>
         <button
           onClick={runPreview}
           disabled={prevLoading}
-          style={{ padding: '7px 16px', background: 'none', border: '1px solid #8B5CF6', borderRadius: 8, color: '#8B5CF6', fontSize: 13, cursor: 'pointer', whiteSpace: 'nowrap' }}
+          className="btn btn-ghost"
+          style={{ fontSize: 12, padding: '6px 14px', borderColor: '#8B5CF6', color: '#8B5CF6' }}
         >
-          <Eye size={14} style={{ marginRight: 6 }} />
-          {prevLoading ? 'Calculando…' : 'Prévia'}
+          <Eye size={13} style={{ marginRight: 4 }} />
+          {prevLoading ? 'Calculando…' : 'Calcular Prévia'}
         </button>
-        {prevError && <span style={{ fontSize: 12, color: '#DC2626', alignSelf: 'center' }}>{prevError}</span>}
+
+        {prevError && (
+          <span style={{ fontSize: 12, color: '#DC2626' }}>{prevError}</span>
+        )}
+
         {preview && !prevError && (
-          <div style={{ fontSize: 13, color: 'var(--text-muted)', alignSelf: 'center' }}>
-            <strong style={{ color: 'var(--text-dark)' }}>{preview.count}</strong> registros correspondem às condições.
+          <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+            <strong style={{ color: 'var(--text-dark)' }}>{preview.count}</strong> registros satisfazem este segmento.
             {preview.sample?.length > 0 && (
-              <span> Ex: {preview.sample.slice(0, 3).map(s => s.nome || s.name || s.id).join(', ')}{preview.count > 3 ? '…' : ''}</span>
+              <span> (Ex: {preview.sample.slice(0, 3).map(s => s.nome || s.name || s.id).join(', ')}{preview.count > 3 ? '…' : ''})</span>
             )}
           </div>
         )}
       </div>
 
-      <div style={{ display: 'flex', gap: 8 }}>
-        <button
-          onClick={handleSave}
-          disabled={!form.name || saving}
-          style={{ padding: '8px 20px', background: '#8B5CF6', border: 'none', borderRadius: 8, color: '#fff', fontWeight: 600, cursor: form.name ? 'pointer' : 'not-allowed', opacity: form.name ? 1 : 0.5 }}
-        >{saving ? 'Salvando…' : 'Salvar segmento'}</button>
-        <button onClick={onClose} style={{ padding: '8px 16px', background: 'none', border: '1px solid var(--border)', borderRadius: 8, color: 'var(--text-muted)', cursor: 'pointer' }}>Cancelar</button>
+      <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 10 }}>
+        <button onClick={onClose} className="btn btn-ghost">Cancelar</button>
+        <button onClick={handleSave} disabled={!form.name.trim() || saving} className="btn btn-primary">
+          {saving ? 'Salvando…' : 'Salvar Segmento'}
+        </button>
       </div>
     </div>
   );
 }
 
-// ─── Visão: Canais e Campanhas ────────────────────────────────────────────────
+// ─── Visão 3: Canais e Campanhas ──────────────────────────────────────────────
 
 function CanaisCampanhas({ campanhas, periodPreset }) {
   const [canalStats, setCanalStats] = useState([]);
@@ -959,8 +2135,8 @@ function CanaisCampanhas({ campanhas, periodPreset }) {
       publico_descricao: b.publico_descricao || '',
       responsavel: b.responsavel || '',
       okr_kr_ref: b.okr_kr_ref || '',
-      orcamento_planejado: b.orcamento_planejado || '',
-      investimento_realizado: b.investimento_realizado || '',
+      orcamento_planejado: b.orcamento_planejado ?? '',
+      investimento_realizado: b.investimento_realizado ?? '',
       resultado_observado: b.resultado_observado || '',
       decisao: b.decisao || '',
       aprendizado: b.aprendizado || '',
@@ -977,7 +2153,7 @@ function CanaisCampanhas({ campanhas, periodPreset }) {
     });
     if (!error && data) {
       setBrief(data);
-      alert('Brief salvo com sucesso!');
+      alert('Brief analítico salvo com sucesso!');
     } else if (error) {
       alert('Erro ao salvar: ' + (error?.message || error));
     }
@@ -989,38 +2165,35 @@ function CanaisCampanhas({ campanhas, periodPreset }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
 
-      {/* Tabela de desempenho por canal */}
+      {/* Desempenho por Canal */}
       <div>
-        <h4 style={{ margin: '0 0 12px', color: 'var(--text-dark)', fontSize: 15 }}>
-          Desempenho por canal de origem
+        <h4 style={{ margin: '0 0 10px', color: 'var(--text-dark)', fontSize: 15 }}>
+          Desempenho por Canal de Aquisição
         </h4>
         <p style={{ margin: '0 0 12px', fontSize: 13, color: 'var(--text-muted)' }}>
-          Leads registrados no período {fmtDate(from)} – {fmtDate(to)} agrupados por <code>origem</code>.
-          Atribuição simples: lead → appointment_id → atendimento. Recebimentos indisponíveis sem conciliação financeira.
+          Leads registrados entre {fmtDate(from)} e {fmtDate(to)} agrupados por origem, com conversão em agendamentos válidos e receitas atribuídas.
         </p>
 
         {canalLoading ? (
-          <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>Carregando…</p>
+          <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>Carregando estatísticas…</p>
         ) : canalError ? (
           <p style={{ color: '#DC2626', fontSize: 13 }}>{canalError}</p>
         ) : canalStats.length === 0 ? (
-          <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>
-            Nenhum lead registrado no período. Verifique o CRM ou ajuste o período.
-          </p>
+          <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>Nenhum lead com origem registrada no período.</p>
         ) : (
           <>
             <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
                 <thead>
                   <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                    {['Canal / Origem', 'Interessados', 'Com agendamento', 'Clientes atendidos vinculados', 'Cobertura de atribuição', 'Recebimentos'].map(h => (
+                    {['Canal / Origem', 'Interessados', 'Com agendamento válido', 'Pacientes atendidos vinculados', 'Taxa de Conversão', 'Recebimentos atribuídos'].map(h => (
                       <th key={h} style={{ padding: '8px 12px', textAlign: 'left', color: 'var(--text-muted)', fontWeight: 600, whiteSpace: 'nowrap' }}>{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
                   {canalStats.map((row, i) => {
-                    const conversao = row.interessados_total > 0
+                    const conv = row.interessados_total > 0
                       ? Math.round((Number(row.interessados_com_agendamento) / Number(row.interessados_total)) * 100)
                       : null;
                     return (
@@ -1036,12 +2209,15 @@ function CanaisCampanhas({ campanhas, periodPreset }) {
                         <td style={{ padding: '8px 12px', color: 'var(--text-muted)' }}>{row.interessados_com_agendamento}</td>
                         <td style={{ padding: '8px 12px', color: 'var(--text-muted)' }}>{row.clientes_atendidos_vinculados}</td>
                         <td style={{ padding: '8px 12px' }}>
-                          {conversao !== null
-                            ? <span style={{ color: conversao > 50 ? '#10B981' : conversao > 20 ? '#D97706' : '#DC2626' }}>{conversao}%</span>
-                            : <span style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>Não calculável</span>
-                          }
+                          {conv !== null ? (
+                            <span style={{ color: conv > 40 ? '#10B981' : conv > 15 ? '#D97706' : '#DC2626', fontWeight: 600 }}>{conv}%</span>
+                          ) : (
+                            <span style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>Não calculável</span>
+                          )}
                         </td>
-                        <td style={{ padding: '8px 12px', color: 'var(--text-muted)', fontStyle: 'italic', fontSize: 12 }}>Indisponível</td>
+                        <td style={{ padding: '8px 12px', color: Number(row.recebimentos_atribuidos) > 0 ? '#10B981' : 'var(--text-muted)', fontWeight: Number(row.recebimentos_atribuidos) > 0 ? 600 : 400 }}>
+                          {Number(row.recebimentos_atribuidos) > 0 ? fmtBRL(row.recebimentos_atribuidos) : '—'}
+                        </td>
                       </tr>
                     );
                   })}
@@ -1072,17 +2248,17 @@ function CanaisCampanhas({ campanhas, periodPreset }) {
         )}
       </div>
 
-      {/* Campanhas com brief */}
+      {/* Campanhas e Briefs */}
       <div>
-        <h4 style={{ margin: '0 0 12px', color: 'var(--text-dark)', fontSize: 15 }}>
-          Campanhas — Plano e resultado
+        <h4 style={{ margin: '0 0 10px', color: 'var(--text-dark)', fontSize: 15 }}>
+          Campanhas — Plano e Resultado Analítico
         </h4>
         <p style={{ margin: '0 0 12px', fontSize: 13, color: 'var(--text-muted)' }}>
-          Clique em uma campanha para abrir o brief analítico. Os campos originais da campanha são preservados.
+          Selecione uma campanha para visualizar e editar o brief analítico, objetivos e o público-alvo vinculado.
         </p>
 
         {(!campanhas || campanhas.length === 0) ? (
-          <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>Nenhuma campanha cadastrada.</p>
+          <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>Nenhuma campanha cadastrada no ERP.</p>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {campanhas.map(c => (
@@ -1099,7 +2275,7 @@ function CanaisCampanhas({ campanhas, periodPreset }) {
                 onClick={() => openBrief(c)}
               >
                 <Megaphone size={16} style={{ color: '#8B5CF6', flexShrink: 0 }} />
-                <span style={{ fontWeight: 500, color: 'var(--text-dark)', flex: 1 }}>{c.nome}</span>
+                <span style={{ fontWeight: 600, color: 'var(--text-dark)', flex: 1 }}>{c.nome}</span>
                 <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{c.canal}</span>
                 <span style={{
                   fontSize: 11, padding: '2px 8px', borderRadius: 10, fontWeight: 600,
@@ -1112,7 +2288,7 @@ function CanaisCampanhas({ campanhas, periodPreset }) {
           </div>
         )}
 
-        {/* Brief form */}
+        {/* Formulário do Brief */}
         {selectedCampanha && (
           <div style={{
             background: 'var(--bg-card)',
@@ -1123,64 +2299,73 @@ function CanaisCampanhas({ campanhas, periodPreset }) {
             display: 'flex', flexDirection: 'column', gap: 14,
           }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h4 style={{ margin: 0, color: 'var(--text-dark)' }}>
-                Brief — {selectedCampanha.nome}
-              </h4>
+              <div>
+                <h4 style={{ margin: 0, color: 'var(--text-dark)' }}>
+                  Brief — {selectedCampanha.nome}
+                </h4>
+                {brief?.snapshot_date && (
+                  <p style={{ margin: '4px 0 0', fontSize: 11, color: '#10B981' }}>
+                    Snapshot de público registrado em {fmtDate(brief.snapshot_date)} (amostra estimada: {brief.estimated_count ?? '—'})
+                  </p>
+                )}
+              </div>
               <button onClick={() => setSelectedCampanha(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}><X size={18} /></button>
             </div>
 
             {briefLoading ? (
-              <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>Carregando…</p>
+              <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>Carregando brief…</p>
             ) : (
               <>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                  {[
-                    { key: 'objetivo', label: 'Objetivo mensurável', placeholder: 'Ex: Aumentar agendamentos de limpeza de pele' },
-                    { key: 'meta', label: 'Meta', placeholder: 'Ex: 20 agendamentos em outubro' },
-                    { key: 'publico_descricao', label: 'Público / Segmento', placeholder: 'Descreva o público-alvo' },
-                    { key: 'responsavel', label: 'Responsável', placeholder: '' },
-                    { key: 'okr_kr_ref', label: 'Referência OKR (texto)', placeholder: 'Ex: KR-2024-Q4-1' },
-                  ].map(f => (
-                    <div key={f.key} style={{ gridColumn: f.key === 'publico_descricao' ? '1/-1' : undefined }}>
-                      <label style={{ fontSize: 12, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>{f.label}</label>
-                      <input className="form-input" placeholder={f.placeholder} value={briefForm[f.key] || ''} onChange={e => setBriefForm(p => ({ ...p, [f.key]: e.target.value }))} />
-                    </div>
-                  ))}
                   <div>
-                    <label style={{ fontSize: 12, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Orçamento planejado (R$)</label>
+                    <label style={{ fontSize: 12, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Objetivo Mensurável</label>
+                    <input className="form-input" placeholder="Ex: Aumentar agendamentos de bioestimulador" value={briefForm.objetivo || ''} onChange={e => setBriefForm(p => ({ ...p, objetivo: e.target.value }))} />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 12, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Meta</label>
+                    <input className="form-input" placeholder="Ex: 25 agendamentos confirmados" value={briefForm.meta || ''} onChange={e => setBriefForm(p => ({ ...p, meta: e.target.value }))} />
+                  </div>
+                  <div style={{ gridColumn: '1/-1' }}>
+                    <label style={{ fontSize: 12, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Público-alvo / Critérios do Segmento</label>
+                    <input className="form-input" placeholder="Descrição do público ou referência de segmento" value={briefForm.publico_descricao || ''} onChange={e => setBriefForm(p => ({ ...p, publico_descricao: e.target.value }))} />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 12, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Orçamento Planejado (R$)</label>
                     <input className="form-input" type="number" placeholder="0,00" value={briefForm.orcamento_planejado || ''} onChange={e => setBriefForm(p => ({ ...p, orcamento_planejado: e.target.value }))} />
                   </div>
                   <div>
-                    <label style={{ fontSize: 12, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Investimento realizado (R$)</label>
+                    <label style={{ fontSize: 12, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Investimento Realizado Confirmado (R$)</label>
                     <input className="form-input" type="number" placeholder="0,00" value={briefForm.investimento_realizado || ''} onChange={e => setBriefForm(p => ({ ...p, investimento_realizado: e.target.value }))} />
                   </div>
                   <div style={{ gridColumn: '1/-1' }}>
-                    <label style={{ fontSize: 12, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Resultado observado</label>
-                    <textarea className="form-input" rows={2} value={briefForm.resultado_observado || ''} onChange={e => setBriefForm(p => ({ ...p, resultado_observado: e.target.value }))} style={{ resize: 'vertical' }} />
+                    <label style={{ fontSize: 12, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Resultado Observado</label>
+                    <textarea className="form-input" rows={2} value={briefForm.resultado_observado || ''} onChange={e => setBriefForm(p => ({ ...p, resultado_observado: e.target.value }))} />
                   </div>
                   <div>
-                    <label style={{ fontSize: 12, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Decisão</label>
+                    <label style={{ fontSize: 12, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Decisão Final</label>
                     <select className="form-select" value={briefForm.decisao || ''} onChange={e => setBriefForm(p => ({ ...p, decisao: e.target.value }))}>
                       <option value="">Não definida</option>
-                      <option value="repetir">Repetir</option>
-                      <option value="ajustar">Ajustar</option>
-                      <option value="encerrar">Encerrar</option>
+                      <option value="repetir">Repetir ação</option>
+                      <option value="ajustar">Ajustar parâmetros</option>
+                      <option value="encerrar">Encerrar campanha</option>
                     </select>
                   </div>
                   <div>
-                    <label style={{ fontSize: 12, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Aprendizado</label>
-                    <input className="form-input" placeholder="O que aprendemos com esta campanha?" value={briefForm.aprendizado || ''} onChange={e => setBriefForm(p => ({ ...p, aprendizado: e.target.value }))} />
+                    <label style={{ fontSize: 12, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Aprendizado para Próximas Campanhas</label>
+                    <input className="form-input" placeholder="O que aprendemos com esta ação?" value={briefForm.aprendizado || ''} onChange={e => setBriefForm(p => ({ ...p, aprendizado: e.target.value }))} />
                   </div>
                 </div>
 
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                   <button
+                    className="btn btn-primary"
                     onClick={saveBrief}
                     disabled={briefSaving}
-                    style={{ padding: '8px 20px', background: '#8B5CF6', border: 'none', borderRadius: 8, color: '#fff', fontWeight: 600, cursor: 'pointer', opacity: briefSaving ? 0.7 : 1 }}
-                  >{briefSaving ? 'Salvando…' : 'Salvar brief'}</button>
-                  <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                    Os campos originais da campanha ({selectedCampanha.canal}, mensagem, etc.) são preservados.
+                  >
+                    {briefSaving ? 'Salvando…' : 'Salvar Brief da Campanha'}
+                  </button>
+                  <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                    Os campos originais da campanha (mensagem, agendamento) são preservados integralmente.
                   </span>
                 </div>
               </>
@@ -1188,31 +2373,61 @@ function CanaisCampanhas({ campanhas, periodPreset }) {
           </div>
         )}
       </div>
+
     </div>
   );
 }
 
-// ─── Componente Principal ─────────────────────────────────────────────────────
+// ─── Componente Principal Exportado ───────────────────────────────────────────
 
 export default function InteligenicaComercial({ campanhas }) {
   const [subView, setSubView] = useState('visao-geral');
   const [setup, setSetup] = useState(null);
   const [periodPreset, setPeriodPreset] = useState('30d');
+  const [initialRfmFilter, setInitialRfmFilter] = useState('atendidos_periodo');
 
   useEffect(() => {
     checkIntelligenceSetup().then(setSetup);
   }, []);
 
+  const handleSwitchTab = (tabKey, rfmFilter = 'atendidos_periodo') => {
+    setSubView(tabKey);
+    if (rfmFilter) setInitialRfmFilter(rfmFilter);
+  };
+
   if (!setup) {
     return (
       <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)', fontSize: 14 }}>
-        Verificando configuração…
+        Verificando configuração de Inteligência Comercial…
       </div>
     );
   }
 
   if (!setup.ready) {
-    return <SetupPendingBanner reason={setup.reason} />;
+    return (
+      <div style={{
+        background: 'var(--bg-card)',
+        border: '1px solid #D9770644',
+        borderRadius: 12,
+        padding: '32px',
+        textAlign: 'center',
+        maxWidth: 540,
+        margin: '60px auto',
+      }}>
+        <AlertTriangle size={40} style={{ color: '#D97706', marginBottom: 16 }} />
+        <h3 style={{ margin: '0 0 12px', color: 'var(--text-dark)', fontSize: 18 }}>
+          Configuração do banco pendente
+        </h3>
+        <p style={{ margin: '0 0 20px', color: 'var(--text-muted)', fontSize: 14, lineHeight: 1.6 }}>
+          Execute o arquivo <code style={{ background: 'var(--bg-main)', padding: '2px 6px', borderRadius: 4 }}>
+            marketing_inteligencia_incremental.sql
+          </code> no SQL Editor do Supabase e recarregue.
+        </p>
+        <p style={{ margin: 0, fontSize: 12, color: 'var(--text-muted)' }}>
+          O restante do ERP continua funcionando normalmente.
+        </p>
+      </div>
+    );
   }
 
   return (
@@ -1262,15 +2477,25 @@ export default function InteligenicaComercial({ campanhas }) {
         })}
       </div>
 
-      {/* Content */}
+      {/* Conteúdo da Sub-View ativa */}
       {subView === 'visao-geral' && (
-        <VisaoGeral periodPreset={periodPreset} onPeriodChange={setPeriodPreset} />
+        <VisaoGeral
+          periodPreset={periodPreset}
+          onPeriodChange={setPeriodPreset}
+          onSwitchTab={handleSwitchTab}
+        />
       )}
       {subView === 'clientes-publicos' && (
-        <ClientesPublicos periodPreset={periodPreset} />
+        <ClientesPublicos
+          periodPreset={periodPreset}
+          initialRfmFilter={initialRfmFilter}
+        />
       )}
       {subView === 'canais-campanhas' && (
-        <CanaisCampanhas campanhas={campanhas || []} periodPreset={periodPreset} />
+        <CanaisCampanhas
+          campanhas={campanhas || []}
+          periodPreset={periodPreset}
+        />
       )}
     </div>
   );
