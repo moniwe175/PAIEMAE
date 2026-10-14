@@ -190,12 +190,21 @@ BEGIN
     AND proxima_acao_prazo < v_hoje
     AND (proxima_acao_concluida IS FALSE OR proxima_acao_concluida IS NULL);
 
+  -- "Sem ação": lead ativo sem prazo definido, sem descrição (incluindo vazia), ou com tarefa já concluída.
+  -- Tarefa concluída equivale a não ter próxima ação pendente real, mesmo com prazo e descrição preenchidos.
+  -- Regra idêntica ao filtro /crm para garantir consistência entre painel e CRM.
   SELECT COUNT(*)
   INTO v_interessados_sem_acao
   FROM crm_leads
   WHERE (arquivado IS FALSE OR arquivado IS NULL)
     AND status NOT IN ('encerrado_ganho', 'encerrado_perdido', 'arquivado')
-    AND (proxima_acao_prazo IS NULL OR proxima_acao_descricao IS NULL OR TRIM(proxima_acao_descricao) = '');
+    AND NOT (
+      -- Tem próxima ação pendente válida: prazo preenchido + descrição não vazia + não concluída
+      proxima_acao_prazo IS NOT NULL
+      AND proxima_acao_descricao IS NOT NULL
+      AND proxima_acao_descricao <> ''
+      AND (proxima_acao_concluida IS FALSE OR proxima_acao_concluida IS NULL)
+    );
 
   -- 7. Cobertura de atendimentos
   SELECT COUNT(*), COUNT(client_id)
@@ -230,9 +239,40 @@ BEGIN
     AND st.date_ref <= p_date_to
     AND st.deleted_at IS NULL
     AND (st.is_metadata IS NOT TRUE OR st.is_metadata IS NULL)
-    AND (st.row_type IN ('receita', 'estorno') OR st.row_type IS NULL)
-    AND lower(COALESCE(st.row_type, '')) NOT LIKE ANY (ARRAY['despesa%', 'saida%', 'saída%', 'sangria%', 'gasto%', 'total%', 'resumo%'])
-    AND lower(COALESCE(st.client, '')) NOT LIKE ANY (ARRAY['sangria%', 'despesa%', 'passagem%', 'produtos%', 'tributos%', 'outras saída%', 'outras saida%', 'total%']);
+    -- Classificação comprovada: exige receita ou estorno (não aceita row_type nulo automaticamente)
+    AND lower(COALESCE(st.row_type, st.tipo, '')) IN ('receita', 'estorno')
+    -- Exclusão explícita de despesas e sangrias usando OR para garantir que todos os padrões sejam excluídos
+    AND NOT (
+      lower(COALESCE(st.row_type, st.tipo, '')) LIKE 'despesa%'
+      OR lower(COALESCE(st.row_type, st.tipo, '')) LIKE 'saida%'
+      OR lower(COALESCE(st.row_type, st.tipo, '')) LIKE 'saída%'
+      OR lower(COALESCE(st.row_type, st.tipo, '')) LIKE 'sangria%'
+      OR lower(COALESCE(st.row_type, st.tipo, '')) LIKE 'gasto%'
+      OR lower(COALESCE(st.row_type, st.tipo, '')) LIKE 'total%'
+      OR lower(COALESCE(st.row_type, st.tipo, '')) LIKE 'resumo%'
+    )
+    AND NOT (
+      lower(COALESCE(st.client, '')) LIKE 'sangria%'
+      OR lower(COALESCE(st.client, '')) LIKE 'despesa%'
+      OR lower(COALESCE(st.client, '')) LIKE 'passagem%'
+      OR lower(COALESCE(st.client, '')) LIKE 'produtos%'
+      OR lower(COALESCE(st.client, '')) LIKE 'tributos%'
+      OR lower(COALESCE(st.client, '')) LIKE 'outras saída%'
+      OR lower(COALESCE(st.client, '')) LIKE 'outras saida%'
+      OR lower(COALESCE(st.client, '')) LIKE 'total%'
+      OR lower(COALESCE(st.client, '')) LIKE 'resumo%'
+    )
+    AND NOT (
+      lower(COALESCE(st.procedure, '')) LIKE 'sangria%'
+      OR lower(COALESCE(st.procedure, '')) LIKE 'despesa%'
+      OR lower(COALESCE(st.procedure, '')) LIKE 'passagem%'
+      OR lower(COALESCE(st.procedure, '')) LIKE 'produtos%'
+      OR lower(COALESCE(st.procedure, '')) LIKE 'tributos%'
+      OR lower(COALESCE(st.procedure, '')) LIKE 'outras saída%'
+      OR lower(COALESCE(st.procedure, '')) LIKE 'outras saida%'
+      OR lower(COALESCE(st.procedure, '')) LIKE 'total%'
+      OR lower(COALESCE(st.procedure, '')) LIKE 'resumo%'
+    );
 
   IF v_transacoes_total = 0 THEN
     v_receita_status := 'sem_lancamentos';
@@ -347,9 +387,39 @@ BEGIN
       AND st.date_ref <= p_date_to
       AND st.deleted_at IS NULL
       AND (st.is_metadata IS NOT TRUE OR st.is_metadata IS NULL)
-      AND (st.row_type IN ('receita', 'estorno') OR st.row_type IS NULL)
-      AND lower(COALESCE(st.row_type, '')) NOT LIKE ANY (ARRAY['despesa%', 'saida%', 'saída%', 'sangria%', 'gasto%', 'total%', 'resumo%'])
-      AND lower(COALESCE(st.client, '')) NOT LIKE ANY (ARRAY['sangria%', 'despesa%', 'passagem%', 'produtos%', 'tributos%', 'outras saída%', 'outras saida%', 'total%'])
+      -- Classificação comprovada: apenas receita e estorno
+      AND lower(COALESCE(st.row_type, st.tipo, '')) IN ('receita', 'estorno')
+      AND NOT (
+        lower(COALESCE(st.row_type, st.tipo, '')) LIKE 'despesa%'
+        OR lower(COALESCE(st.row_type, st.tipo, '')) LIKE 'saida%'
+        OR lower(COALESCE(st.row_type, st.tipo, '')) LIKE 'saída%'
+        OR lower(COALESCE(st.row_type, st.tipo, '')) LIKE 'sangria%'
+        OR lower(COALESCE(st.row_type, st.tipo, '')) LIKE 'gasto%'
+        OR lower(COALESCE(st.row_type, st.tipo, '')) LIKE 'total%'
+        OR lower(COALESCE(st.row_type, st.tipo, '')) LIKE 'resumo%'
+      )
+      AND NOT (
+        lower(COALESCE(st.client, '')) LIKE 'sangria%'
+        OR lower(COALESCE(st.client, '')) LIKE 'despesa%'
+        OR lower(COALESCE(st.client, '')) LIKE 'passagem%'
+        OR lower(COALESCE(st.client, '')) LIKE 'produtos%'
+        OR lower(COALESCE(st.client, '')) LIKE 'tributos%'
+        OR lower(COALESCE(st.client, '')) LIKE 'outras saída%'
+        OR lower(COALESCE(st.client, '')) LIKE 'outras saida%'
+        OR lower(COALESCE(st.client, '')) LIKE 'total%'
+        OR lower(COALESCE(st.client, '')) LIKE 'resumo%'
+      )
+      AND NOT (
+        lower(COALESCE(st.procedure, '')) LIKE 'sangria%'
+        OR lower(COALESCE(st.procedure, '')) LIKE 'despesa%'
+        OR lower(COALESCE(st.procedure, '')) LIKE 'passagem%'
+        OR lower(COALESCE(st.procedure, '')) LIKE 'produtos%'
+        OR lower(COALESCE(st.procedure, '')) LIKE 'tributos%'
+        OR lower(COALESCE(st.procedure, '')) LIKE 'outras saída%'
+        OR lower(COALESCE(st.procedure, '')) LIKE 'outras saida%'
+        OR lower(COALESCE(st.procedure, '')) LIKE 'total%'
+        OR lower(COALESCE(st.procedure, '')) LIKE 'resumo%'
+      )
   ),
   -- Atribuição comprovada 1-para-1 por transação para evitar duplicação em múltiplos leads:
   -- Prioridade 1: Agendamento do cliente na data do pagamento que está vinculado a um lead
@@ -459,9 +529,39 @@ BEGIN
      AND crl.source_table = 'sheet_transactions'
     WHERE st.deleted_at IS NULL
       AND (st.is_metadata IS NOT TRUE OR st.is_metadata IS NULL)
-      AND (st.row_type IN ('receita', 'estorno') OR st.row_type IS NULL)
-      AND lower(COALESCE(st.row_type, '')) NOT LIKE ANY (ARRAY['despesa%', 'saida%', 'saída%', 'sangria%', 'gasto%', 'total%', 'resumo%'])
-      AND lower(COALESCE(st.client, '')) NOT LIKE ANY (ARRAY['sangria%', 'despesa%', 'passagem%', 'produtos%', 'tributos%', 'outras saída%', 'outras saida%', 'total%'])
+      -- Classificação comprovada: apenas receita e estorno
+      AND lower(COALESCE(st.row_type, st.tipo, '')) IN ('receita', 'estorno')
+      AND NOT (
+        lower(COALESCE(st.row_type, st.tipo, '')) LIKE 'despesa%'
+        OR lower(COALESCE(st.row_type, st.tipo, '')) LIKE 'saida%'
+        OR lower(COALESCE(st.row_type, st.tipo, '')) LIKE 'saída%'
+        OR lower(COALESCE(st.row_type, st.tipo, '')) LIKE 'sangria%'
+        OR lower(COALESCE(st.row_type, st.tipo, '')) LIKE 'gasto%'
+        OR lower(COALESCE(st.row_type, st.tipo, '')) LIKE 'total%'
+        OR lower(COALESCE(st.row_type, st.tipo, '')) LIKE 'resumo%'
+      )
+      AND NOT (
+        lower(COALESCE(st.client, '')) LIKE 'sangria%'
+        OR lower(COALESCE(st.client, '')) LIKE 'despesa%'
+        OR lower(COALESCE(st.client, '')) LIKE 'passagem%'
+        OR lower(COALESCE(st.client, '')) LIKE 'produtos%'
+        OR lower(COALESCE(st.client, '')) LIKE 'tributos%'
+        OR lower(COALESCE(st.client, '')) LIKE 'outras saída%'
+        OR lower(COALESCE(st.client, '')) LIKE 'outras saida%'
+        OR lower(COALESCE(st.client, '')) LIKE 'total%'
+        OR lower(COALESCE(st.client, '')) LIKE 'resumo%'
+      )
+      AND NOT (
+        lower(COALESCE(st.procedure, '')) LIKE 'sangria%'
+        OR lower(COALESCE(st.procedure, '')) LIKE 'despesa%'
+        OR lower(COALESCE(st.procedure, '')) LIKE 'passagem%'
+        OR lower(COALESCE(st.procedure, '')) LIKE 'produtos%'
+        OR lower(COALESCE(st.procedure, '')) LIKE 'tributos%'
+        OR lower(COALESCE(st.procedure, '')) LIKE 'outras saída%'
+        OR lower(COALESCE(st.procedure, '')) LIKE 'outras saida%'
+        OR lower(COALESCE(st.procedure, '')) LIKE 'total%'
+        OR lower(COALESCE(st.procedure, '')) LIKE 'resumo%'
+      )
     GROUP BY crl.client_id
   ),
   filtered_clients AS (
@@ -822,9 +922,37 @@ BEGIN
       AND st.deleted_at IS NULL
       AND (st.is_metadata IS NOT TRUE OR st.is_metadata IS NULL)
       -- Exclui despesas, sangrias e resumos da lista de conciliação
-      AND (st.row_type IN ('receita', 'estorno') OR st.row_type IS NULL)
-      AND lower(COALESCE(st.row_type, '')) NOT LIKE ANY (ARRAY['despesa%', 'saida%', 'saída%', 'sangria%', 'gasto%', 'total%', 'resumo%'])
-      AND lower(COALESCE(st.client, '')) NOT LIKE ANY (ARRAY['sangria%', 'despesa%', 'passagem%', 'produtos%', 'tributos%', 'outras saída%', 'outras saida%', 'total%'])
+      AND NOT (
+        lower(COALESCE(st.row_type, st.tipo, '')) LIKE 'despesa%'
+        OR lower(COALESCE(st.row_type, st.tipo, '')) LIKE 'saida%'
+        OR lower(COALESCE(st.row_type, st.tipo, '')) LIKE 'saída%'
+        OR lower(COALESCE(st.row_type, st.tipo, '')) LIKE 'sangria%'
+        OR lower(COALESCE(st.row_type, st.tipo, '')) LIKE 'gasto%'
+        OR lower(COALESCE(st.row_type, st.tipo, '')) LIKE 'total%'
+        OR lower(COALESCE(st.row_type, st.tipo, '')) LIKE 'resumo%'
+      )
+      AND NOT (
+        lower(COALESCE(st.client, '')) LIKE 'sangria%'
+        OR lower(COALESCE(st.client, '')) LIKE 'despesa%'
+        OR lower(COALESCE(st.client, '')) LIKE 'passagem%'
+        OR lower(COALESCE(st.client, '')) LIKE 'produtos%'
+        OR lower(COALESCE(st.client, '')) LIKE 'tributos%'
+        OR lower(COALESCE(st.client, '')) LIKE 'outras saída%'
+        OR lower(COALESCE(st.client, '')) LIKE 'outras saida%'
+        OR lower(COALESCE(st.client, '')) LIKE 'total%'
+        OR lower(COALESCE(st.client, '')) LIKE 'resumo%'
+      )
+      AND NOT (
+        lower(COALESCE(st.procedure, '')) LIKE 'sangria%'
+        OR lower(COALESCE(st.procedure, '')) LIKE 'despesa%'
+        OR lower(COALESCE(st.procedure, '')) LIKE 'passagem%'
+        OR lower(COALESCE(st.procedure, '')) LIKE 'produtos%'
+        OR lower(COALESCE(st.procedure, '')) LIKE 'tributos%'
+        OR lower(COALESCE(st.procedure, '')) LIKE 'outras saída%'
+        OR lower(COALESCE(st.procedure, '')) LIKE 'outras saida%'
+        OR lower(COALESCE(st.procedure, '')) LIKE 'total%'
+        OR lower(COALESCE(st.procedure, '')) LIKE 'resumo%'
+      )
   ),
   counted AS (
     SELECT COUNT(*) AS total_rows FROM unlinked

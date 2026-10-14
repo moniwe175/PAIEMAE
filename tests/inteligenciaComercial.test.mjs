@@ -33,6 +33,7 @@ import {
   checkIntelligenceSetup,
 } from '../src/services/inteligenciaComercialService.js';
 import { supabase } from '../src/lib/supabase.js';
+import { newDb } from 'pg-mem';
 
 // ─── 1. Helpers Puros de Contrato de Cálculo (Espelham RPCs PostgreSQL) ──────
 
@@ -111,6 +112,7 @@ function calcConversaoAgendamento(leadsValidos, interessados) {
 /**
  * Contrato de oportunidades operacionais corrigido:
  * Exclui arquivados e leads encerrados.
+ * "Sem ação" usa NOT (tem_ação_pendente_válida) para espelhar a SQL da RPC.
  */
 function calcOportunidadesOperacionais(leads, hojeStr) {
   const CLOSED_STATUSES = new Set(['encerrado_ganho', 'encerrado_perdido', 'arquivado']);
@@ -127,8 +129,16 @@ function calcOportunidadesOperacionais(leads, hojeStr) {
       retornosPendentes++;
     }
 
-    // Interessado sem ação: sem prazo ou sem descrição
-    if (!l.proxima_acao_prazo || !l.proxima_acao_descricao || !l.proxima_acao_descricao.trim()) {
+    // "Sem ação": lead que NÃO possui próxima ação pendente válida.
+    // Ação pendente válida exige: prazo preenchido + descrição não vazia + não concluída.
+    // Tarefa concluída (proxima_acao_concluida=true) não conta como ação pendente real.
+    const hasValidPendingAction = Boolean(
+      l.proxima_acao_prazo &&
+      l.proxima_acao_descricao &&
+      l.proxima_acao_descricao.trim() &&
+      !l.proxima_acao_concluida
+    );
+    if (!hasValidPendingAction) {
       interessadosSemAcao++;
     }
   }
@@ -491,6 +501,24 @@ describe('Inteligência Comercial — Suíte Completa de Contratos e Serviço Re
               maybeSingle: async () => ({ data: null, error: null }),
             }),
           }),
+          insert: (payloads) => {
+            insertedPayload = payloads[0];
+            return {
+              select: () => ({
+                single: async () => ({ data: insertedPayload, error: null }),
+              }),
+            };
+          },
+          update: (patch) => {
+            insertedPayload = patch;
+            return {
+              eq: () => ({
+                select: () => ({
+                  single: async () => ({ data: insertedPayload, error: null }),
+                }),
+              }),
+            };
+          },
           upsert: (payloads) => {
             insertedPayload = payloads[0];
             return {
@@ -678,40 +706,49 @@ describe('Inteligência Comercial — Suíte Completa de Contratos e Serviço Re
 
   describe('13. Exclusão de Despesas, Sangrias e Resumos de Receitas Financeiras', () => {
     const rawTransactions = [
-      { id: 't1', gross: 350.00, row_type: 'receita', client: 'Maria Silva' },
-      { id: 't2', gross: 200.00, row_type: null, client: 'João Santos' }, // Nulo tratado como receita
-      { id: 't3', gross: 50.00,  row_type: 'estorno', client: 'Maria Silva' }, // Estorno
-      { id: 't4', gross: 80.00,  row_type: 'despesa', client: 'PASSAGEM' }, // Despesa operacional
-      { id: 't5', gross: 120.00, row_type: 'sangria', client: 'SANGRIA' }, // Sangria de caixa
-      { id: 't6', gross: 90.00,  row_type: 'receita', client: 'OUTRAS SAÍDAS' }, // Descrição de saída disfarçada
-      { id: 't7', gross: 500.00, row_type: 'resumo', client: 'TOTAL DO DIA' }, // Linha de resumo/total
+      { id: 't1', gross: 800.00, row_type: 'receita', client: 'Maria Silva' },
+      { id: 't2', gross: 700.00, row_type: null, client: 'SANGRIA CAIXA' }, // Sangria sem tipo definido -> NÃO deve entrar
+      { id: 't3', gross: 200.00, row_type: null, client: 'João Santos' }, // Nulo sem classificação -> NÃO entra como receita confirmada
+      { id: 't4', gross: 100.00, row_type: 'estorno', client: 'Maria Silva' }, // Estorno deduzido
+      { id: 't5', gross: 80.00,  row_type: 'despesa', client: 'PASSAGEM' }, // Despesa operacional
+      { id: 't6', gross: 120.00, row_type: 'sangria', client: 'SANGRIA' }, // Sangria de caixa
+      { id: 't7', gross: 90.00,  row_type: 'receita', client: 'OUTRAS SAÍDAS' }, // Descrição de saída disfarçada
+      { id: 't8', gross: 500.00, row_type: 'resumo', client: 'TOTAL DO DIA' }, // Linha de resumo/total
     ];
 
     function isEligibleReceipt(t) {
-      const rt = String(t.row_type || '').toLowerCase().trim();
+      const rt = String(t.row_type || t.tipo || '').toLowerCase().trim();
       const client = String(t.client || '').toLowerCase().trim();
+      const proc = String(t.procedure || '').toLowerCase().trim();
 
-      if (['sangria', 'despesa', 'resumo'].includes(rt)) return false;
-      if (rt.startsWith('despesa') || rt.startsWith('saida') || rt.startsWith('saída') || rt.startsWith('sangria') || rt.startsWith('gasto') || rt.startsWith('total')) return false;
-      if (client.startsWith('sangria') || client.startsWith('despesa') || client.startsWith('passagem') || client.startsWith('produtos') || client.startsWith('tributos') || client.startsWith('outras saída') || client.startsWith('outras saida') || client.startsWith('total')) return false;
+      // Classificação comprovada: apenas receita ou estorno (não aceita null automaticamente)
+      if (!['receita', 'estorno'].includes(rt)) return false;
 
-      return rt === 'receita' || rt === 'estorno' || !rt;
+      // Exclusão estrita: NOT (expressão LIKE ANY (...))
+      const excludedTypes = ['despesa', 'saida', 'saída', 'sangria', 'gasto', 'total', 'resumo'];
+      if (excludedTypes.some(p => rt.startsWith(p))) return false;
+
+      const excludedDescriptions = ['sangria', 'despesa', 'passagem', 'produtos', 'tributos', 'outras saída', 'outras saida', 'total', 'resumo'];
+      if (excludedDescriptions.some(p => client.startsWith(p))) return false;
+      if (excludedDescriptions.some(p => proc.startsWith(p))) return false;
+
+      return true;
     }
 
-    it('Filtra estritamente receitas e estornos válidos, excluindo despesas e sangrias', () => {
+    it('Filtra estritamente receitas e estornos comprovados, excluindo sangria sem tipo e despesas', () => {
       const eligible = rawTransactions.filter(isEligibleReceipt);
-      assert.equal(eligible.length, 3, 'Apenas t1, t2 e t3 devem ser elegíveis');
-      assert.deepEqual(eligible.map(t => t.id), ['t1', 't2', 't3']);
+      assert.equal(eligible.length, 2, 'Apenas t1 e t4 são elegíveis (receita confirmada e estorno)');
+      assert.deepEqual(eligible.map(t => t.id), ['t1', 't4']);
     });
 
-    it('Calcula valor líquido considerando estorno como dedução', () => {
+    it('Calcula valor líquido considerando estorno como dedução (R$ 700 líquido e NUNCA R$ 1.500)', () => {
       const eligible = rawTransactions.filter(isEligibleReceipt);
       const net = eligible.reduce((acc, t) => {
         if (t.row_type === 'estorno') return acc - Math.abs(t.gross);
         return acc + t.gross;
       }, 0);
-      // 350 (t1) + 200 (t2) - 50 (t3) = 500
-      assert.equal(net, 500.00);
+      // 800 (t1) - 100 (t4) = 700. Sangria de 700 (t2) foi excluída e não virou 1.500.
+      assert.equal(net, 700.00);
     });
   });
 
@@ -779,20 +816,60 @@ describe('Inteligência Comercial — Suíte Completa de Contratos e Serviço Re
     });
   });
 
-  describe('15. Preservação Bidirecional de Dados em saveCampaignBrief', () => {
-    it('Vincular público preserva objetivo, orçamento e aprendizado pré-existentes', async () => {
+  describe('15. Preservação Bidirecional de Dados e Atualização Atômica em saveCampaignBrief', () => {
+    it('Interrompe salvamento imediatamente se a leitura prévia retornar erro', async () => {
       const originalFrom = supabase.from;
-      let upsertedRow = null;
+      let updateCalled = false;
+      let insertCalled = false;
 
-      // Simula brief existente com objetivo e orçamento já preenchidos
+      supabase.from = (table) => {
+        assert.equal(table, 'marketing_campaign_briefs');
+        return {
+          select: () => ({
+            eq: () => ({
+              maybeSingle: async () => ({
+                data: null,
+                error: { message: 'Timeout ao consultar campanha', code: '57014' },
+              }),
+            }),
+          }),
+          update: () => {
+            updateCalled = true;
+            return { eq: () => ({ select: () => ({ single: async () => ({}) }) }) };
+          },
+          insert: () => {
+            insertCalled = true;
+            return { select: () => ({ single: async () => ({}) }) };
+          },
+        };
+      };
+
+      try {
+        const res = await saveCampaignBrief({
+          campaign_id: 10,
+          segment_id: 'seg-1',
+        });
+        assert.ok(res.error, 'Deve retornar erro quando a leitura prévia falhar');
+        assert.equal(res.data, null);
+        assert.equal(updateCalled, false, 'Não deve chamar update se a leitura falhou');
+        assert.equal(insertCalled, false, 'Não deve chamar insert se a leitura falhou');
+      } finally {
+        supabase.from = originalFrom;
+      }
+    });
+
+    it('Vincular público envia update atômico sem sobrescrever objetivo, orçamento e aprendizado', async () => {
+      const originalFrom = supabase.from;
+      let updatedPatch = null;
+
       const existingInDb = {
+        id: 'brief-10',
         campaign_id: 10,
         objetivo: 'Reativar 50 clientes inativos',
         meta: '20 agendamentos',
         orcamento_planejado: 1500,
         investimento_realizado: 1200,
         aprendizado: 'Bons resultados no final de semana',
-        responsavel: 'Equipe Marketing',
       };
 
       supabase.from = (table) => {
@@ -803,12 +880,18 @@ describe('Inteligência Comercial — Suíte Completa de Contratos e Serviço Re
               maybeSingle: async () => ({ data: existingInDb, error: null }),
             }),
           }),
-          upsert: (payloads) => {
-            upsertedRow = payloads[0];
+          update: (patch) => {
+            updatedPatch = patch;
             return {
-              select: () => ({
-                single: async () => ({ data: upsertedRow, error: null }),
-              }),
+              eq: (col, val) => {
+                assert.equal(col, 'campaign_id');
+                assert.equal(val, 10);
+                return {
+                  select: () => ({
+                    single: async () => ({ data: { ...existingInDb, ...patch }, error: null }),
+                  }),
+                };
+              },
             };
           },
         };
@@ -825,27 +908,25 @@ describe('Inteligência Comercial — Suíte Completa de Contratos e Serviço Re
         });
 
         assert.equal(res.error, null);
-        assert.equal(upsertedRow.campaign_id, 10);
-        assert.equal(upsertedRow.segment_id, 'seg-xyz');
-        assert.equal(upsertedRow.segment_version, 2);
-        assert.equal(upsertedRow.estimated_count, 85);
-        // Garante que campos não enviados foram PRESERVADOS do banco
-        assert.equal(upsertedRow.objetivo, 'Reativar 50 clientes inativos');
-        assert.equal(upsertedRow.meta, '20 agendamentos');
-        assert.equal(upsertedRow.orcamento_planejado, 1500);
-        assert.equal(upsertedRow.investimento_realizado, 1200);
-        assert.equal(upsertedRow.aprendizado, 'Bons resultados no final de semana');
+        assert.equal(updatedPatch.segment_id, 'seg-xyz');
+        assert.equal(updatedPatch.segment_version, 2);
+        assert.equal(updatedPatch.estimated_count, 85);
+        assert.ok(updatedPatch.snapshot_date);
+        // Atualização atômica: não envia os campos não modificados (preservando o banco mesmo com edições simultâneas)
+        assert.equal(updatedPatch.objetivo, undefined, 'objetivo não deve ser sobrescrito pelo vínculo de público');
+        assert.equal(updatedPatch.orcamento_planejado, undefined, 'orcamento_planejado não deve ser sobrescrito');
+        assert.equal(updatedPatch.aprendizado, undefined, 'aprendizado não deve ser sobrescrito');
       } finally {
         supabase.from = originalFrom;
       }
     });
 
-    it('Editar ficha da campanha preserva vínculo do público e snapshots pré-existentes', async () => {
+    it('Editar ficha da campanha envia update atômico sem sobrescrever vínculo e snapshots de público', async () => {
       const originalFrom = supabase.from;
-      let upsertedRow = null;
+      let updatedPatch = null;
 
-      // Simula brief existente com vínculo de público já gravado
       const existingInDb = {
+        id: 'brief-20',
         campaign_id: 20,
         segment_id: 'seg-vip',
         segment_version: 4,
@@ -862,12 +943,18 @@ describe('Inteligência Comercial — Suíte Completa de Contratos e Serviço Re
               maybeSingle: async () => ({ data: existingInDb, error: null }),
             }),
           }),
-          upsert: (payloads) => {
-            upsertedRow = payloads[0];
+          update: (patch) => {
+            updatedPatch = patch;
             return {
-              select: () => ({
-                single: async () => ({ data: upsertedRow, error: null }),
-              }),
+              eq: (col, val) => {
+                assert.equal(col, 'campaign_id');
+                assert.equal(val, 20);
+                return {
+                  select: () => ({
+                    single: async () => ({ data: { ...existingInDb, ...patch }, error: null }),
+                  }),
+                };
+              },
             };
           },
         };
@@ -883,15 +970,13 @@ describe('Inteligência Comercial — Suíte Completa de Contratos e Serviço Re
         });
 
         assert.equal(res.error, null);
-        assert.equal(upsertedRow.campaign_id, 20);
-        assert.equal(upsertedRow.objetivo, 'Lançamento de Procedimento Novo');
-        assert.equal(upsertedRow.orcamento_planejado, 3000);
-        // Garante que segment_id e snapshot foram PRESERVADOS
-        assert.equal(upsertedRow.segment_id, 'seg-vip');
-        assert.equal(upsertedRow.segment_version, 4);
-        assert.deepEqual(upsertedRow.conditions_snapshot, existingInDb.conditions_snapshot);
-        assert.equal(upsertedRow.estimated_count, 42);
-        assert.equal(upsertedRow.snapshot_date, '2026-10-10T12:00:00Z');
+        assert.equal(updatedPatch.objetivo, 'Lançamento de Procedimento Novo');
+        assert.equal(updatedPatch.orcamento_planejado, 3000);
+        assert.equal(updatedPatch.aprendizado, 'Campanha em andamento');
+        // Atualização atômica: não envia segment_id nem snapshots (preserva no banco)
+        assert.equal(updatedPatch.segment_id, undefined, 'segment_id não deve ser sobrescrito pela edição da ficha');
+        assert.equal(updatedPatch.conditions_snapshot, undefined, 'snapshot não deve ser sobrescrito');
+        assert.equal(updatedPatch.estimated_count, undefined, 'estimated_count não deve ser sobrescrito');
       } finally {
         supabase.from = originalFrom;
       }
@@ -926,6 +1011,8 @@ describe('Inteligência Comercial — Suíte Completa de Contratos e Serviço Re
       { id: 'l4', status: 'encerrado_perdido', arquivado: false, proxima_acao_prazo: '2026-10-01', proxima_acao_concluida: false, proxima_acao_descricao: 'Reativar' },
       // 5. Arquivado com prazo atrasado (NÃO deve aparecer)
       { id: 'l5', status: 'aguardando_resposta', arquivado: true, proxima_acao_prazo: '2026-10-05', proxima_acao_concluida: false, proxima_acao_descricao: 'Mensagem' },
+      // 6. Contato com tarefa CONCLUÍDA com prazo e descrição ainda preenchidos (DEVE contar como sem ação!)
+      { id: 'l6', status: 'aguardando_resposta', arquivado: false, proxima_acao_prazo: '2026-10-10', proxima_acao_concluida: true, proxima_acao_descricao: 'Mensagem já enviada' },
     ];
 
     it('Filtro atrasados em /crm coincide com retornos_pendentes da Visão Geral', () => {
@@ -938,15 +1025,114 @@ describe('Inteligência Comercial — Suíte Completa de Contratos e Serviço Re
       assert.equal(atrasados[0].id, 'l1');
     });
 
-    it('Filtro sem_acao em /crm coincide com interessados_sem_acao da Visão Geral', () => {
+    it('Filtro sem_acao em /crm coincide com interessados_sem_acao da Visão Geral (incluindo tarefa concluída)', () => {
       const semAcao = leads.filter(l => {
         if (l.arquivado) return false;
-        if (['encerrado_ganho', 'encerrado_perdido'].includes(l.status)) return false;
-        const hasValidAction = l.proxima_acao_prazo && l.proxima_acao_descricao && l.proxima_acao_descricao.trim() && !l.proxima_acao_concluida;
-        return !hasValidAction;
+        if (['encerrado_ganho', 'encerrado_perdido', 'arquivado'].includes(l.status)) return false;
+        const hasValidPendingAction = Boolean(
+          l.proxima_acao_prazo &&
+          l.proxima_acao_descricao &&
+          l.proxima_acao_descricao.trim() &&
+          !l.proxima_acao_concluida
+        );
+        return !hasValidPendingAction;
       });
-      assert.equal(semAcao.length, 1);
-      assert.equal(semAcao[0].id, 'l2');
+      assert.equal(semAcao.length, 2, 'l2 (sem prazo) e l6 (tarefa concluída) devem ambos constar como sem ação');
+      assert.deepEqual(semAcao.map(l => l.id), ['l2', 'l6']);
+    });
+  });
+
+  describe('18. Execução de Queries SQL Reais em PostgreSQL Isolado (pg-mem)', () => {
+    it('Exclusão estrita de sangria sem tipo e cálculo de receita líquida (R$ 800 - 100 = 700)', () => {
+      const db = newDb();
+      db.public.none(`
+        CREATE TABLE sheet_transactions (
+          id text PRIMARY KEY,
+          client text,
+          procedure text,
+          row_type text,
+          tipo text,
+          gross numeric,
+          date_ref date,
+          deleted_at timestamp,
+          is_metadata boolean
+        );
+
+        INSERT INTO sheet_transactions VALUES 
+          ('1', 'Maria Silva', 'Limpeza', 'receita', 'receita', 800.00, '2026-10-01', null, false),
+          ('2', 'SANGRIA CAIXA', null, null, null, 700.00, '2026-10-01', null, false),
+          ('3', 'DESPESA PAPELARIA', null, 'despesa', 'despesa', 150.00, '2026-10-01', null, false),
+          ('4', 'João Santos', 'Corte', 'estorno', 'estorno', 100.00, '2026-10-01', null, false),
+          ('5', 'Cliente Pendente', null, null, null, 200.00, '2026-10-01', null, false);
+      `);
+
+      // Executa a cláusula WHERE real da RPC fn_ic_overview_metrics / fn_ic_canal_stats
+      const rows = db.public.many(`
+        SELECT id, client, row_type, gross,
+               CASE WHEN lower(COALESCE(row_type, tipo, '')) = 'estorno' THEN -gross ELSE gross END as net_val
+        FROM sheet_transactions st
+        WHERE deleted_at IS NULL
+          AND (is_metadata IS NOT TRUE OR is_metadata IS NULL)
+          AND lower(COALESCE(row_type, tipo, '')) IN ('receita', 'estorno')
+          AND NOT (lower(COALESCE(row_type, tipo, '')) LIKE ANY (ARRAY['despesa%', 'saida%', 'saída%', 'sangria%', 'gasto%', 'total%', 'resumo%']))
+          AND NOT (lower(COALESCE(client, '')) LIKE ANY (ARRAY['sangria%', 'despesa%', 'passagem%', 'produtos%', 'tributos%', 'outras saída%', 'outras saida%', 'total%', 'resumo%']))
+          AND NOT (lower(COALESCE(procedure, '')) LIKE ANY (ARRAY['sangria%', 'despesa%', 'passagem%', 'produtos%', 'tributos%', 'outras saída%', 'outras saida%', 'total%', 'resumo%']));
+      `);
+
+      assert.equal(rows.length, 2, 'Apenas Maria Silva (receita) e João Santos (estorno) devem ser retornados');
+      assert.deepEqual(rows.map(r => r.id), ['1', '4']);
+
+      const totalLiquido = rows.reduce((acc, r) => acc + Number(r.net_val), 0);
+      assert.equal(totalLiquido, 700, 'O líquido deve ser 700 e NUNCA 1500 (sangria de 700 foi excluída)');
+    });
+
+    it('v_interessados_sem_acao conta lead com tarefa concluída no PostgreSQL isolado', () => {
+      const db = newDb();
+      // Registra trim() com a API correta do pg-mem
+      db.public.registerFunction({
+        name: 'trim',
+        args: ['text'],
+        returns: 'text',
+        implementation: (s) => (s ? s.trim() : ''),
+      });
+      db.public.none(`
+        CREATE TABLE crm_leads (
+          id text PRIMARY KEY,
+          arquivado boolean,
+          status text,
+          proxima_acao_prazo date,
+          proxima_acao_descricao text,
+          proxima_acao_concluida boolean
+        );
+
+        INSERT INTO crm_leads VALUES
+          ('lead-1', false, 'aguardando_resposta', '2026-10-10', 'Ligar para confirmar', true),
+          ('lead-2', false, 'aguardando_resposta', null, null, false),
+          ('lead-3', false, 'aguardando_resposta', '2026-10-20', 'Retornar semana que vem', false),
+          ('lead-4', false, 'encerrado_ganho', null, null, false);
+      `);
+
+      // Executa a query da RPC fn_ic_overview_metrics (versão corrigida com NOT AND)
+      // lead-1: arquivado=false, status=aguardando_resposta, prazo NãO NULL, descricao NãO NULL, descricao<>'', concluida=TRUE
+      //   -> NOT (prazo IS NOT NULL AND desc IS NOT NULL AND desc<>'' AND concluida IS FALSE)
+      //   -> NOT (true AND true AND true AND false) -> NOT false -> TRUE -> conta em sem_acao
+      // lead-2: prazo NULL -> NOT (false AND ...) -> NOT false -> TRUE -> conta em sem_acao
+      // lead-3: prazo NOT NULL, desc NOT NULL, desc<>'', concluida=false -> NOT (true AND true AND true AND true) -> NOT true -> FALSE -> não conta
+      // lead-4: status encerrado_ganho -> filtrado por AND status NOT IN
+      const res = db.public.one(`
+        SELECT COUNT(*) as count
+        FROM crm_leads
+        WHERE (arquivado IS FALSE OR arquivado IS NULL)
+          AND status NOT IN ('encerrado_ganho', 'encerrado_perdido', 'arquivado')
+          AND NOT (
+            proxima_acao_prazo IS NOT NULL
+            AND proxima_acao_descricao IS NOT NULL
+            AND proxima_acao_descricao <> ''
+            AND (proxima_acao_concluida IS FALSE OR proxima_acao_concluida IS NULL)
+          );
+      `);
+
+      assert.equal(Number(res.count), 2, 'lead-1 (concluída) e lead-2 (sem prazo) devem contar em interessados_sem_acao');
     });
   });
 
