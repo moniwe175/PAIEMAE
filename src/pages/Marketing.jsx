@@ -3,7 +3,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Megaphone, Plus, XCircle, Users, TrendingUp, Send, MessageSquare, Camera,
   Star, Search, Edit3, Trash2, CheckCircle, Pause, Play, Archive, Eye,
-  Target, DollarSign, RefreshCw, Mail, Smartphone, Sparkles
+  Target, DollarSign, RefreshCw, Mail, Smartphone, Sparkles, Brain
 } from 'lucide-react';
 import {
   fetchCampaigns, insertCampaign, updateCampaign, deleteCampaign
@@ -18,6 +18,7 @@ import InstagramTestModal from '../components/marketing/InstagramTestModal';
 import InstagramConfigModal from '../components/marketing/InstagramConfigModal';
 import InstagramInsightsPanel from '../components/marketing/InstagramInsightsPanel';
 import IdeiasPlanejamento from '../components/marketing/IdeiasPlanejamento';
+import InteligenicaComercial from '../components/marketing/inteligencia/InteligenicaComercial';
 import { fetchLinkedIdeasForCampaign } from '../services/marketingIdeasService';
 import {
   getInstagramStatus,
@@ -636,6 +637,13 @@ export default function Marketing() {
         >
           <Sparkles style={{ width: 14, height: 14, color: '#8B5CF6' }} /> Ideias e Planejamento
         </button>
+        <button
+          className={`tab-item${subTab === 'inteligencia' ? ' active' : ''}`}
+          onClick={() => setSubTab('inteligencia')}
+          style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700 }}
+        >
+          <Brain style={{ width: 14, height: 14, color: '#6D28D9' }} /> Inteligência
+        </button>
       </div>
 
       {/* ────────────────── SUB-ABA 1: CAMPANHAS ────────────────── */}
@@ -877,6 +885,9 @@ export default function Marketing() {
               enviados: 0, abertos: 0, cliques: 0, conversoes: 0, orcamento: 0 }, ...prev]);
           }}
         />
+      )}
+      {subTab === 'inteligencia' && (
+        <InteligenicaComercial campanhas={campanhas} />
       )}
     </div>
   );
