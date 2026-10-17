@@ -303,7 +303,7 @@ function CampanhaDetail({ campanha, onClose, onEdit }) {
 // ─── Main Component ────────────────────────────────────────────
 
 export default function Marketing() {
-  const [subTab, setSubTab] = useState('campanhas'); // 'campanhas' | 'instagram' | 'insights' | 'ideias'
+  const [subTab, setSubTab] = useState('instagram'); // 'instagram' | 'insights' | 'campanhas' | 'ideias' | 'inteligencia'
 
   // ── Campanhas State ──
   const [campanhas, setCampanhas] = useState([]);
@@ -602,15 +602,8 @@ export default function Marketing() {
         </div>
       </div>
 
-      {/* Main Tab Switcher (Campanhas vs Automação Instagram) */}
+      {/* Main Tab Switcher (Automação Instagram, Insights Instagram, Campanhas, etc.) */}
       <div className="tabs" style={{ marginBottom: 20 }}>
-        <button
-          className={`tab-item${subTab === 'campanhas' ? ' active' : ''}`}
-          onClick={() => setSubTab('campanhas')}
-          style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700 }}
-        >
-          <Megaphone style={{ width: 14, height: 14 }} /> Campanhas
-        </button>
         <button
           className={`tab-item${subTab === 'instagram' ? ' active' : ''}`}
           onClick={() => setSubTab('instagram')}
@@ -629,6 +622,13 @@ export default function Marketing() {
           style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700 }}
         >
           <TrendingUp style={{ width: 14, height: 14, color: '#C02662' }} /> Insights Instagram
+        </button>
+        <button
+          className={`tab-item${subTab === 'campanhas' ? ' active' : ''}`}
+          onClick={() => setSubTab('campanhas')}
+          style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700 }}
+        >
+          <Megaphone style={{ width: 14, height: 14 }} /> Campanhas
         </button>
         <button
           className={`tab-item${subTab === 'ideias' ? ' active' : ''}`}

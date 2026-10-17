@@ -1549,16 +1549,21 @@ export async function insertCrmLead(lead) {
   return { data, error: null };
 }
 
-export async function updateCrmLead(id, updates) {
+export async function updateCrmLead(id, updates, expectedStatus = null) {
   if (!isSupabaseConfigured()) return handleError('Supabase not configured');
-  const { data, error } = await supabase
-    .from('crm_leads')
-    .update(updates)
-    .eq('id', id)
-    .select()
-    .single();
+  let query = supabase.from('crm_leads').update(updates).eq('id', id);
+  if (expectedStatus) {
+    query = query.eq('status', expectedStatus);
+    const { data, error } = await query.select();
+    if (error) return handleError(error);
+    if (!data || data.length === 0) {
+      return { data: null, error: null, count: 0 };
+    }
+    return { data: data[0], error: null, count: 1 };
+  }
+  const { data, error } = await query.select().single();
   if (error) return handleError(error);
-  return { data, error: null };
+  return { data, error: null, count: 1 };
 }
 
 export async function deleteCrmLead(id) {

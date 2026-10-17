@@ -5,7 +5,7 @@ import {
   Users, Plus, Search, XCircle, RefreshCw, Phone, Calendar,
   CheckCircle, Clock, AlertTriangle, MessageSquare,
   ChevronRight, Link2, Send, Star, ArrowRight, Flag, ClipboardList,
-  Check, X, Inbox, Archive, UserPlus, Filter,
+  Check, X, Inbox, Archive, UserPlus, Filter, Camera,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import {
@@ -83,6 +83,46 @@ function isDueToday(lead) {
 function normPhone(tel) {
   if (!tel) return '';
   return tel.replace(/\D/g, '');
+}
+
+const DEFAULT_FOLLOWUP_DAYS = 2;
+
+function addDaysToSaoPauloDate(days = DEFAULT_FOLLOWUP_DAYS) {
+  const now = new Date();
+  const spTime = new Date(now.toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }));
+  spTime.setDate(spTime.getDate() + days);
+  const y = spTime.getFullYear();
+  const m = String(spTime.getMonth() + 1).padStart(2, '0');
+  const d = String(spTime.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+function fmtRelativeTime(ts) {
+  if (!ts) return '—';
+  const diffMs = Date.now() - new Date(ts).getTime();
+  if (diffMs < 0) return 'agora mesmo';
+  const diffMin = Math.floor(diffMs / 60000);
+  if (diffMin < 1) return 'agora mesmo';
+  if (diffMin < 60) return `há ${diffMin} min`;
+  const diffHours = Math.floor(diffMin / 60);
+  if (diffHours < 24) return `há ${diffHours} ${diffHours === 1 ? 'hora' : 'horas'}`;
+  const diffDays = Math.floor(diffHours / 24);
+  if (diffDays === 1) return 'ontem';
+  if (diffDays < 30) return `há ${diffDays} dias`;
+  return fmtDatetime(ts);
+}
+
+function openWhatsApp(telefone) {
+  const raw = normPhone(telefone);
+  if (!raw || raw.length < 10) return;
+  const num = raw.startsWith('55') ? raw : `55${raw}`;
+  window.open(`https://wa.me/${num}`, '_blank', 'noopener,noreferrer');
+}
+
+function openInstagram(instagram) {
+  const handle = (instagram || '').replace(/^@/, '').trim();
+  if (!handle) return;
+  window.open(`https://instagram.com/${encodeURIComponent(handle)}`, '_blank', 'noopener,noreferrer');
 }
 
 // ─── Nova lead modal ──────────────────────────────────────────
@@ -950,9 +990,15 @@ function LeadDrawer({ lead, onClose, onUpdate, clientes = [], agendamentos = [],
 
 // ─── Lead Row ─────────────────────────────────────────────────
 
-function LeadRow({ lead, onClick, overdue, dueToday }) {
+function LeadRow({ lead, onClick, overdue, dueToday, isFila, onJaRespondi, actionLoading }) {
   const st = statusConfig(lead.status);
   const StIcon = st.icon;
+
+  const rawPhone = normPhone(lead.telefone);
+  const hasPhone = Boolean(rawPhone && rawPhone.length >= 10);
+  const cleanIg = (lead.instagram || '').replace(/^@/, '').trim();
+  const hasInstagram = Boolean(cleanIg.length > 0);
+
   return (
     <tr onClick={onClick} style={{ cursor: 'pointer' }} tabIndex={0} onKeyDown={e => e.key === 'Enter' && onClick()}>
       <td>
@@ -1007,10 +1053,94 @@ function LeadRow({ lead, onClick, overdue, dueToday }) {
           <StIcon style={{ width: 10, height: 10 }} />{st.label}
         </span>
       </td>
-      <td style={{ fontSize: 11, color: 'var(--text-muted)' }}>{fmtDatetime(lead.created_at)}</td>
-      <td>
-        <ChevronRight style={{ width: 14, height: 14, color: 'var(--text-muted)' }} />
+      <td style={{ fontSize: 11, color: 'var(--text-muted)', whiteSpace: 'nowrap' }} title={fmtDatetime(lead.created_at)}>
+        {isFila ? (
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: 'rgba(212, 149, 106, 0.12)', color: '#C0706A', padding: '3px 8px', borderRadius: 6, fontWeight: 700, fontSize: 11 }}>
+            <Clock style={{ width: 11, height: 11 }} />
+            {fmtRelativeTime(lead.created_at)}
+          </div>
+        ) : (
+          fmtDatetime(lead.created_at)
+        )}
       </td>
+      {isFila ? (
+        <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }} onClick={e => e.stopPropagation()}>
+          <div style={{ display: 'inline-flex', gap: 8, alignItems: 'center', justifyContent: 'flex-end' }}>
+            {hasPhone ? (
+              <button
+                type="button"
+                className="btn btn-sm"
+                onClick={(e) => { e.stopPropagation(); openWhatsApp(lead.telefone); }}
+                title={`Abrir conversa no WhatsApp (${lead.telefone})`}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 5,
+                  fontSize: 12, fontWeight: 700, padding: '6px 12px', minHeight: 36,
+                  background: 'rgba(37, 211, 102, 0.12)', color: '#15803d', border: '1px solid rgba(37, 211, 102, 0.3)',
+                  borderRadius: 6, cursor: 'pointer',
+                }}
+              >
+                <Phone style={{ width: 13, height: 13 }} />
+                WhatsApp
+              </button>
+            ) : hasInstagram ? (
+              <button
+                type="button"
+                className="btn btn-sm"
+                onClick={(e) => { e.stopPropagation(); openInstagram(lead.instagram); }}
+                title={`Abrir perfil do Instagram (@${cleanIg})`}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 5,
+                  fontSize: 12, fontWeight: 700, padding: '6px 12px', minHeight: 36,
+                  background: 'rgba(225, 48, 108, 0.12)', color: '#E1306C', border: '1px solid rgba(225, 48, 108, 0.3)',
+                  borderRadius: 6, cursor: 'pointer',
+                }}
+              >
+                <Camera style={{ width: 13, height: 13 }} />
+                Instagram
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="btn btn-sm"
+                disabled
+                title="Nenhum telefone ou Instagram cadastrado"
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 5,
+                  fontSize: 12, fontWeight: 600, padding: '6px 12px', minHeight: 36,
+                  background: 'var(--bg-main)', color: 'var(--text-muted)', border: '1px solid var(--border-color)',
+                  borderRadius: 6, opacity: 0.6, cursor: 'not-allowed',
+                }}
+              >
+                Sem contato
+              </button>
+            )}
+
+            <button
+              type="button"
+              className="btn btn-sm btn-primary"
+              disabled={actionLoading}
+              onClick={(e) => onJaRespondi(lead, e)}
+              title="Marcar como respondido e definir próxima ação"
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 5,
+                fontSize: 12, fontWeight: 700, padding: '6px 12px', minHeight: 36,
+                borderRadius: 6, cursor: actionLoading ? 'wait' : 'pointer',
+              }}
+            >
+              {actionLoading ? (
+                <RefreshCw style={{ width: 13, height: 13, animation: 'spin 1s linear infinite' }} />
+              ) : (
+                <CheckCircle style={{ width: 13, height: 13 }} />
+              )}
+              Já respondi
+            </button>
+          </div>
+        </td>
+      ) : (
+        <td>
+          <ChevronRight style={{ width: 14, height: 14, color: 'var(--text-muted)' }} />
+        </td>
+      )}
     </tr>
   );
 }
@@ -1033,6 +1163,15 @@ export default function CrmInteressados() {
   const [filtroOrigemParam, setFiltroOrigemParam] = useState(null);
   const [showNova, setShowNova] = useState(false);
   const [selectedLead, setSelectedLead] = useState(null);
+  const [undoToast, setUndoToast] = useState(null);
+  const [actionError, setActionError] = useState(null);
+  const [actionLoadingId, setActionLoadingId] = useState(null);
+
+  useEffect(() => {
+    return () => {
+      if (undoToast?.timerId) clearTimeout(undoToast.timerId);
+    };
+  }, [undoToast]);
 
   // Sincroniza aba e filtros vindos da Inteligência Comercial (/crm?filtro=...)
   useEffect(() => {
@@ -1112,6 +1251,122 @@ export default function CrmInteressados() {
   const handleLeadClick = async (lead) => {
     setSelectedLead(lead);
     if (clientes.length === 0) loadAuxData();
+  };
+
+  const handleJaRespondi = async (lead, e) => {
+    if (e) e.stopPropagation();
+    setActionError(null);
+    setActionLoadingId(lead.id);
+
+    // 1. Verifica se já existe próxima ação pendente aberta (não concluída e com texto)
+    const hasOpenPendingAction = Boolean(
+      lead.proxima_acao_descricao &&
+      lead.proxima_acao_descricao.trim() &&
+      !lead.proxima_acao_concluida
+    );
+
+    const prazoD2 = addDaysToSaoPauloDate(DEFAULT_FOLLOWUP_DAYS);
+    const currentAuthor = user?.email || null;
+    const responsavelAtribuido = (lead.responsavel && lead.responsavel.trim()) ? lead.responsavel : currentAuthor;
+
+    const updates = {
+      status: 'aguardando_cliente',
+      responsavel: responsavelAtribuido,
+      proxima_acao_descricao: hasOpenPendingAction ? lead.proxima_acao_descricao : 'Retornar contato',
+      proxima_acao_prazo: hasOpenPendingAction ? lead.proxima_acao_prazo : prazoD2,
+      proxima_acao_responsavel: lead.proxima_acao_responsavel || responsavelAtribuido,
+      proxima_acao_concluida: hasOpenPendingAction ? lead.proxima_acao_concluida : false,
+    };
+
+    // 2. Atualização condicionada ao status 'aguardando_resposta'
+    const res = await updateCrmLead(lead.id, updates, 'aguardando_resposta');
+    setActionLoadingId(null);
+
+    if (res.error) {
+      setActionError('Erro ao registrar resposta. Tente novamente.');
+      return;
+    }
+
+    if (res.count === 0) {
+      setActionError('Outra pessoa já respondeu este contato.');
+      await load();
+      return;
+    }
+
+    const updatedLead = res.data;
+
+    // 3. Grava no histórico (crm_interactions) com tipo 'contato' e texto neutro
+    const histDesc = hasOpenPendingAction ? lead.proxima_acao_descricao : 'Retornar contato';
+    await insertCrmInteraction({
+      lead_id: lead.id,
+      tipo: 'contato',
+      conteudo: 'Resposta registrada. Próxima ação: Retornar contato.',
+      autor: currentAuthor || 'Sistema',
+      meta: {
+        acao: 'ja_respondi',
+        de: 'aguardando_resposta',
+        para: 'aguardando_cliente',
+        proxima_acao: histDesc,
+        prazo: updates.proxima_acao_prazo,
+      },
+    });
+
+    // 4. Atualiza lista local sem remoção prematura
+    setLeads(prev => prev.map(l => l.id === lead.id ? updatedLead : l));
+    if (selectedLead && selectedLead.id === lead.id) {
+      setSelectedLead(updatedLead);
+    }
+
+    // 5. Configura aviso "Desfazer" de 10 segundos
+    if (undoToast?.timerId) {
+      clearTimeout(undoToast.timerId);
+    }
+    const timerId = setTimeout(() => {
+      setUndoToast(null);
+    }, 10000);
+
+    setUndoToast({
+      leadId: lead.id,
+      leadNome: lead.nome,
+      previousLead: lead,
+      timerId,
+    });
+  };
+
+  const handleDesfazer = async () => {
+    if (!undoToast) return;
+    const { leadId, previousLead, timerId } = undoToast;
+    if (timerId) clearTimeout(timerId);
+    setUndoToast(null);
+    setActionLoadingId(leadId);
+
+    const revertPayload = {
+      status: 'aguardando_resposta',
+      responsavel: previousLead.responsavel,
+      proxima_acao_descricao: previousLead.proxima_acao_descricao,
+      proxima_acao_prazo: previousLead.proxima_acao_prazo,
+      proxima_acao_responsavel: previousLead.proxima_acao_responsavel,
+      proxima_acao_concluida: previousLead.proxima_acao_concluida,
+    };
+
+    const res = await updateCrmLead(leadId, revertPayload);
+    setActionLoadingId(null);
+
+    if (res.data) {
+      await insertCrmInteraction({
+        lead_id: leadId,
+        tipo: 'contato',
+        conteudo: 'Ação desfeita: retorno ao status Responder.',
+        autor: user?.email || 'Sistema',
+        meta: { acao: 'desfazer_resposta' },
+      });
+      setLeads(prev => prev.map(l => l.id === leadId ? res.data : l));
+      if (selectedLead && selectedLead.id === leadId) {
+        setSelectedLead(res.data);
+      }
+    } else {
+      setActionError('Erro ao desfazer ação. Tente novamente.');
+    }
   };
 
   // ── Filtering ──
@@ -1318,6 +1573,34 @@ export default function CrmInteressados() {
         )}
       </div>
 
+      {actionError && (
+        <div style={{
+          marginBottom: 16,
+          padding: '10px 16px',
+          background: '#FEF2F2',
+          border: '1px solid #FECACA',
+          borderRadius: 8,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          fontSize: 13,
+          color: '#DC2626',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <AlertTriangle style={{ width: 16, height: 16 }} />
+            <span>{actionError}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setActionError(null)}
+            style={{ background: 'transparent', border: 'none', color: '#DC2626', cursor: 'pointer' }}
+            aria-label="Fechar erro"
+          >
+            <X style={{ width: 14, height: 14 }} />
+          </button>
+        </div>
+      )}
+
       {/* Tabs + Search */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
         <div className="tabs">
@@ -1384,7 +1667,7 @@ export default function CrmInteressados() {
             <p style={{ marginTop: 12, color: 'var(--text-muted)' }}>
               {busca || filtroMeus || filtroSemAcao || filtroArquivados
                 ? 'Nenhum resultado para estes filtros.'
-                : aba === 'fila'       ? 'Nenhum interessado aguardando resposta.'
+                : aba === 'fila'       ? 'Tudo respondido por enquanto.'
                 : aba === 'hoje'       ? 'Nenhuma ação para hoje. Bom trabalho!'
                 : aba === 'atrasados'  ? 'Nenhuma ação atrasada.'
                 : aba === 'agendados'  ? 'Nenhum interessado agendado.'
@@ -1416,8 +1699,12 @@ export default function CrmInteressados() {
                   <th>Responsável</th>
                   <th>Próxima ação</th>
                   <th>Status</th>
-                  <th>Cadastro</th>
-                  <th style={{ width: 24 }}></th>
+                  <th>{aba === 'fila' ? 'Espera' : 'Cadastro'}</th>
+                  {aba === 'fila' ? (
+                    <th style={{ textAlign: 'right', minWidth: 230 }}>Ações</th>
+                  ) : (
+                    <th style={{ width: 24 }}></th>
+                  )}
                 </tr>
               </thead>
               <tbody>
@@ -1428,6 +1715,9 @@ export default function CrmInteressados() {
                     onClick={() => handleLeadClick(lead)}
                     overdue={isOverdue(lead)}
                     dueToday={isDueToday(lead)}
+                    isFila={aba === 'fila'}
+                    onJaRespondi={handleJaRespondi}
+                    actionLoading={actionLoadingId === lead.id}
                   />
                 ))}
               </tbody>
@@ -1461,6 +1751,66 @@ export default function CrmInteressados() {
           </div>
         ) : null;
       })()}
+
+      {/* Undo ("Desfazer") toast notice */}
+      {undoToast && (
+        <div style={{
+          position: 'fixed',
+          bottom: 24,
+          right: 24,
+          zIndex: 1000,
+          background: '#1F2937',
+          color: '#F9FAFB',
+          padding: '12px 18px',
+          borderRadius: 10,
+          boxShadow: '0 10px 25px -5px rgba(0,0,0,0.3)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 16,
+          fontSize: 13,
+          border: '1px solid #374151',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <CheckCircle style={{ width: 16, height: 16, color: '#34D399' }} />
+            <span>Resposta registrada para <strong>{undoToast.leadNome}</strong>.</span>
+          </div>
+          <button
+            type="button"
+            onClick={handleDesfazer}
+            style={{
+              background: '#3B82F6',
+              color: '#fff',
+              border: 'none',
+              borderRadius: 6,
+              padding: '5px 12px',
+              fontSize: 12,
+              fontWeight: 700,
+              cursor: 'pointer',
+            }}
+          >
+            Desfazer
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              if (undoToast.timerId) clearTimeout(undoToast.timerId);
+              setUndoToast(null);
+            }}
+            style={{
+              background: 'transparent',
+              border: 'none',
+              color: '#9CA3AF',
+              cursor: 'pointer',
+              padding: 2,
+              display: 'flex',
+              alignItems: 'center',
+            }}
+            aria-label="Fechar aviso"
+          >
+            <X style={{ width: 14, height: 14 }} />
+          </button>
+        </div>
+      )}
     </div>
   );
 }
