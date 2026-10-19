@@ -1,9 +1,16 @@
-import React, { useState, useRef, useEffect, useCallback } from "react";
+/* eslint-disable react/prop-types */
+import { useState, useRef, useEffect, useCallback } from "react";
 import {
   Upload, Download, Play, Pause, SkipBack, SkipForward,
   CheckCircle2, AlertCircle, Loader2, Volume2, VolumeX,
-  Sparkles, Settings2, RefreshCw, Clock, Film, Trash2, Info
+  Sparkles, Settings2, RefreshCw, Clock, Film, Trash2, Info, ImagePlus, X
 } from "lucide-react";
+import {
+  buildAutomaticBrollCues,
+  buildKeepSegments,
+  detectAdaptiveSilences,
+  fitCover,
+} from "../lib/videoAutoEdit";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants
@@ -11,9 +18,9 @@ import {
 const MAX_VIDEO_DURATION = 5 * 60; // 5 minutos
 
 const SENSITIVITY = {
-  suave:     { minPauseS: 0.50, paddingS: 0.15, rmsRatio: 0.08 },
-  normal:    { minPauseS: 0.35, paddingS: 0.12, rmsRatio: 0.12 },
-  agressivo: { minPauseS: 0.20, paddingS: 0.08, rmsRatio: 0.18 },
+  suave:     { minPauseS: 0.50, paddingS: 0.16, thresholdRatio: 0.18, bridgeSpeechS: 0.06 },
+  normal:    { minPauseS: 0.35, paddingS: 0.12, thresholdRatio: 0.24, bridgeSpeechS: 0.08 },
+  agressivo: { minPauseS: 0.20, paddingS: 0.08, thresholdRatio: 0.32, bridgeSpeechS: 0.10 },
 };
 
 const STEPS = [
@@ -116,44 +123,6 @@ function computeRMS(mono, sr, windowMs = 20) {
     r.push({ t: i / sr, rms: Math.sqrt(sum / chunk.length) });
   }
   return r;
-}
-
-function detectSilences(rmsData, cfg) {
-  const maxRMS   = Math.max(...rmsData.map((d) => d.rms), 0.001);
-  const thr      = maxRMS * cfg.rmsRatio;
-  const silences = [];
-  let silStart   = null;
-
-  for (const { t, rms } of rmsData) {
-    if (rms < thr) {
-      if (silStart === null) silStart = t;
-    } else if (silStart !== null) {
-      if (t - silStart >= cfg.minPauseS) {
-        silences.push({
-          start: Math.max(0, silStart + cfg.paddingS),
-          end: Math.max(0, t - cfg.paddingS)
-        });
-      }
-      silStart = null;
-    }
-  }
-  return silences;
-}
-
-function silencesToSegments(silences, dur) {
-  const segs = [];
-  let cursor = 0;
-  for (const s of silences) {
-    const end = Math.max(cursor + 0.05, s.start);
-    if (end - cursor > 0.12) {
-      segs.push({ start: cursor, end });
-    }
-    cursor = s.end;
-  }
-  if (dur - cursor > 0.12) {
-    segs.push({ start: cursor, end: dur });
-  }
-  return segs;
 }
 
 function removeRepetitions(segs, words) {
@@ -267,17 +236,16 @@ export default function EditorVideo() {
 
   // Results
   const [segments,   setSegments]   = useState([]);
-  const [autoWords,  setAutoWords]  = useState([]);
   const [captions,   setCaptions]   = useState([]);
+  const [brollAssets, setBrollAssets] = useState([]);
+  const [brollCues, setBrollCues] = useState([]);
   const [origDur,    setOrigDur]    = useState(0);
   const [finalDur,   setFinalDur]   = useState(0);
-  const [modelDev,   setModelDev]   = useState("wasm");
 
   // Settings
   const [settings, setSettings] = useState({
     sensitivity:    "normal",
     enableCaptions: true,
-    enableZoom:     true,
     enableAudio:    true,
   });
 
@@ -289,16 +257,32 @@ export default function EditorVideo() {
   const canvasRef   = useRef(null);
   const rafRef      = useRef(null);
   const fileRef     = useRef(null);
+  const brollFileRef = useRef(null);
   const workerRef   = useRef(null);
   const audioCtxR   = useRef(null);
   const cancelRef   = useRef(false);
-  const zoomRef     = useRef(1.0);
   const chunksRef   = useRef([]);
   const segmentsRef = useRef([]);
+  const brollAssetsRef = useRef([]);
 
   useEffect(() => {
     segmentsRef.current = segments;
   }, [segments]);
+
+  useEffect(() => {
+    setBrollCues(buildAutomaticBrollCues(segments, brollAssets));
+  }, [segments, brollAssets]);
+
+  useEffect(() => {
+    brollAssetsRef.current = brollAssets;
+  }, [brollAssets]);
+
+  useEffect(() => () => {
+    brollAssetsRef.current.forEach(asset => {
+      if (asset.type === "video") asset.element?.pause();
+      URL.revokeObjectURL(asset.url);
+    });
+  }, []);
 
   const isDone    = step === "done";
   const isExp     = step === "exporting";
@@ -318,13 +302,73 @@ export default function EditorVideo() {
     setIsPlaying(false);
     setCurrentTime(0);
     setSegments([]);
-    setAutoWords([]);
     setCaptions([]);
+    setBrollAssets((current) => {
+      current.forEach(asset => {
+        if (asset.type === "video") asset.element?.pause();
+        URL.revokeObjectURL(asset.url);
+      });
+      return [];
+    });
+    setBrollCues([]);
     setStep(null);
     setPipeError(null);
     setNoWhisper(false);
-    zoomRef.current = 1.0;
   }, [videoSrc]);
+
+  const addBrollFiles = useCallback(async (fileList) => {
+    const files = [...(fileList || [])]
+      .filter(file => file.type.startsWith("image/") || file.type.startsWith("video/"))
+      .slice(0, 8);
+    if (!files.length) return;
+
+    const loaded = await Promise.all(files.map(file => new Promise((resolve) => {
+      const id = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
+      const url = URL.createObjectURL(file);
+      if (file.type.startsWith("image/")) {
+        const image = new Image();
+        image.onload = () => resolve({ id, name: file.name, type: "image", url, element: image });
+        image.onerror = () => { URL.revokeObjectURL(url); resolve(null); };
+        image.src = url;
+        return;
+      }
+
+      const video = document.createElement("video");
+      video.muted = true;
+      video.loop = true;
+      video.playsInline = true;
+      video.preload = "auto";
+      video.onloadedmetadata = () => resolve({
+        id, name: file.name, type: "video", url, element: video, duration: video.duration,
+      });
+      video.onerror = () => { URL.revokeObjectURL(url); resolve(null); };
+      video.src = url;
+      video.load();
+    })));
+
+    const valid = loaded.filter(Boolean);
+    setBrollAssets(current => {
+      const combined = [...current, ...valid];
+      combined.slice(8).forEach(asset => {
+        if (asset.type === "video") asset.element?.pause();
+        URL.revokeObjectURL(asset.url);
+      });
+      return combined.slice(0, 8);
+    });
+    if (valid.length) {
+      setToast({ msg: `${valid.length} mídia(s) de apoio adicionada(s).`, isError: false });
+      setTimeout(() => setToast(null), 5000);
+    }
+  }, []);
+
+  const removeBrollAsset = useCallback((assetId) => {
+    setBrollAssets(current => current.filter(asset => {
+      if (asset.id !== assetId) return true;
+      if (asset.type === "video") asset.element?.pause();
+      URL.revokeObjectURL(asset.url);
+      return false;
+    }));
+  }, []);
 
   useEffect(() => {
     const v = videoRef.current;
@@ -380,31 +424,46 @@ export default function EditorVideo() {
       c.height = v.videoHeight || 720;
     }
 
-    // Dynamic zoom alternation (100% and ~115% between cuts)
-    if (settings.enableZoom && segments.length > 0) {
-      const ct = v.currentTime;
-      const si = segments.findIndex((s) => ct >= s.start && ct < s.end);
-      const tgt = si >= 0 ? (si % 2 === 0 ? 1.0 : 1.14) : 1.0;
-      zoomRef.current += (tgt - zoomRef.current) * 0.08;
-    } else {
-      zoomRef.current += (1.0 - zoomRef.current) * 0.1;
+    ctx.drawImage(v, 0, 0, c.width, c.height);
+
+    // B-roll substitui somente a imagem; a voz do vídeo principal continua.
+    const ct = v.currentTime;
+    const activeCue = brollCues.find(cue => ct >= cue.start && ct < cue.end);
+    const activeAsset = activeCue && brollAssets.find(asset => asset.id === activeCue.assetId);
+    brollAssets.forEach(asset => {
+      if (asset.type === "video" && asset.id !== activeAsset?.id && !asset.element.paused) asset.element.pause();
+    });
+    if (activeCue && activeAsset?.element) {
+      const media = activeAsset.element;
+      if (activeAsset.type === "video" && Number.isFinite(activeAsset.duration) && activeAsset.duration > 0) {
+        const targetTime = (ct - activeCue.start) % activeAsset.duration;
+        if (Math.abs(media.currentTime - targetTime) > 0.18) media.currentTime = targetTime;
+        if (v.paused) {
+          if (!media.paused) media.pause();
+        } else if (media.paused) {
+          media.play().catch(() => {});
+        }
+      }
+      const sourceWidth = activeAsset.type === "image" ? media.naturalWidth : media.videoWidth;
+      const sourceHeight = activeAsset.type === "image" ? media.naturalHeight : media.videoHeight;
+      if (sourceWidth && sourceHeight) {
+        const rect = fitCover(sourceWidth, sourceHeight, c.width, c.height);
+        const fade = Math.min(1, (ct - activeCue.start) / 0.16, (activeCue.end - ct) / 0.16);
+        ctx.save();
+        ctx.globalAlpha = Math.max(0, fade);
+        ctx.drawImage(media, rect.x, rect.y, rect.width, rect.height);
+        ctx.restore();
+      }
     }
 
-    const sc = zoomRef.current;
-    ctx.save();
-    ctx.translate(c.width / 2, c.height / 2);
-    ctx.scale(sc, sc);
-    ctx.translate(-c.width / 2, -c.height / 2);
-    ctx.drawImage(v, 0, 0, c.width, c.height);
-    ctx.restore();
-
     // Word captions
-    if (settings.enableCaptions && autoWords.length > 0) {
-      drawWordCaption(ctx, autoWords, v.currentTime, c.width, c.height);
+    const captionWords = captions.flatMap(caption => caption.words || []);
+    if (settings.enableCaptions && captionWords.length > 0) {
+      drawWordCaption(ctx, captionWords, v.currentTime, c.width, c.height);
     }
 
     rafRef.current = requestAnimationFrame(drawFrame);
-  }, [videoSrc, segments, settings, autoWords]);
+  }, [videoSrc, settings, captions, brollAssets, brollCues]);
 
   useEffect(() => {
     if (videoSrc) rafRef.current = requestAnimationFrame(drawFrame);
@@ -418,9 +477,7 @@ export default function EditorVideo() {
     setPipeError(null);
     setNoWhisper(false);
     setSegments([]);
-    setAutoWords([]);
     setCaptions([]);
-    zoomRef.current = 1.0;
 
     const go = (key, label, pct = 0) => { setStep(key); setStepLabel(label); setStepPct(pct); };
     let words = [];
@@ -469,7 +526,6 @@ export default function EditorVideo() {
           if (cancelRef.current) { worker.terminate(); return; }
 
           if (loadResult.ok) {
-            setModelDev(loadResult.device);
             setStepPct(100);
 
             // ── 3. Transcrever fala ──
@@ -487,18 +543,15 @@ export default function EditorVideo() {
           } else {
             console.warn("Whisper indisponível:", loadResult.error);
             setNoWhisper(true);
-            setModelDev("silêncio");
           }
         } catch (workerErr) {
           console.warn("Falha no worker de transcrição:", workerErr);
           setNoWhisper(true);
-          setModelDev("silêncio");
         } finally {
           worker.terminate();
         }
       } else {
         setNoWhisper(true);
-        setModelDev("silêncio");
       }
 
       if (cancelRef.current) return;
@@ -507,8 +560,8 @@ export default function EditorVideo() {
       go("analyzing", "Analisando pausas e gerando cortes automáticos…", 60);
       const cfg   = SENSITIVITY[settings.sensitivity];
       const rms   = computeRMS(audio16k, 16000, 20);
-      const sils  = detectSilences(rms, cfg);
-      const raw   = silencesToSegments(sils, videoRef.current.duration);
+      const sils  = detectAdaptiveSilences(rms, videoRef.current.duration, cfg);
+      const raw   = buildKeepSegments(sils, videoRef.current.duration);
       const segs  = words.length > 0 ? removeRepetitions(raw, words) : raw;
       const segsW = segs.map((s) => ({
         ...s,
@@ -517,7 +570,6 @@ export default function EditorVideo() {
 
       const fDur = segs.reduce((sum, s) => sum + (s.end - s.start), 0);
       setSegments(segsW);
-      setAutoWords(words);
       setOrigDur(videoRef.current.duration);
       setFinalDur(fDur);
       if (words.length > 0) {
@@ -567,13 +619,17 @@ export default function EditorVideo() {
           try {
             const vs = v.captureStream?.();
             if (vs) vs.getAudioTracks().forEach((t) => cs.addTrack(t));
-          } catch {}
+          } catch {
+            // Alguns navegadores não expõem a faixa de áudio via captureStream.
+          }
         }
       } else {
         try {
           const vs = v.captureStream?.();
           if (vs) vs.getAudioTracks().forEach((t) => cs.addTrack(t));
-        } catch {}
+        } catch {
+          // Exportação segue somente com o vídeo quando a captura de áudio não existe.
+        }
       }
 
       const preferredMimes = [
@@ -706,7 +762,7 @@ export default function EditorVideo() {
             {!videoSrc ? (
               <div
                 className="ev-up"
-                style={C.uploadZone}
+                style={{ ...C.uploadZone, borderColor: dragOver ? "var(--color-primary)" : "var(--border-color)" }}
                 onClick={() => fileRef.current?.click()}
                 onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
                 onDragLeave={() => setDragOver(false)}
@@ -756,7 +812,6 @@ export default function EditorVideo() {
 
               {[
                 { key: "enableCaptions", label: "Legenda animada palavra por palavra" },
-                { key: "enableZoom",     label: "Zoom dinâmico alternado a cada corte" },
                 { key: "enableAudio",    label: "Melhora de áudio (redução de ruído e volume)" },
               ].map(({ key, label }) => (
                 <div key={key} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
@@ -764,6 +819,46 @@ export default function EditorVideo() {
                   <Toggle on={settings[key]} onChange={(v) => setSettings((s) => ({ ...s, [key]: v }))} />
                 </div>
               ))}
+
+              <div style={{ marginTop: 13, paddingTop: 12, borderTop: "1px solid var(--border-color)" }}>
+                <div style={{ ...C.secT, marginBottom: 7 }}><ImagePlus size={11} /> B-roll automático (opcional)</div>
+                <input
+                  ref={brollFileRef}
+                  type="file"
+                  accept="image/*,video/*"
+                  multiple
+                  style={{ display: "none" }}
+                  onChange={(event) => {
+                    addBrollFiles(event.target.files);
+                    event.target.value = "";
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => brollFileRef.current?.click()}
+                  disabled={!videoSrc || brollAssets.length >= 8}
+                  style={{ width: "100%", border: "1px dashed var(--border-color)", borderRadius: 7, padding: "8px 9px", background: "var(--bg-main)", color: "var(--text-medium)", cursor: videoSrc ? "pointer" : "not-allowed", fontSize: 11, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
+                >
+                  <ImagePlus size={13} /> Adicionar fotos ou vídeos
+                </button>
+                <p style={{ fontSize: 9.5, color: "var(--text-light)", margin: "5px 0 0", lineHeight: 1.4 }}>
+                  O editor distribui as mídias sobre a fala e mantém o áudio principal. Máximo de 8 arquivos.
+                </p>
+
+                {brollAssets.length > 0 && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 8 }}>
+                    {brollAssets.map(asset => (
+                      <div key={asset.id} style={{ display: "flex", alignItems: "center", gap: 6, background: "var(--color-accent-soft)", borderRadius: 6, padding: "5px 7px", fontSize: 10 }}>
+                        <Film size={11} color="var(--color-primary)" />
+                        <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--text-medium)" }}>{asset.name}</span>
+                        <button type="button" onClick={() => removeBrollAsset(asset.id)} title="Remover B-roll" style={{ border: "none", background: "none", color: "var(--text-light)", cursor: "pointer", padding: 1 }}>
+                          <X size={11} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
 
               <button
                 style={{ ...C.bigBtn(!videoSrc), marginTop: 12 }}
@@ -773,7 +868,7 @@ export default function EditorVideo() {
                 <Sparkles size={16} /> ✨ Editar automaticamente
               </button>
               <p style={{ fontSize: 10, color: "var(--text-light)", textAlign: "center", marginTop: 8, lineHeight: 1.5 }}>
-                100% automático: corta silêncios, remove repetições, aplica zoom e gera legendas animadas.
+                100% no navegador: corta pausas, remove repetições, sincroniza legendas e posiciona o B-roll.
               </p>
             </div>
           )}
@@ -831,7 +926,7 @@ export default function EditorVideo() {
                 <div style={C.warnBox}>
                   <Info size={14} style={{ flexShrink: 0, marginTop: 1 }} />
                   <span>
-                    Transcrição com IA pausada neste navegador. O corte foi realizado perfeitamente pela análise acústica de silêncios com zoom dinâmico e melhora de áudio.
+                    A transcrição com IA não ficou disponível neste navegador. As pausas ainda foram removidas pela análise acústica e o áudio foi tratado, mas esta versão será exportada sem legendas.
                   </span>
                 </div>
               )}
@@ -859,7 +954,7 @@ export default function EditorVideo() {
                 </>
               ) : (
                 <div style={{ fontSize: 11, color: "var(--text-light)", textAlign: "center", padding: "6px 0" }}>
-                  Nenhum corte foi necessário com a sensibilidade atual. Experimente "Agressivo".
+                  Nenhum corte foi necessário com a sensibilidade atual. Experimente &quot;Agressivo&quot;.
                 </div>
               )}
 
