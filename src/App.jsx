@@ -31,6 +31,7 @@ import ClientBooking from './pages/ClientBooking';
 import Anamnese from './pages/Anamnese';
 import Estrategia from './pages/Estrategia';
 import CrmInteressados from './pages/CrmInteressados';
+import EditorVideo from './pages/EditorVideo';
 import Privacidade from './pages/Privacidade';
 import TermosUso from './pages/TermosUso';
 import ExclusaoDados from './pages/ExclusaoDados';
@@ -73,6 +74,7 @@ function MainLayout() {
           <Route path="/anamnese" element={<ModuleGate module="anamnese"><Anamnese /></ModuleGate>} />
           <Route path="/estrategia" element={<ModuleGate module="estrategia"><Estrategia /></ModuleGate>} />
           <Route path="/crm" element={<ModuleGate module="crm"><CrmInteressados /></ModuleGate>} />
+          <Route path="/editor-video" element={<EditorVideo />} />
           <Route path="/gerenciar-acessos" element={
             <ModuleGate adminOnly>
               <Suspense fallback={<div style={{padding:40,textAlign:'center',color:'#8C7573'}}>Carregando...</div>}>

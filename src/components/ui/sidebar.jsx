@@ -19,7 +19,8 @@ import {
   Target,
   Shield,
   BookOpen,
-  UserPlus
+  UserPlus,
+  Video
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { fetchQueuePendingCount } from '../../services/supabaseService';
@@ -42,6 +43,7 @@ const menuItems = [
   { key: 'comissoes', name: 'Comissões', path: '/comissoes', icon: Coins },
   { key: 'financeiro', name: 'Financeiro', path: '/financial', icon: Wallet },
   { key: 'integracoes', name: 'Integrações', path: '/integration', icon: Zap },
+  { key: 'marketing', name: 'Editor de Vídeo', path: '/editor-video', icon: Video },
 ];
 
 const Sidebar = () => {
