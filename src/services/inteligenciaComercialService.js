@@ -112,6 +112,57 @@ export async function fetchClientRFM(dateFrom, dateTo, limit = 50, offset = 0, f
   return { data: data || [], error: null };
 }
 
+/**
+ * Base completa usada pelos públicos automáticos. Pagina as RPCs/consultas para
+ * não depender do limite padrão de linhas do PostgREST.
+ */
+export async function fetchAutomaticAudienceDataset(dateFrom, dateTo) {
+  if (!cfg()) return handleErr('Supabase not configured', { rfm: [], appointments: [] });
+
+  const pageSize = 500;
+  const rfm = [];
+  let rfmOffset = 0;
+  let expectedTotal = null;
+
+  do {
+    const { data, error } = await supabase.rpc('fn_ic_client_rfm', {
+      p_date_from: dateFrom,
+      p_date_to: dateTo,
+      p_limit: pageSize,
+      p_offset: rfmOffset,
+      p_filter_mode: 'todos',
+    });
+    if (error) return handleErr(error, { rfm: [], appointments: [] });
+
+    const page = data || [];
+    rfm.push(...page);
+    if (expectedTotal == null) expectedTotal = Number(page[0]?.total_count || page.length);
+    rfmOffset += page.length;
+    if (page.length < pageSize) break;
+  } while (rfmOffset < expectedTotal);
+
+  const appointments = [];
+  let appointmentOffset = 0;
+
+  while (true) {
+    const { data, error } = await supabase
+      .from('appointments')
+      .select('id, client_id, procedure, appointment_date, status')
+      .eq('status', 'finalizado')
+      .lte('appointment_date', dateTo)
+      .order('appointment_date', { ascending: false })
+      .range(appointmentOffset, appointmentOffset + pageSize - 1);
+
+    if (error) return handleErr(error, { rfm: [], appointments: [] });
+    const page = data || [];
+    appointments.push(...page);
+    appointmentOffset += page.length;
+    if (page.length < pageSize) break;
+  }
+
+  return { data: { rfm, appointments }, error: null };
+}
+
 // ─── Segmentos ────────────────────────────────────────────────────────────────
 export async function fetchSegments({ includeArchived = false } = {}) {
   if (!cfg()) return handleErr('Supabase not configured', []);

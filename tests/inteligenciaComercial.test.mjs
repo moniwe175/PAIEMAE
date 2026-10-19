@@ -17,6 +17,8 @@
 
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
+import fs from 'node:fs';
+import path from 'node:path';
 import {
   getDateRange,
   fmtDate,
@@ -1129,6 +1131,23 @@ describe('Inteligência Comercial — Suíte Completa de Contratos e Serviço Re
       `);
 
       assert.equal(Number(res.count), 3, 'lead-1 (concluída), lead-2 (sem prazo) e lead-5 (só espaços) devem contar em interessados_sem_acao');
+    });
+  });
+
+  describe('19. Compatibilidade da sincronização automática com a Inteligência', () => {
+    it('persiste appointment_id e usa apenas status já aceitos pelas RPCs fn_ic_*', () => {
+      const syncSql = fs.readFileSync(path.resolve('crm_agenda_automatic_sync.sql'), 'utf8');
+      const intelligenceSql = fs.readFileSync(path.resolve('marketing_inteligencia_incremental.sql'), 'utf8');
+
+      assert.match(syncSql, /appointment_id = v_new_appointment_id/i);
+      assert.match(syncSql, /v_new_status := 'agendado'/i);
+      assert.match(syncSql, /v_new_status := 'encerrado_ganho'/i);
+      assert.match(syncSql, /v_new_status := 'aguardando_resposta'/i);
+      assert.match(syncSql, /v_new_status := 'encerrado_perdido'/i);
+
+      assert.match(intelligenceSql, /INNER JOIN appointments a ON a\.id = l\.appointment_id/i);
+      assert.match(intelligenceSql, /status NOT IN \('encerrado_ganho', 'encerrado_perdido', 'arquivado'\)/i);
+      assert.doesNotMatch(syncSql, /UPDATE\s+public\.marketing_/i, 'Sincronização do CRM não deve escrever nas tabelas de Marketing');
     });
   });
 

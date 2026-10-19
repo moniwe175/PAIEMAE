@@ -1529,6 +1529,12 @@ export async function updateAccessRequestStatus(id, status) {
 
 export async function fetchCrmLeads() {
   if (!isSupabaseConfigured()) return handleError('Supabase not configured', []);
+  // Atualiza também regras dependentes apenas da passagem do tempo (>30 dias).
+  // Mantém compatibilidade enquanto a migração automática ainda não foi aplicada.
+  const { error: syncError } = await supabase.rpc('fn_crm_sync_all_leads_from_agenda');
+  if (syncError && !['42883', 'PGRST202'].includes(syncError.code)) {
+    console.warn('[CRM] sincronização automática não executada:', syncError.message);
+  }
   const { data, error } = await supabase
     .from('crm_leads')
     .select('*')

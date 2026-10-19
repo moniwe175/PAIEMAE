@@ -18,13 +18,14 @@ import {
 import {
   TrendingUp, Users, UserPlus, RefreshCw, Target, AlertTriangle,
   Clock, CheckCircle, Plus, Archive, ChevronRight, Info, Settings,
-  Search, Layers, Star, Megaphone, BookOpen, X, Save, Eye,
-  BarChart2, Filter, AlertCircle, HelpCircle, Check, DollarSign,
+  Search, Layers, Star, Megaphone, BookOpen, X, Eye,
+  BarChart2, Check, DollarSign,
   ArrowRight, ShieldCheck, Edit3, Link2, ExternalLink, Calendar,
-  ChevronLeft, ChevronDown, ListFilter,
+  ChevronLeft,
 } from 'lucide-react';
 import { useAuth } from '../../../contexts/AuthContext';
 import { supabase } from '../../../lib/supabase';
+import { buildAutomaticAudienceInsights } from '../../../lib/automaticAudiences';
 import { insertIdea } from '../../../services/marketingIdeasService';
 import { fetchCampaigns, fetchClients } from '../../../services/supabaseService';
 import {
@@ -32,6 +33,7 @@ import {
   fetchOverviewMetrics,
   fetchCanalStats,
   fetchClientRFM,
+  fetchAutomaticAudienceDataset,
   fetchSegments,
   saveSegment,
   updateSegment,
@@ -1384,7 +1386,7 @@ function VisaoGeral({ periodPreset, onPeriodChange, onSwitchTab }) {
 
 function ClientesPublicos({ periodPreset, initialRfmFilter = 'atendidos_periodo' }) {
   const { user, canEdit } = useAuth();
-  const [subTab, setSubTab] = useState('rfm'); // 'rfm' | 'segmentos' | 'icp'
+  const [subTab, setSubTab] = useState('rfm'); // 'rfm' | 'automaticos'
 
   // RFM states
   const [rfmData, setRfmData] = useState([]);
@@ -1394,6 +1396,12 @@ function ClientesPublicos({ periodPreset, initialRfmFilter = 'atendidos_periodo'
   const [rfmPage, setRfmPage] = useState(1);
   const [rfmPageSize] = useState(25);
   const [rfmTotalCount, setRfmTotalCount] = useState(0);
+
+  // Públicos e perfil calculados com Agenda + Financeiro, sem cadastro manual.
+  const [automaticInsights, setAutomaticInsights] = useState(null);
+  const [automaticLoading, setAutomaticLoading] = useState(false);
+  const [automaticError, setAutomaticError] = useState(null);
+  const [selectedAudienceId, setSelectedAudienceId] = useState('retorno');
 
   // Segmentos states
   const [segments, setSegments] = useState([]);
@@ -1441,6 +1449,23 @@ function ClientesPublicos({ periodPreset, initialRfmFilter = 'atendidos_periodo'
   useEffect(() => {
     if (subTab === 'rfm') loadRFM();
   }, [subTab, loadRFM]);
+
+  const loadAutomaticInsights = useCallback(async () => {
+    setAutomaticLoading(true);
+    setAutomaticError(null);
+    const { data, error } = await fetchAutomaticAudienceDataset(from, to);
+    if (error) {
+      setAutomaticError(error.message || 'Erro ao calcular públicos automáticos');
+      setAutomaticInsights(null);
+    } else {
+      setAutomaticInsights(buildAutomaticAudienceInsights(data?.rfm || [], data?.appointments || []));
+    }
+    setAutomaticLoading(false);
+  }, [from, to]);
+
+  useEffect(() => {
+    if (subTab === 'automaticos') loadAutomaticInsights();
+  }, [subTab, loadAutomaticInsights]);
 
   // Carrega segmentos
   const loadSegments = useCallback(async () => {
@@ -1535,9 +1560,8 @@ function ClientesPublicos({ periodPreset, initialRfmFilter = 'atendidos_periodo'
       {/* Sub-tabs */}
       <div style={{ display: 'flex', gap: 4, borderBottom: '1px solid var(--border)' }}>
         {[
-          { key: 'rfm', label: 'Ficha RFM de Atendimento' },
-          { key: 'segmentos', label: 'Públicos e Segmentos' },
-          { key: 'icp', label: 'Perfis de Clientes (ICP)' },
+          { key: 'rfm', label: 'Clientes' },
+          { key: 'automaticos', label: 'Públicos automáticos' },
         ].map(t => (
           <button
             key={t.key}
@@ -1679,6 +1703,138 @@ function ClientesPublicos({ periodPreset, initialRfmFilter = 'atendidos_periodo'
               </div>
             </>
           )}
+        </div>
+      )}
+
+      {/* ── Sub-Aba: Públicos calculados automaticamente ── */}
+      {subTab === 'automaticos' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
+            <div>
+              <h3 style={{ margin: 0, color: 'var(--text-dark)', fontSize: 16 }}>Públicos prontos para usar</h3>
+              <p style={{ margin: '4px 0 0', color: 'var(--text-muted)', fontSize: 12, maxWidth: 720 }}>
+                Calculados pela Agenda, histórico de clientes e receitas conciliadas. Você não precisa criar segmentos,
+                preencher critérios nem cadastrar perfil ideal.
+              </p>
+            </div>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, borderRadius: 14, padding: '5px 10px', background: '#10B98118', color: '#07845D', fontSize: 11, fontWeight: 700 }}>
+              <RefreshCw size={12} /> Atualização automática
+            </span>
+          </div>
+
+          {automaticLoading ? (
+            <p style={{ color: 'var(--text-muted)', padding: '36px 0', textAlign: 'center' }}>Analisando os atendimentos…</p>
+          ) : automaticError ? (
+            <div style={{ background: '#DC262618', padding: 12, borderRadius: 8, color: '#DC2626', fontSize: 13 }}>
+              {automaticError}
+            </div>
+          ) : automaticInsights ? (
+            <>
+              <div style={{ background: 'linear-gradient(135deg, #8B5CF614, #3B82F60C)', border: '1px solid #8B5CF633', borderRadius: 12, padding: '16px 18px', display: 'grid', gridTemplateColumns: 'minmax(240px, 1.5fr) repeat(3, minmax(100px, .6fr))', gap: 16, alignItems: 'center' }}>
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                    <Target size={17} style={{ color: '#8B5CF6' }} />
+                    <strong style={{ color: 'var(--text-dark)', fontSize: 14 }}>{automaticInsights.profile.name}</strong>
+                    <span style={{ background: '#8B5CF618', color: '#8B5CF6', borderRadius: 10, padding: '2px 7px', fontSize: 10, fontWeight: 700 }}>
+                      evidência {automaticInsights.profile.confidence}
+                    </span>
+                  </div>
+                  <p style={{ margin: '6px 0 0', color: 'var(--text-muted)', fontSize: 12, lineHeight: 1.5 }}>
+                    {automaticInsights.profile.summary}
+                  </p>
+                </div>
+                {[
+                  ['Clientes usados', automaticInsights.profile.sampleCount],
+                  ['Média de atendimentos', automaticInsights.profile.sampleCount ? automaticInsights.profile.averageVisits.toFixed(1) : '—'],
+                  ['Valor médio histórico', automaticInsights.profile.averageValue > 0 ? fmtBRL(automaticInsights.profile.averageValue) : '—'],
+                ].map(([label, value]) => (
+                  <div key={label}>
+                    <div style={{ fontSize: 10, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '.04em' }}>{label}</div>
+                    <div style={{ marginTop: 3, fontSize: 17, fontWeight: 700, color: 'var(--text-dark)' }}>{value}</div>
+                  </div>
+                ))}
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: 10 }}>
+                {automaticInsights.audiences.map(audience => {
+                  const selected = selectedAudienceId === audience.id;
+                  return (
+                    <button
+                      key={audience.id}
+                      type="button"
+                      onClick={() => setSelectedAudienceId(audience.id)}
+                      style={{
+                        textAlign: 'left', padding: 15, borderRadius: 11, cursor: 'pointer',
+                        background: selected ? `${audience.color}12` : 'var(--bg-card)',
+                        border: `1px solid ${selected ? audience.color : 'var(--border)'}`,
+                        boxShadow: selected ? `0 0 0 1px ${audience.color}22` : 'none',
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                        <strong style={{ color: 'var(--text-dark)', fontSize: 13 }}>{audience.name}</strong>
+                        <span style={{ minWidth: 28, height: 28, borderRadius: 14, display: 'inline-flex', justifyContent: 'center', alignItems: 'center', background: `${audience.color}18`, color: audience.color, fontWeight: 800, fontSize: 13 }}>
+                          {audience.count}
+                        </span>
+                      </div>
+                      <p style={{ margin: '7px 0', color: 'var(--text-muted)', fontSize: 11, lineHeight: 1.4 }}>{audience.description}</p>
+                      <div style={{ fontSize: 10, color: audience.color, fontWeight: 650 }}>{audience.rule}</div>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {(() => {
+                const audience = automaticInsights.audiences.find(item => item.id === selectedAudienceId)
+                  || automaticInsights.audiences[0];
+                if (!audience) return null;
+                return (
+                  <div style={{ border: '1px solid var(--border)', borderRadius: 12, background: 'var(--bg-card)', overflow: 'hidden' }}>
+                    <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+                      <div>
+                        <strong style={{ color: 'var(--text-dark)', fontSize: 14 }}>{audience.name}</strong>
+                        <div style={{ marginTop: 3, color: 'var(--text-muted)', fontSize: 11 }}>{audience.action}</div>
+                      </div>
+                      <div style={{ display: 'flex', gap: 14, color: 'var(--text-muted)', fontSize: 11 }}>
+                        {audience.topService && <span><strong>Serviço mais comum:</strong> {audience.topService}</span>}
+                        {audience.topSource && <span><strong>Origem principal:</strong> {audience.topSource}</span>}
+                      </div>
+                    </div>
+
+                    {audience.members.length === 0 ? (
+                      <p style={{ margin: 0, padding: 24, color: 'var(--text-muted)', textAlign: 'center', fontSize: 12 }}>
+                        Nenhum cliente está neste público hoje. Ele será atualizado sozinho conforme a Agenda mudar.
+                      </p>
+                    ) : (
+                      <div style={{ overflowX: 'auto' }}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                          <thead>
+                            <tr style={{ background: 'var(--bg-main)', color: 'var(--text-muted)' }}>
+                              {['Cliente', 'Último atendimento', 'Dias sem atendimento', 'Atendimentos', 'Valor histórico'].map(label => (
+                                <th key={label} style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 600, whiteSpace: 'nowrap' }}>{label}</th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {audience.members.slice(0, 100).map(member => (
+                              <tr key={member.id} style={{ borderTop: '1px solid var(--border)' }}>
+                                <td style={{ padding: '9px 12px', color: 'var(--text-dark)', fontWeight: 600 }}>{member.name}</td>
+                                <td style={{ padding: '9px 12px', color: 'var(--text-muted)' }}>{fmtDate(member.lastVisit)}</td>
+                                <td style={{ padding: '9px 12px', color: audience.color, fontWeight: 650 }}>{member.daysSinceVisit} dias</td>
+                                <td style={{ padding: '9px 12px', color: 'var(--text-muted)' }}>{member.totalVisits}</td>
+                                <td style={{ padding: '9px 12px', color: member.totalValue > 0 ? 'var(--text-dark)' : 'var(--text-muted)' }}>
+                                  {member.totalValue > 0 ? fmtBRL(member.totalValue) : '—'}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+            </>
+          ) : null}
         </div>
       )}
 
@@ -2636,10 +2792,45 @@ export default function InteligenicaComercial({ campanhas }) {
             <TrendingUp size={18} style={{ color: '#fff' }} />
           </div>
           <div>
-            <h3 style={{ margin: 0, fontSize: 16, color: 'var(--text-dark)', fontWeight: 700 }}>Inteligência Comercial</h3>
-            <p style={{ margin: 0, fontSize: 12, color: 'var(--text-muted)' }}>Dados → Público → Ideia → Campanha → Resultado</p>
+            <h3 style={{ margin: 0, fontSize: 16, color: 'var(--text-dark)', fontWeight: 700 }}>Resultados do CRM</h3>
+            <p style={{ margin: 0, fontSize: 12, color: 'var(--text-muted)' }}>Entenda de onde as clientes vêm, quem agenda e quem retorna.</p>
           </div>
         </div>
+      </div>
+
+      {/* Explica a ligação entre os módulos */}
+      <div style={{
+        display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 8,
+        padding: 12, borderRadius: 12, background: '#8B5CF60A', border: '1px solid #8B5CF626',
+      }}>
+        {[
+          { step: '1', title: 'Interessados', text: 'Registra a origem e a conversa', icon: UserPlus },
+          { step: '2', title: 'Agenda', text: 'Confirma agendamento, falta e atendimento', icon: Calendar },
+          { step: '3', title: 'Resultados', text: 'Calcula conversão, retorno e canais', icon: BarChart2 },
+        ].map(({ step, title, text, icon: Icon }, index) => (
+          <div key={title} style={{ display: 'flex', alignItems: 'center', gap: 9, minWidth: 0 }}>
+            <div style={{
+              width: 30, height: 30, borderRadius: 9, flexShrink: 0,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              background: '#8B5CF618', color: '#6D28D9', fontSize: 11, fontWeight: 800,
+            }}>
+              <Icon size={14} />
+            </div>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 11, fontWeight: 800, color: 'var(--text-dark)' }}>{step}. {title}</div>
+              <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 1 }}>{text}</div>
+            </div>
+            {index < 2 && <ArrowRight size={13} style={{ color: '#8B5CF6', marginLeft: 'auto', flexShrink: 0 }} />}
+          </div>
+        ))}
+        <button
+          type="button"
+          className="btn btn-ghost btn-sm"
+          onClick={() => { window.location.href = '/crm'; }}
+          style={{ fontSize: 11, justifySelf: 'end', alignSelf: 'center' }}
+        >
+          Abrir interessados <ExternalLink size={12} />
+        </button>
       </div>
 
       {/* Sub-view tabs */}

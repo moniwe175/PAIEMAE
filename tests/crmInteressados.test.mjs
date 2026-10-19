@@ -287,24 +287,43 @@ test('R4 Substituído: Marketing.jsx define aba padrão "instagram" e nova ordem
   assert.ok(inteligenciaIndex > ideiasIndex, 'Inteligência deve vir após Ideias');
 });
 
-// ─── 8. Testes de Texto de Fila Vazia (AC1.3) e Histórico Neutro ─
+// ─── 8. CRM automático: interface e migração ───────────────────
 
-test('AC1.3 e Histórico: Textos exatos no CRM', () => {
+test('CRM exibe somente as quatro abas automáticas e remove qualificação/status manual', () => {
   const crmPath = path.resolve('src/pages/CrmInteressados.jsx');
   const code = fs.readFileSync(crmPath, 'utf8');
 
-  assert.ok(
-    code.includes('Tudo respondido por enquanto.'),
-    'Fila vazia deve exibir "Tudo respondido por enquanto."'
-  );
+  const tabsBlock = code.slice(code.indexOf('const ABAS'), code.indexOf('const JOURNEY_FILTER_LABELS'));
+  assert.match(tabsBlock, /label: 'Responder'/);
+  assert.match(tabsBlock, /label: 'Agendados'/);
+  assert.match(tabsBlock, /label: 'Atendidos'/);
+  assert.match(tabsBlock, /label: 'Perdidos'/);
+  assert.doesNotMatch(tabsBlock, /label: 'Hoje'|label: 'Atrasados'|label: 'Todos'/);
 
-  assert.ok(
-    code.includes('Resposta registrada. Próxima ação: Retornar contato.'),
-    'Histórico deve conter a mensagem neutra solicitada'
-  );
+  assert.ok(code.includes('Etapa automática · atualizada pela Agenda'));
+  assert.ok(code.includes('Corrigir vínculo'));
+  assert.ok(!code.includes("activeTab === 'qualificacao'"), 'Bloco manual qual_* não deve ser renderizado');
+  assert.ok(!code.includes('handleStatusChange'), 'Status não pode mais ser alterado manualmente');
+  assert.ok(!code.includes('Já respondi'), 'Ação não pode escrever status manual');
+});
 
-  assert.ok(
-    code.includes('Ação desfeita: retorno ao status Responder.'),
-    'Desfazer deve registrar a reversão no histórico'
-  );
+test('migração automática cria função, triggers, histórico e backfill idempotente', () => {
+  const migrationPath = path.resolve('crm_agenda_automatic_sync.sql');
+  const sql = fs.readFileSync(migrationPath, 'utf8');
+
+  assert.match(sql, /CREATE OR REPLACE FUNCTION public\.fn_crm_sync_lead_from_agenda\(p_lead_id uuid\)/i);
+  assert.match(sql, /CREATE OR REPLACE FUNCTION public\.fn_crm_sync_all_leads_from_agenda\(\)/i);
+  assert.match(sql, /GRANT EXECUTE ON FUNCTION public\.fn_crm_sync_all_leads_from_agenda\(\) TO authenticated/i);
+  assert.match(sql, /AFTER INSERT ON public\.appointments/i);
+  assert.match(sql, /AFTER UPDATE OF status, client_id, client_phone, appointment_date, appointment_time/i);
+  assert.match(sql, /v_duplicate_leads = 1/i, 'Telefone duplicado não pode ser vinculado automaticamente');
+  assert.match(sql, /status = v_new_status/i);
+  assert.match(sql, /appointment_id = v_new_appointment_id/i);
+  assert.match(sql, /'sincronizacao_automatica_agenda'/i);
+  assert.match(sql, /FOR v_lead_id IN SELECT id FROM public\.crm_leads/i, 'Deve recalcular leads existentes');
+  assert.doesNotMatch(sql, /CREATE POLICY|DROP POLICY|ENABLE ROW LEVEL SECURITY/i, 'Migração não deve alterar RLS');
+
+  const service = fs.readFileSync(path.resolve('src/services/supabaseService.js'), 'utf8');
+  const crmFetch = service.slice(service.indexOf('export async function fetchCrmLeads'), service.indexOf('export async function insertCrmLead'));
+  assert.match(crmFetch, /rpc\('fn_crm_sync_all_leads_from_agenda'\)/i, 'Abrir o CRM deve aplicar também a regra temporal de 30 dias');
 });

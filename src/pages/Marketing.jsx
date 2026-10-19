@@ -642,7 +642,7 @@ export default function Marketing() {
           onClick={() => setSubTab('inteligencia')}
           style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700 }}
         >
-          <Brain style={{ width: 14, height: 14, color: '#6D28D9' }} /> Inteligência
+          <Brain style={{ width: 14, height: 14, color: '#6D28D9' }} /> Resultados do CRM
         </button>
       </div>
 

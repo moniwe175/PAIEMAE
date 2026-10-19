@@ -13,6 +13,11 @@ import {
   fetchCrmInteractions, insertCrmInteraction,
   fetchClients, fetchAppointments,
 } from '../services/supabaseService';
+import {
+  CRM_JOURNEY_STATUS,
+  enrichCrmLeads,
+  matchesCrmJourneyFilter,
+} from '../lib/crmJourney';
 
 // ─── Constants ────────────────────────────────────────────────
 
@@ -37,12 +42,18 @@ const TIPO_INTERACAO = [
 
 const ABAS = [
   { key: 'fila',       label: 'Responder' },
-  { key: 'hoje',       label: 'Hoje' },
-  { key: 'atrasados',  label: 'Atrasados' },
   { key: 'agendados',  label: 'Agendados' },
-  { key: 'encerrados', label: 'Encerrados' },
-  { key: 'todos',      label: 'Todos' },
+  { key: 'atendidos',  label: 'Atendidos' },
+  { key: 'perdidos',   label: 'Perdidos' },
 ];
+
+const JOURNEY_FILTER_LABELS = {
+  sem_agendamento: 'Interessadas sem agendamento',
+  faltaram: 'Faltaram e precisam reagendar',
+  em_risco: 'Clientes em risco ou inativas',
+  agendadas: 'Com agendamento futuro',
+  clientes: 'Clientes atendidas e recorrentes',
+};
 
 // ─── Helpers ──────────────────────────────────────────────────
 
@@ -70,6 +81,26 @@ function fmtDatetime(ts) {
   });
 }
 
+function fmtMoney(value) {
+  return Number(value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+}
+
+function JourneyBadge({ journey, compact = false }) {
+  if (!journey) return null;
+  return (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', gap: 5,
+      padding: compact ? '3px 8px' : '5px 10px', borderRadius: 99,
+      fontSize: compact ? 10 : 11, fontWeight: 800,
+      color: journey.color, background: journey.background,
+      border: `1px solid ${journey.color}33`, whiteSpace: 'nowrap',
+    }}>
+      <span style={{ width: 6, height: 6, borderRadius: '50%', background: journey.color }} />
+      {compact ? journey.shortLabel : journey.label}
+    </span>
+  );
+}
+
 function isOverdue(lead) {
   if (!lead.proxima_acao_prazo || lead.proxima_acao_concluida) return false;
   return lead.proxima_acao_prazo < todayStr();
@@ -83,18 +114,6 @@ function isDueToday(lead) {
 function normPhone(tel) {
   if (!tel) return '';
   return tel.replace(/\D/g, '');
-}
-
-const DEFAULT_FOLLOWUP_DAYS = 2;
-
-function addDaysToSaoPauloDate(days = DEFAULT_FOLLOWUP_DAYS) {
-  const now = new Date();
-  const spTime = new Date(now.toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }));
-  spTime.setDate(spTime.getDate() + days);
-  const y = spTime.getFullYear();
-  const m = String(spTime.getMonth() + 1).padStart(2, '0');
-  const d = String(spTime.getDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
 }
 
 function fmtRelativeTime(ts) {
@@ -131,7 +150,6 @@ function NovaLeadModal({ onClose, onSave }) {
   const [form, setForm] = useState({
     nome: '', telefone: '', email: '', instagram: '',
     servico_interesse: '', origem: '', origem_outro: '', responsavel: '',
-    status: 'aguardando_resposta',
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -232,52 +250,6 @@ function NovaLeadModal({ onClose, onSave }) {
   );
 }
 
-// ─── Encerrar como perdido modal ───────────────────────────────
-
-function PerdidoModal({ onClose, onConfirm }) {
-  const [motivo, setMotivo] = useState('');
-  const [saving, setSaving] = useState(false);
-  return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 400 }}>
-        <div className="modal-header">
-          <span className="modal-title" style={{ color: '#C0706A' }}>Encerrar como Perdido</span>
-          <button className="modal-close" onClick={onClose}><XCircle /></button>
-        </div>
-        <p style={{ fontSize: 13, color: 'var(--text-medium)', marginBottom: 12 }}>
-          Registre o motivo para analisar padrões de perda no futuro.
-        </p>
-        <div className="form-group">
-          <label className="form-label">Motivo da perda *</label>
-          <textarea
-            className="form-textarea"
-            placeholder="Ex: Preço, concorrência, não respondeu mais, mudou de planos..."
-            value={motivo}
-            onChange={e => setMotivo(e.target.value)}
-            style={{ minHeight: 80 }}
-          />
-        </div>
-        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 12 }}>
-          <button className="btn btn-ghost" onClick={onClose} disabled={saving}>Cancelar</button>
-          <button
-            className="btn"
-            style={{ background: '#C0706A', color: '#fff' }}
-            disabled={!motivo.trim() || saving}
-            onClick={async () => {
-              setSaving(true);
-              await onConfirm(motivo);
-              setSaving(false);
-              onClose();
-            }}
-          >
-            <X style={{ width: 14, height: 14 }} /> Confirmar perda
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 // ─── Vincular paciente / agendamento modal ─────────────────────
 
 function VincularModal({ onClose, onConfirm, clientes = [], agendamentos = [], lead }) {
@@ -302,11 +274,11 @@ function VincularModal({ onClose, onConfirm, clientes = [], agendamentos = [], l
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 480 }}>
         <div className="modal-header">
-          <span className="modal-title">Vincular a Paciente / Agendamento</span>
+          <span className="modal-title">Corrigir vínculo</span>
           <button className="modal-close" onClick={onClose}><XCircle /></button>
         </div>
         <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12 }}>
-          Ao vincular, o interessado é associado ao cadastro existente. Nenhum paciente adicional é criado.
+          A Agenda faz este vínculo automaticamente pelo telefone. Use esta tela somente para corrigir uma associação incorreta; nenhum paciente adicional será criado.
         </p>
 
         <div className="form-group">
@@ -398,16 +370,7 @@ function LeadDrawer({ lead, onClose, onUpdate, clientes = [], agendamentos = [],
   const [novaMsg, setNovaMsg] = useState('');
   const [tipoMsg, setTipoMsg] = useState('nota');
   const [sendingMsg, setSendingMsg] = useState(false);
-  const [showPerdido, setShowPerdido] = useState(false);
   const [showVincular, setShowVincular] = useState(false);
-  const [qualForm, setQualForm] = useState({
-    qual_servico:        lead.qual_servico        || '',
-    qual_prazo:          lead.qual_prazo          || '',
-    qual_disponibilidade:lead.qual_disponibilidade|| '',
-    qual_objecao:        lead.qual_objecao        || '',
-  });
-  const [qualSaving, setQualSaving] = useState(false);
-  const [qualError, setQualError] = useState('');
   const [acaoForm, setAcaoForm] = useState({
     proxima_acao_descricao:   lead.proxima_acao_descricao   || '',
     proxima_acao_responsavel: lead.proxima_acao_responsavel || lead.responsavel || '',
@@ -429,9 +392,10 @@ function LeadDrawer({ lead, onClose, onUpdate, clientes = [], agendamentos = [],
 
   useEffect(() => { loadInteractions(); }, [loadInteractions]);
 
+  const journey = lead._journey;
   const linkedClient = useMemo(
-    () => clientes.find(c => String(c.id) === String(lead.client_id)),
-    [clientes, lead.client_id]
+    () => clientes.find(c => String(c.id) === String(lead.client_id)) || journey?.client || null,
+    [clientes, lead.client_id, journey?.client]
   );
 
   // Registrar nota / contato
@@ -451,59 +415,6 @@ function LeadDrawer({ lead, onClose, onUpdate, clientes = [], agendamentos = [],
       setNovaMsg('');
     }
     setSendingMsg(false);
-  };
-
-  // Mudar status
-  const handleStatusChange = async (newStatus) => {
-    if (newStatus === lead.status) return;
-    if (newStatus === 'encerrado_perdido') { setShowPerdido(true); return; }
-    const oldStatus = lead.status;
-    const updated = await onUpdate(lead.id, { status: newStatus });
-    if (updated) {
-      await insertCrmInteraction({
-        lead_id: lead.id,
-        tipo: 'mudanca_status',
-        conteudo: `Status: "${statusConfig(oldStatus).label}" → "${statusConfig(newStatus).label}"`,
-        autor: currentUser?.email || 'Sistema',
-        meta: { de: oldStatus, para: newStatus },
-      });
-      loadInteractions();
-    }
-  };
-
-  const confirmPerdido = async (motivo) => {
-    const oldStatus = lead.status;
-    const updated = await onUpdate(lead.id, { status: 'encerrado_perdido', motivo_perda: motivo });
-    if (updated) {
-      await insertCrmInteraction({
-        lead_id: lead.id,
-        tipo: 'mudanca_status',
-        conteudo: `Encerrado como perdido. Motivo: ${motivo}`,
-        autor: currentUser?.email || 'Sistema',
-        meta: { de: oldStatus, para: 'encerrado_perdido', motivo },
-      });
-      loadInteractions();
-    }
-  };
-
-  // Qualificação
-  const handleQualSave = async () => {
-    setQualSaving(true);
-    setQualError('');
-    const updates = { ...qualForm, qual_updated_at: new Date().toISOString() };
-    const updated = await onUpdate(lead.id, updates);
-    if (updated) {
-      await insertCrmInteraction({
-        lead_id: lead.id,
-        tipo: 'qualificacao',
-        conteudo: 'Qualificação atualizada.',
-        autor: currentUser?.email || 'Sistema',
-      });
-      loadInteractions();
-    } else {
-      setQualError('Erro ao salvar qualificação. Tente novamente.');
-    }
-    setQualSaving(false);
   };
 
   // Próxima ação
@@ -543,7 +454,6 @@ function LeadDrawer({ lead, onClose, onUpdate, clientes = [], agendamentos = [],
       client_id: clientId || null,
       appointment_id: appointmentId || null,
     };
-    if (clientId && appointmentId) updates.status = 'agendado';
     await onUpdate(lead.id, updates);
     const nomeCliente = clientes.find(c => String(c.id) === String(clientId))?.name || clientId;
     await insertCrmInteraction({
@@ -585,9 +495,6 @@ function LeadDrawer({ lead, onClose, onUpdate, clientes = [], agendamentos = [],
 
   return (
     <>
-      {showPerdido && (
-        <PerdidoModal onClose={() => setShowPerdido(false)} onConfirm={confirmPerdido} />
-      )}
       {showVincular && (
         <VincularModal
           lead={lead}
@@ -649,49 +556,70 @@ function LeadDrawer({ lead, onClose, onUpdate, clientes = [], agendamentos = [],
               </div>
             </div>
 
-            {/* Status bar */}
-            {canWrite && (
-              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-                {STATUS_LIST.map(s => {
-                  const active = lead.status === s.key;
-                  return (
-                    <button
-                      key={s.key}
-                      onClick={() => handleStatusChange(s.key)}
-                      style={{
-                        padding: '4px 10px', borderRadius: 99, fontSize: 11, fontWeight: 700,
-                        border: `1.5px solid ${s.color}`,
-                        background: active ? s.color : 'transparent',
-                        color: active ? '#fff' : s.color,
-                        cursor: 'pointer', transition: 'all .15s',
-                      }}
-                    >
-                      {s.label}
-                    </button>
-                  );
-                })}
-                <button
-                  onClick={() => setShowVincular(true)}
-                  style={{ padding: '4px 10px', borderRadius: 99, fontSize: 11, fontWeight: 600, border: '1.5px solid var(--border-color)', background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}
-                >
-                  <Link2 style={{ width: 11, height: 11 }} />
-                  {linkedClient ? `✓ ${linkedClient.name}` : 'Vincular paciente'}
-                </button>
+            {/* Etapa persistida e mantida pela Agenda */}
+            <div>
+              <div style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 800, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 }}>
+                Etapa automática · atualizada pela Agenda
               </div>
-            )}
-            {!canWrite && (
-              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
                 <span className={`badge ${statusConfig(lead.status).badge}`}>{statusConfig(lead.status).label}</span>
                 {linkedClient && <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>→ {linkedClient.name}</span>}
+                {canWrite && (
+                  <button
+                    onClick={() => setShowVincular(true)}
+                    title="Use somente para corrigir um vínculo identificado incorretamente"
+                    style={{ padding: '4px 10px', borderRadius: 99, fontSize: 11, fontWeight: 600, border: '1.5px solid var(--border-color)', background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}
+                  >
+                    <Link2 style={{ width: 11, height: 11 }} /> Corrigir vínculo
+                  </button>
+                )}
               </div>
-            )}
+            </div>
           </div>
+
+          {/* Jornada calculada a partir da Agenda */}
+          {journey && (
+            <div style={{
+              margin: '14px 22px 0', padding: '12px 14px', borderRadius: 12,
+              background: journey.background, border: `1px solid ${journey.color}33`,
+              display: 'grid', gridTemplateColumns: 'minmax(150px, 1.3fr) repeat(3, minmax(90px, 1fr))',
+              gap: 12, alignItems: 'center', flexShrink: 0,
+            }}>
+              <div>
+                <div style={{ fontSize: 10, color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 800, letterSpacing: 0.5 }}>
+                  Situação automática
+                </div>
+                <div style={{ marginTop: 5 }}><JourneyBadge journey={journey} /></div>
+                <div style={{ marginTop: 6, fontSize: 11, color: journey.color, fontWeight: 700 }}>
+                  {journey.recommendation?.label}
+                </div>
+              </div>
+              <div>
+                <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>Último atendimento</div>
+                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-dark)', marginTop: 3 }}>
+                  {journey.lastVisitDate ? fmtDate(journey.lastVisitDate) : 'Ainda não veio'}
+                </div>
+              </div>
+              <div>
+                <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>Próximo agendamento</div>
+                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-dark)', marginTop: 3 }}>
+                  {journey.nextAppointmentDate ? fmtDate(journey.nextAppointmentDate) : 'Nenhum'}
+                </div>
+              </div>
+              <div>
+                <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>Histórico</div>
+                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-dark)', marginTop: 3 }}>
+                  {journey.completedCount} atendimento(s)
+                </div>
+                <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>{fmtMoney(journey.totalSpent)}</div>
+              </div>
+            </div>
+          )}
 
           {/* Tabs */}
           <div style={{ display: 'flex', borderBottom: '1px solid var(--border-color)', flexShrink: 0 }}>
             {[
               { key: 'historico',    label: 'Histórico' },
-              { key: 'qualificacao', label: 'Qualificação' },
               { key: 'proxima_acao', label: 'Próxima ação' },
             ].map(t => (
               <button
@@ -839,69 +767,6 @@ function LeadDrawer({ lead, onClose, onUpdate, clientes = [], agendamentos = [],
               </>
             )}
 
-            {/* ── Qualificação ── */}
-            {activeTab === 'qualificacao' && (
-              <>
-                <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 16, lineHeight: 1.6 }}>
-                  Preencha apenas o que foi efetivamente perguntado e respondido. Campos não perguntados devem ficar vazios.
-                  {lead.qual_updated_at && <span> Última atualização: {fmtDatetime(lead.qual_updated_at)}</span>}
-                </p>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-                  <div className="form-group">
-                    <label className="form-label">O que procura (resposta real)?</label>
-                    <textarea
-                      className="form-textarea"
-                      style={{ minHeight: 60 }}
-                      placeholder="O que a pessoa disse que procura..."
-                      value={qualForm.qual_servico}
-                      onChange={e => setQualForm(f => ({ ...f, qual_servico: e.target.value }))}
-                      disabled={!canWrite}
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label className="form-label">Quando pretende agendar?</label>
-                    <input
-                      className="form-input"
-                      placeholder="Ex: O quanto antes, mês que vem, não sabe ainda..."
-                      value={qualForm.qual_prazo}
-                      onChange={e => setQualForm(f => ({ ...f, qual_prazo: e.target.value }))}
-                      disabled={!canWrite}
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label className="form-label">Disponibilidade de horário</label>
-                    <input
-                      className="form-input"
-                      placeholder="Ex: Manhãs na semana, sábados de tarde..."
-                      value={qualForm.qual_disponibilidade}
-                      onChange={e => setQualForm(f => ({ ...f, qual_disponibilidade: e.target.value }))}
-                      disabled={!canWrite}
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label className="form-label">Objeção ou dúvida principal</label>
-                    <textarea
-                      className="form-textarea"
-                      style={{ minHeight: 60 }}
-                      placeholder="Ex: Preço, procedimento doloroso, concorrente mais barato..."
-                      value={qualForm.qual_objecao}
-                      onChange={e => setQualForm(f => ({ ...f, qual_objecao: e.target.value }))}
-                      disabled={!canWrite}
-                    />
-                  </div>
-                </div>
-                {qualError && <div style={{ fontSize: 12, color: '#DC2626', marginTop: 8 }}>{qualError}</div>}
-                {canWrite && (
-                  <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 16 }}>
-                    <button className="btn btn-primary" onClick={handleQualSave} disabled={qualSaving}>
-                      {qualSaving ? <RefreshCw style={{ width: 14, height: 14, animation: 'spin 1s linear infinite' }} /> : <CheckCircle />}
-                      Salvar qualificação
-                    </button>
-                  </div>
-                )}
-              </>
-            )}
-
             {/* ── Próxima ação ── */}
             {activeTab === 'proxima_acao' && (
               <>
@@ -990,9 +855,10 @@ function LeadDrawer({ lead, onClose, onUpdate, clientes = [], agendamentos = [],
 
 // ─── Lead Row ─────────────────────────────────────────────────
 
-function LeadRow({ lead, onClick, overdue, dueToday, isFila, onJaRespondi, actionLoading }) {
+function LeadRow({ lead, onClick, overdue, dueToday, isFila }) {
   const st = statusConfig(lead.status);
   const StIcon = st.icon;
+  const journey = lead._journey;
 
   const rawPhone = normPhone(lead.telefone);
   const hasPhone = Boolean(rawPhone && rawPhone.length >= 10);
@@ -1022,6 +888,14 @@ function LeadRow({ lead, onClick, overdue, dueToday, isFila, onJaRespondi, actio
         )}
       </td>
       <td style={{ fontSize: 12, color: 'var(--text-medium)' }}>{lead.servico_interesse || '—'}</td>
+      <td>
+        <JourneyBadge journey={journey} compact />
+        {journey?.recommendation?.label && (
+          <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4, maxWidth: 180 }}>
+            {journey.recommendation.label}
+          </div>
+        )}
+      </td>
       <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>{lead.responsavel || <em>Sem responsável</em>}</td>
       <td>
         {lead.proxima_acao_descricao && !lead.proxima_acao_concluida ? (
@@ -1115,25 +989,6 @@ function LeadRow({ lead, onClick, overdue, dueToday, isFila, onJaRespondi, actio
               </button>
             )}
 
-            <button
-              type="button"
-              className="btn btn-sm btn-primary"
-              disabled={actionLoading}
-              onClick={(e) => onJaRespondi(lead, e)}
-              title="Marcar como respondido e definir próxima ação"
-              style={{
-                display: 'inline-flex', alignItems: 'center', gap: 5,
-                fontSize: 12, fontWeight: 700, padding: '6px 12px', minHeight: 36,
-                borderRadius: 6, cursor: actionLoading ? 'wait' : 'pointer',
-              }}
-            >
-              {actionLoading ? (
-                <RefreshCw style={{ width: 13, height: 13, animation: 'spin 1s linear infinite' }} />
-              ) : (
-                <CheckCircle style={{ width: 13, height: 13 }} />
-              )}
-              Já respondi
-            </button>
           </div>
         </td>
       ) : (
@@ -1160,34 +1015,35 @@ export default function CrmInteressados() {
   const [filtroMeus, setFiltroMeus] = useState(false);
   const [filtroSemAcao, setFiltroSemAcao] = useState(false);
   const [filtroArquivados, setFiltroArquivados] = useState(false);
+  const [filtroJornada, setFiltroJornada] = useState(null);
   const [filtroOrigemParam, setFiltroOrigemParam] = useState(null);
   const [showNova, setShowNova] = useState(false);
   const [selectedLead, setSelectedLead] = useState(null);
-  const [undoToast, setUndoToast] = useState(null);
-  const [actionError, setActionError] = useState(null);
-  const [actionLoadingId, setActionLoadingId] = useState(null);
-
-  useEffect(() => {
-    return () => {
-      if (undoToast?.timerId) clearTimeout(undoToast.timerId);
-    };
-  }, [undoToast]);
 
   // Sincroniza aba e filtros vindos da Inteligência Comercial (/crm?filtro=...)
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const f = params.get('filtro');
     if (f === 'atrasados' || f === 'retornos_pendentes') {
-      setAba('atrasados');
+      setAba('resultados');
       setFiltroSemAcao(false);
       setFiltroArquivados(false);
+      setFiltroJornada(null);
       setFiltroOrigemParam(f);
     } else if (f === 'sem_acao' || f === 'interessados_sem_acao') {
-      setAba('todos');
+      setAba('resultados');
       setFiltroSemAcao(true);
       setFiltroArquivados(false);
+      setFiltroJornada(null);
+      setFiltroOrigemParam(f);
+    } else if (['sem_agendamento', 'faltaram', 'em_risco', 'agendadas', 'clientes'].includes(f)) {
+      setAba(f === 'agendadas' ? 'agendados' : 'resultados');
+      setFiltroSemAcao(false);
+      setFiltroArquivados(false);
+      setFiltroJornada(f);
       setFiltroOrigemParam(f);
     } else {
+      setFiltroJornada(null);
       setFiltroOrigemParam(null);
     }
   }, [location.search]);
@@ -1200,11 +1056,17 @@ export default function CrmInteressados() {
     setLoading(true);
     setLoadError(false);
     try {
-      const [{ data: leadsData, error: leadsErr }] = await Promise.all([
-        fetchCrmLeads(),
+      const [
+        { data: leadsData, error: leadsErr },
+        { data: clientsData },
+        { data: appointmentsData },
+      ] = await Promise.all([
+        fetchCrmLeads(), fetchClients(), fetchAppointments(),
       ]);
       if (leadsErr) { setLoadError(true); }
       else { setLeads(leadsData || []); }
+      setClientes(clientsData || []);
+      setAgendamentos(appointmentsData || []);
     } catch {
       setLoadError(true);
     }
@@ -1213,20 +1075,11 @@ export default function CrmInteressados() {
 
   useEffect(() => { load(); }, [load]);
 
-  // Loads clients/appointments on demand (only when vincular modal is opened)
-  const loadAuxData = useCallback(async () => {
-    const [{ data: cli }, { data: age }] = await Promise.all([
-      fetchClients(), fetchAppointments(),
-    ]);
-    setClientes(cli || []);
-    setAgendamentos(age || []);
-  }, []);
-
   const handleSave = async (form) => {
     const res = await insertCrmLead(form);
     if (res.data) {
       setLeads(prev => [res.data, ...prev]);
-      setSelectedLead(res.data);
+      setSelectedLead(enrichCrmLeads([res.data], clientes, agendamentos)[0]);
       await insertCrmInteraction({
         lead_id: res.data.id,
         tipo: 'sistema',
@@ -1241,142 +1094,42 @@ export default function CrmInteressados() {
     const { data, error } = await updateCrmLead(id, updates);
     if (data) {
       setLeads(prev => prev.map(l => l.id === id ? data : l));
-      setSelectedLead(data);
-      return data;
+      const decorated = enrichCrmLeads([data], clientes, agendamentos)[0];
+      setSelectedLead(decorated);
+      return decorated;
     }
     if (error) console.error('updateCrmLead error:', error);
     return null;
   };
 
-  const handleLeadClick = async (lead) => {
+  const handleLeadClick = (lead) => {
     setSelectedLead(lead);
-    if (clientes.length === 0) loadAuxData();
-  };
-
-  const handleJaRespondi = async (lead, e) => {
-    if (e) e.stopPropagation();
-    setActionError(null);
-    setActionLoadingId(lead.id);
-
-    // 1. Verifica se já existe próxima ação pendente aberta (não concluída e com texto)
-    const hasOpenPendingAction = Boolean(
-      lead.proxima_acao_descricao &&
-      lead.proxima_acao_descricao.trim() &&
-      !lead.proxima_acao_concluida
-    );
-
-    const prazoD2 = addDaysToSaoPauloDate(DEFAULT_FOLLOWUP_DAYS);
-    const currentAuthor = user?.email || null;
-    const responsavelAtribuido = (lead.responsavel && lead.responsavel.trim()) ? lead.responsavel : currentAuthor;
-
-    const updates = {
-      status: 'aguardando_cliente',
-      responsavel: responsavelAtribuido,
-      proxima_acao_descricao: hasOpenPendingAction ? lead.proxima_acao_descricao : 'Retornar contato',
-      proxima_acao_prazo: hasOpenPendingAction ? lead.proxima_acao_prazo : prazoD2,
-      proxima_acao_responsavel: lead.proxima_acao_responsavel || responsavelAtribuido,
-      proxima_acao_concluida: hasOpenPendingAction ? lead.proxima_acao_concluida : false,
-    };
-
-    // 2. Atualização condicionada ao status 'aguardando_resposta'
-    const res = await updateCrmLead(lead.id, updates, 'aguardando_resposta');
-    setActionLoadingId(null);
-
-    if (res.error) {
-      setActionError('Erro ao registrar resposta. Tente novamente.');
-      return;
-    }
-
-    if (res.count === 0) {
-      setActionError('Outra pessoa já respondeu este contato.');
-      await load();
-      return;
-    }
-
-    const updatedLead = res.data;
-
-    // 3. Grava no histórico (crm_interactions) com tipo 'contato' e texto neutro
-    const histDesc = hasOpenPendingAction ? lead.proxima_acao_descricao : 'Retornar contato';
-    await insertCrmInteraction({
-      lead_id: lead.id,
-      tipo: 'contato',
-      conteudo: 'Resposta registrada. Próxima ação: Retornar contato.',
-      autor: currentAuthor || 'Sistema',
-      meta: {
-        acao: 'ja_respondi',
-        de: 'aguardando_resposta',
-        para: 'aguardando_cliente',
-        proxima_acao: histDesc,
-        prazo: updates.proxima_acao_prazo,
-      },
-    });
-
-    // 4. Atualiza lista local sem remoção prematura
-    setLeads(prev => prev.map(l => l.id === lead.id ? updatedLead : l));
-    if (selectedLead && selectedLead.id === lead.id) {
-      setSelectedLead(updatedLead);
-    }
-
-    // 5. Configura aviso "Desfazer" de 10 segundos
-    if (undoToast?.timerId) {
-      clearTimeout(undoToast.timerId);
-    }
-    const timerId = setTimeout(() => {
-      setUndoToast(null);
-    }, 10000);
-
-    setUndoToast({
-      leadId: lead.id,
-      leadNome: lead.nome,
-      previousLead: lead,
-      timerId,
-    });
-  };
-
-  const handleDesfazer = async () => {
-    if (!undoToast) return;
-    const { leadId, previousLead, timerId } = undoToast;
-    if (timerId) clearTimeout(timerId);
-    setUndoToast(null);
-    setActionLoadingId(leadId);
-
-    const revertPayload = {
-      status: 'aguardando_resposta',
-      responsavel: previousLead.responsavel,
-      proxima_acao_descricao: previousLead.proxima_acao_descricao,
-      proxima_acao_prazo: previousLead.proxima_acao_prazo,
-      proxima_acao_responsavel: previousLead.proxima_acao_responsavel,
-      proxima_acao_concluida: previousLead.proxima_acao_concluida,
-    };
-
-    const res = await updateCrmLead(leadId, revertPayload);
-    setActionLoadingId(null);
-
-    if (res.data) {
-      await insertCrmInteraction({
-        lead_id: leadId,
-        tipo: 'contato',
-        conteudo: 'Ação desfeita: retorno ao status Responder.',
-        autor: user?.email || 'Sistema',
-        meta: { acao: 'desfazer_resposta' },
-      });
-      setLeads(prev => prev.map(l => l.id === leadId ? res.data : l));
-      if (selectedLead && selectedLead.id === leadId) {
-        setSelectedLead(res.data);
-      }
-    } else {
-      setActionError('Erro ao desfazer ação. Tente novamente.');
-    }
   };
 
   // ── Filtering ──
 
+  const enrichedLeads = useMemo(
+    () => enrichCrmLeads(leads, clientes, agendamentos),
+    [leads, clientes, agendamentos]
+  );
+
+  useEffect(() => {
+    setSelectedLead(current => {
+      if (!current) return null;
+      return enrichedLeads.find(lead => lead.id === current.id) || current;
+    });
+  }, [enrichedLeads]);
+
   const baseLeads = useMemo(() => {
     const q = busca.toLowerCase();
-    return leads.filter(l => {
+    return enrichedLeads.filter(l => {
       if (!filtroArquivados && l.arquivado) return false;
       if (filtroArquivados && !l.arquivado) return false;
       if (filtroMeus && l.responsavel?.toLowerCase() !== (user?.email || '').toLowerCase()) return false;
+      if (filtroJornada) {
+        if (!matchesCrmJourneyFilter(l, filtroJornada)) return false;
+      }
+      if (['atrasados', 'retornos_pendentes'].includes(filtroOrigemParam) && !isOverdue(l)) return false;
       if (filtroSemAcao) {
         if (['encerrado_ganho', 'encerrado_perdido', 'arquivado'].includes(l.status)) return false;
         // Lead com tarefa pendente ativa: tem prazo, descrição não vazia E NÃO concluída
@@ -1397,17 +1150,15 @@ export default function CrmInteressados() {
         (l.responsavel || '').toLowerCase().includes(q)
       );
     });
-  }, [leads, busca, filtroMeus, filtroSemAcao, filtroArquivados, user]);
+  }, [enrichedLeads, busca, filtroMeus, filtroSemAcao, filtroArquivados, filtroJornada, filtroOrigemParam, user]);
 
   const byAba = useMemo(() => {
-    const active = baseLeads.filter(l => !['encerrado_ganho', 'encerrado_perdido'].includes(l.status));
     return {
       fila:      baseLeads.filter(l => l.status === 'aguardando_resposta'),
-      hoje:      active.filter(l => isDueToday(l)),
-      atrasados: active.filter(l => isOverdue(l)),
       agendados: baseLeads.filter(l => l.status === 'agendado'),
-      encerrados:baseLeads.filter(l => ['encerrado_ganho', 'encerrado_perdido'].includes(l.status)),
-      todos:     baseLeads,
+      atendidos: baseLeads.filter(l => l.status === 'encerrado_ganho'),
+      perdidos:  baseLeads.filter(l => l.status === 'encerrado_perdido'),
+      resultados: baseLeads,
     };
   }, [baseLeads]);
 
@@ -1415,19 +1166,33 @@ export default function CrmInteressados() {
 
   // Stats use raw leads (not filtered) for badge accuracy
   const stats = useMemo(() => {
-    const activeLeads = leads.filter(l => !l.arquivado);
+    const activeLeads = enrichedLeads.filter(l => !l.arquivado);
+    const openLeads = activeLeads.filter(l => !['encerrado_ganho', 'encerrado_perdido'].includes(l.status));
     return {
       fila:       activeLeads.filter(l => l.status === 'aguardando_resposta').length,
       atrasados:  activeLeads.filter(l => isOverdue(l)).length,
       hoje:       activeLeads.filter(l => isDueToday(l) && !['encerrado_ganho','encerrado_perdido'].includes(l.status)).length,
       agendados:  activeLeads.filter(l => l.status === 'agendado').length,
-      ganhos:     leads.filter(l => l.status === 'encerrado_ganho').length,
+      ganhos:     enrichedLeads.filter(l => l.status === 'encerrado_ganho').length,
+      semAgendamento: openLeads.filter(l => l._journey?.key === 'interessada').length,
+      faltaram: openLeads.filter(l => l._journey?.key === 'faltou').length,
+      emRisco: openLeads.filter(l => ['em_risco', 'inativa'].includes(l._journey?.key)).length,
+      clientes: openLeads.filter(l => ['cliente', 'recorrente'].includes(l._journey?.key)).length,
       semAcao:    activeLeads.filter(l => (
         !['encerrado_ganho', 'encerrado_perdido', 'arquivado'].includes(l.status) &&
         (!l.proxima_acao_prazo || !l.proxima_acao_descricao || !l.proxima_acao_descricao.trim() || l.proxima_acao_concluida === true)
       )).length,
     };
-  }, [leads]);
+  }, [enrichedLeads]);
+
+  const applyJourneyFilter = (filter) => {
+    setFiltroJornada(current => current === filter ? null : filter);
+    setFiltroSemAcao(false);
+    setFiltroArquivados(false);
+    setAba(filter === 'agendadas' ? 'agendados' : 'resultados');
+    setFiltroOrigemParam(null);
+    window.history.replaceState({}, '', '/crm');
+  };
 
   if (!canViewCrm) {
     return (
@@ -1466,9 +1231,7 @@ export default function CrmInteressados() {
           <div className="page-header-label"><UserPlus />CRM</div>
           <h1 className="page-title">Interessados</h1>
           <p className="page-subtitle">
-            {stats.fila} aguardando resposta
-            {stats.atrasados > 0 && <span style={{ color: '#DC2626', marginLeft: 8 }}>· {stats.atrasados} atrasados</span>}
-            {stats.semAcao > 0 && <span style={{ color: 'var(--text-muted)', marginLeft: 8 }}>· {stats.semAcao} sem próxima ação</span>}
+            A Agenda atualiza vínculos e etapas automaticamente · {stats.fila} para responder · {stats.agendados} agendados
           </p>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
@@ -1502,9 +1265,10 @@ export default function CrmInteressados() {
             <span>
               Filtro da Inteligência Comercial ativo:{' '}
               <strong>
-                {filtroOrigemParam === 'atrasados' || filtroOrigemParam === 'retornos_pendentes'
-                  ? 'Retornos pendentes (próxima ação vencida e não concluída)'
-                  : 'Interessados sem próxima ação definida'}
+                {JOURNEY_FILTER_LABELS[filtroOrigemParam]
+                  || (filtroOrigemParam === 'atrasados' || filtroOrigemParam === 'retornos_pendentes'
+                    ? 'Retornos pendentes (próxima ação vencida e não concluída)'
+                    : 'Interessados sem próxima ação definida')}
               </strong>
             </span>
           </div>
@@ -1515,6 +1279,7 @@ export default function CrmInteressados() {
               window.history.replaceState({}, '', '/crm');
               setFiltroOrigemParam(null);
               setFiltroSemAcao(false);
+              setFiltroJornada(null);
               setAba('fila');
             }}
           >
@@ -1523,19 +1288,37 @@ export default function CrmInteressados() {
         </div>
       )}
 
-      {/* KPI Cards */}
-      <div className="grid-4 section-gap" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
+      {/* Filas automáticas baseadas na Agenda */}
+      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, marginBottom: 10 }}>
+        <div>
+          <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--text-dark)' }}>Quem precisa de atenção</div>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>Listas atualizadas sozinhas pelos agendamentos e atendimentos.</div>
+        </div>
+        {filtroJornada && (
+          <button className="btn btn-ghost btn-sm" onClick={() => applyJourneyFilter(filtroJornada)} style={{ fontSize: 11 }}>
+            <XCircle style={{ width: 12, height: 12 }} /> Ver todos
+          </button>
+        )}
+      </div>
+      <div className="grid-4 section-gap" style={{ gridTemplateColumns: 'repeat(4, minmax(0, 1fr))' }}>
         {[
-          { label: 'Aguardando resposta', val: stats.fila,      cor: '#D4956A', icon: Inbox },
-          { label: 'Ações atrasadas',     val: stats.atrasados, cor: '#DC2626', icon: AlertTriangle },
-          { label: 'Para hoje',           val: stats.hoje,      cor: '#D97706', icon: Clock },
-          { label: 'Agendados',           val: stats.agendados, cor: '#6B9B7A', icon: Calendar },
-        ].map(({ label, val, cor, icon: Icon }) => (
-          <div key={label} className="stat-card">
+          { key: 'sem_agendamento', label: 'Sem agendamento', val: stats.semAgendamento, cor: '#D97706', icon: Inbox },
+          { key: 'faltaram', label: 'Faltaram', val: stats.faltaram, cor: '#DC2626', icon: AlertTriangle },
+          { key: 'em_risco', label: 'Em risco / inativas', val: stats.emRisco, cor: '#C2410C', icon: Clock },
+          { key: 'agendadas', label: 'Agenda futura', val: stats.agendados, cor: '#2563EB', icon: Calendar },
+        ].map(({ key, label, val, cor, icon: Icon }) => (
+          <button
+            type="button"
+            key={key}
+            className="stat-card"
+            onClick={() => applyJourneyFilter(key)}
+            aria-pressed={filtroJornada === key}
+            style={{ textAlign: 'left', cursor: 'pointer', border: filtroJornada === key ? `2px solid ${cor}` : undefined }}
+          >
             <div className="stat-card-icon" style={{ background: `${cor}18` }}><Icon style={{ color: cor }} /></div>
             <div className="stat-value" style={{ color: cor }}>{val}</div>
             <div className="stat-label">{label}</div>
-          </div>
+          </button>
         ))}
       </div>
 
@@ -1557,15 +1340,20 @@ export default function CrmInteressados() {
         </button>
         <button
           className={`btn btn-sm ${filtroArquivados ? 'btn-primary' : 'btn-ghost'}`}
-          onClick={() => { setFiltroArquivados(v => !v); setAba('todos'); }}
+          onClick={() => { setFiltroArquivados(v => !v); setAba('resultados'); }}
           style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 4 }}
         >
           <Archive style={{ width: 12, height: 12 }} /> Arquivados
         </button>
-        {(filtroMeus || filtroSemAcao || filtroArquivados || busca) && (
+        {filtroJornada && (
+          <span style={{ fontSize: 11, color: CRM_JOURNEY_STATUS[filtroJornada === 'faltaram' ? 'faltou' : filtroJornada === 'agendadas' ? 'agendada' : filtroJornada === 'sem_agendamento' ? 'interessada' : 'em_risco']?.color, fontWeight: 700 }}>
+            {JOURNEY_FILTER_LABELS[filtroJornada]}
+          </span>
+        )}
+        {(filtroMeus || filtroSemAcao || filtroArquivados || filtroJornada || busca) && (
           <button
             className="btn btn-ghost btn-sm"
-            onClick={() => { setFiltroMeus(false); setFiltroSemAcao(false); setFiltroArquivados(false); setBusca(''); }}
+            onClick={() => { setFiltroMeus(false); setFiltroSemAcao(false); setFiltroArquivados(false); setFiltroJornada(null); setBusca(''); }}
             style={{ fontSize: 12, color: 'var(--text-muted)' }}
           >
             <XCircle style={{ width: 12, height: 12 }} /> Limpar filtros
@@ -1573,40 +1361,12 @@ export default function CrmInteressados() {
         )}
       </div>
 
-      {actionError && (
-        <div style={{
-          marginBottom: 16,
-          padding: '10px 16px',
-          background: '#FEF2F2',
-          border: '1px solid #FECACA',
-          borderRadius: 8,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          fontSize: 13,
-          color: '#DC2626',
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <AlertTriangle style={{ width: 16, height: 16 }} />
-            <span>{actionError}</span>
-          </div>
-          <button
-            type="button"
-            onClick={() => setActionError(null)}
-            style={{ background: 'transparent', border: 'none', color: '#DC2626', cursor: 'pointer' }}
-            aria-label="Fechar erro"
-          >
-            <X style={{ width: 14, height: 14 }} />
-          </button>
-        </div>
-      )}
-
       {/* Tabs + Search */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
         <div className="tabs">
           {ABAS.map(a => {
             const count = byAba[a.key]?.length || 0;
-            const isAlert = (a.key === 'fila' && stats.fila > 0) || (a.key === 'atrasados' && stats.atrasados > 0);
+            const isAlert = (a.key === 'fila' && stats.fila > 0) || (a.key === 'perdidos' && byAba.perdidos.length > 0);
             return (
               <button
                 key={a.key}
@@ -1645,7 +1405,7 @@ export default function CrmInteressados() {
         <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-dark)', display: 'flex', alignItems: 'center', gap: 6 }}>
             <Star style={{ width: 14, height: 14, color: 'var(--color-primary)' }} />
-            {ABAS.find(a => a.key === aba)?.label}
+            {ABAS.find(a => a.key === aba)?.label || JOURNEY_FILTER_LABELS[filtroOrigemParam] || 'Resultados filtrados'}
             {abaLeads.length > 0 && <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>— {abaLeads.length}</span>}
           </span>
         </div>
@@ -1665,25 +1425,24 @@ export default function CrmInteressados() {
           <div className="empty-state">
             <Users style={{ width: 32, height: 32, color: 'var(--text-muted)' }} />
             <p style={{ marginTop: 12, color: 'var(--text-muted)' }}>
-              {busca || filtroMeus || filtroSemAcao || filtroArquivados
+              {busca || filtroMeus || filtroSemAcao || filtroArquivados || filtroJornada
                 ? 'Nenhum resultado para estes filtros.'
                 : aba === 'fila'       ? 'Tudo respondido por enquanto.'
-                : aba === 'hoje'       ? 'Nenhuma ação para hoje. Bom trabalho!'
-                : aba === 'atrasados'  ? 'Nenhuma ação atrasada.'
                 : aba === 'agendados'  ? 'Nenhum interessado agendado.'
-                : aba === 'encerrados' ? 'Nenhum atendimento encerrado.'
+                : aba === 'atendidos'  ? 'Nenhum interessado atendido ainda.'
+                : aba === 'perdidos'   ? 'Nenhum interessado perdido.'
                 : 'Nenhum interessado cadastrado.'}
             </p>
-            {(busca || filtroMeus || filtroSemAcao) && (
+            {(busca || filtroMeus || filtroSemAcao || filtroJornada) && (
               <button
                 className="btn btn-ghost"
                 style={{ marginTop: 8 }}
-                onClick={() => { setBusca(''); setFiltroMeus(false); setFiltroSemAcao(false); }}
+                onClick={() => { setBusca(''); setFiltroMeus(false); setFiltroSemAcao(false); setFiltroJornada(null); }}
               >
                 Limpar filtros
               </button>
             )}
-            {aba === 'fila' && !busca && !filtroMeus && !filtroSemAcao && canWriteCrm && (
+            {aba === 'fila' && !busca && !filtroMeus && !filtroSemAcao && !filtroJornada && canWriteCrm && (
               <button className="btn btn-primary" onClick={() => setShowNova(true)} style={{ marginTop: 12 }}>
                 <Plus />Cadastrar primeiro interessado
               </button>
@@ -1696,12 +1455,13 @@ export default function CrmInteressados() {
                 <tr>
                   <th>Nome</th>
                   <th>Serviço</th>
+                  <th>Situação automática</th>
                   <th>Responsável</th>
                   <th>Próxima ação</th>
-                  <th>Status</th>
+                  <th>Etapa automática</th>
                   <th>{aba === 'fila' ? 'Espera' : 'Cadastro'}</th>
                   {aba === 'fila' ? (
-                    <th style={{ textAlign: 'right', minWidth: 230 }}>Ações</th>
+                    <th style={{ textAlign: 'right', minWidth: 130 }}>Contato</th>
                   ) : (
                     <th style={{ width: 24 }}></th>
                   )}
@@ -1716,8 +1476,6 @@ export default function CrmInteressados() {
                     overdue={isOverdue(lead)}
                     dueToday={isDueToday(lead)}
                     isFila={aba === 'fila'}
-                    onJaRespondi={handleJaRespondi}
-                    actionLoading={actionLoadingId === lead.id}
                   />
                 ))}
               </tbody>
@@ -1726,9 +1484,9 @@ export default function CrmInteressados() {
         )}
       </div>
 
-      {/* Summary: losses breakdown on encerrados tab */}
-      {aba === 'encerrados' && byAba.encerrados.length > 0 && (() => {
-        const perdidos = byAba.encerrados.filter(l => l.status === 'encerrado_perdido');
+      {/* Summary: losses breakdown */}
+      {aba === 'perdidos' && byAba.perdidos.length > 0 && (() => {
+        const perdidos = byAba.perdidos;
         const motivoMap = {};
         perdidos.forEach(l => {
           const m = l.motivo_perda || 'Sem motivo';
@@ -1752,65 +1510,6 @@ export default function CrmInteressados() {
         ) : null;
       })()}
 
-      {/* Undo ("Desfazer") toast notice */}
-      {undoToast && (
-        <div style={{
-          position: 'fixed',
-          bottom: 24,
-          right: 24,
-          zIndex: 1000,
-          background: '#1F2937',
-          color: '#F9FAFB',
-          padding: '12px 18px',
-          borderRadius: 10,
-          boxShadow: '0 10px 25px -5px rgba(0,0,0,0.3)',
-          display: 'flex',
-          alignItems: 'center',
-          gap: 16,
-          fontSize: 13,
-          border: '1px solid #374151',
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <CheckCircle style={{ width: 16, height: 16, color: '#34D399' }} />
-            <span>Resposta registrada para <strong>{undoToast.leadNome}</strong>.</span>
-          </div>
-          <button
-            type="button"
-            onClick={handleDesfazer}
-            style={{
-              background: '#3B82F6',
-              color: '#fff',
-              border: 'none',
-              borderRadius: 6,
-              padding: '5px 12px',
-              fontSize: 12,
-              fontWeight: 700,
-              cursor: 'pointer',
-            }}
-          >
-            Desfazer
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              if (undoToast.timerId) clearTimeout(undoToast.timerId);
-              setUndoToast(null);
-            }}
-            style={{
-              background: 'transparent',
-              border: 'none',
-              color: '#9CA3AF',
-              cursor: 'pointer',
-              padding: 2,
-              display: 'flex',
-              alignItems: 'center',
-            }}
-            aria-label="Fechar aviso"
-          >
-            <X style={{ width: 14, height: 14 }} />
-          </button>
-        </div>
-      )}
     </div>
   );
 }
