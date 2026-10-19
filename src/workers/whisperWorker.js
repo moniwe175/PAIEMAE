@@ -1,63 +1,68 @@
 // src/workers/whisperWorker.js
-// Runs entirely in a Web Worker - no DOM, no Supabase, no external API
+// Runs entirely in a Web Worker context – no DOM, no Supabase.
 import { pipeline, env } from '@huggingface/transformers';
 
+// ── Environment config ──
 env.allowLocalModels = false;
-env.useBrowserCache = true; // cache model after first download
+env.useBrowserCache  = true;
+// Force single-thread WASM so no SharedArrayBuffer / COOP-COEP headers are required in production
+env.backends.onnx.wasm.numThreads = 1;
 
 let transcriber = null;
 
-/**
- * Attempt to load Whisper, trying WebGPU first, then WASM.
- * Emits model_progress events so the UI can show a download bar.
- */
-async function loadModel() {
-  const devices = ['webgpu', 'wasm'];
+async function canUseWebGPU() {
+  if (typeof navigator === 'undefined' || !navigator.gpu) return false;
+  try {
+    const adapter = await navigator.gpu.requestAdapter();
+    return !!adapter;
+  } catch {
+    return false;
+  }
+}
+
+async function loadModel(onProgress) {
+  const hasGpu = await canUseWebGPU();
+  // Safe detection: only attempt WebGPU if navigator.gpu actually acquired an adapter
+  const devicesToTry = hasGpu ? ['webgpu', 'wasm'] : ['wasm'];
+
   let lastError = null;
-
-  for (const device of devices) {
+  for (const device of devicesToTry) {
     try {
-      self.postMessage({ type: 'log', message: `Tentando dispositivo: ${device}` });
-
+      self.postMessage({ type: 'log', message: `Iniciando dispositivo: ${device}` });
       const t = await pipeline(
         'automatic-speech-recognition',
-        'onnx-community/whisper-base',
+        'onnx-community/whisper-tiny',
         {
-          dtype:
-            device === 'webgpu'
-              ? { encoder_model: 'fp32', decoder_model_merged: 'q4' }
-              : { encoder_model: 'q8', decoder_model_merged: 'q4' },
-          device,
-          progress_callback: (progress) => {
-            self.postMessage({ type: 'model_progress', progress });
+          dtype: {
+            encoder_model: device === 'webgpu' ? 'fp32' : 'q4',
+            decoder_model_merged: 'q4',
           },
+          device,
+          progress_callback: onProgress,
         }
       );
-
-      transcriber = t;
-      return device;
+      return { transcriber: t, device };
     } catch (err) {
       lastError = err;
-      self.postMessage({
-        type: 'log',
-        message: `${device} indisponivel: ${err.message}`,
-      });
+      self.postMessage({ type: 'log', message: `${device} falhou: ${err.message}` });
     }
   }
 
-  throw new Error(
-    lastError?.message || 'Nenhum dispositivo de IA disponivel neste navegador.'
-  );
+  throw lastError || new Error('Não foi possível carregar o modelo de transcrição.');
 }
 
 self.addEventListener('message', async ({ data }) => {
   switch (data.type) {
     case 'load': {
       try {
-        const device = await loadModel();
+        const { transcriber: t, device } = await loadModel((p) =>
+          self.postMessage({ type: 'model_progress', progress: p })
+        );
+        transcriber = t;
         self.postMessage({ type: 'ready', device });
       } catch (err) {
-        self.postMessage({ type: 'error', error: err.message });
+        // Whisper unavailable (e.g. offline or browser memory) -> inform UI to fallback gracefully to silence-only edit
+        self.postMessage({ type: 'whisper_unavailable', error: err.message });
       }
       break;
     }
@@ -65,7 +70,7 @@ self.addEventListener('message', async ({ data }) => {
     case 'transcribe': {
       try {
         if (!transcriber) {
-          throw new Error('Modelo nao carregado. Carregue o modelo primeiro.');
+          throw new Error('Modelo não carregado.');
         }
         const output = await transcriber(data.audio, {
           language: 'portuguese',
