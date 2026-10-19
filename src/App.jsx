@@ -74,7 +74,7 @@ function MainLayout() {
           <Route path="/anamnese" element={<ModuleGate module="anamnese"><Anamnese /></ModuleGate>} />
           <Route path="/estrategia" element={<ModuleGate module="estrategia"><Estrategia /></ModuleGate>} />
           <Route path="/crm" element={<ModuleGate module="crm"><CrmInteressados /></ModuleGate>} />
-          <Route path="/editor-video" element={<EditorVideo />} />
+          <Route path="/editor-video" element={<ModuleGate module="marketing"><EditorVideo /></ModuleGate>} />
           <Route path="/gerenciar-acessos" element={
             <ModuleGate adminOnly>
               <Suspense fallback={<div style={{padding:40,textAlign:'center',color:'#8C7573'}}>Carregando...</div>}>
