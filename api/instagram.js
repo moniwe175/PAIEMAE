@@ -195,6 +195,19 @@ async function requestMetaInsight(accessToken, objectId, params) {
   return payload.data || [];
 }
 
+async function fetchMediaMetricsBundle(accessToken, mediaId) {
+  const names = ['reach', 'views', 'saved', 'shares'];
+  try {
+    const data = await requestMetaInsight(accessToken, mediaId, { metric: names.join(',') });
+    return Object.fromEntries(names.map((name) => {
+      const result = data.find(item => item.name === name);
+      return [name, insightNumber(result?.total_value?.value ?? result?.values?.at(-1)?.value)];
+    }));
+  } catch {
+    return Object.fromEntries(names.map(name => [name, null]));
+  }
+}
+
 export function insightErrorMessage(error) {
   if (error.code === 190) return 'Token da Meta expirado. Atualize META_ACCESS_TOKEN no backend.';
   if (error.code === 10 || error.code === 200) {
@@ -236,9 +249,11 @@ export async function fetchInstagramInsights(accessToken, accountId, days, media
   ]));
 
   let media = null;
+  let ownedMediaResult = null;
   if (mediaId) {
     // Não deixa o navegador pedir métricas de uma publicação fora desta conta.
     const owned = await fetchAccountMedia(accessToken, accountId);
+    ownedMediaResult = owned;
     if (!owned.ok) throw new Error(owned.error);
     if (!owned.media.some(item => item.id === mediaId)) throw new Error('Publicação não encontrada na conta conectada.');
     const values = await Promise.allSettled(['reach', 'views', 'saved', 'shares'].map(async metric => {
@@ -256,7 +271,37 @@ export async function fetchInstagramInsights(accessToken, accountId, days, media
     }
   }
 
-  return { ok: true, period_days: days, reach: series, totals, media, updated_at: new Date().toISOString() };
+  const ownedSummary = ownedMediaResult || await fetchAccountMedia(accessToken, accountId);
+  const recentMedia = (ownedSummary.ok ? ownedSummary.media : [])
+    .filter(item => item.timestamp && item.timestamp.slice(0, 10) >= since.toISOString().slice(0, 10))
+    .slice(0, 12);
+  const contentResults = await Promise.allSettled(recentMedia.map(async item => {
+    const metricsForItem = item.id === mediaId && media
+      ? { reach: media.reach, views: media.views, saved: media.saved, shares: media.shares }
+      : await fetchMediaMetricsBundle(accessToken, item.id);
+    const publicInteractions = Number(item.like_count || 0) + Number(item.comments_count || 0);
+    const privateInteractions = Number(metricsForItem.saved || 0) + Number(metricsForItem.shares || 0);
+    return { id: item.id, timestamp: item.timestamp, ...metricsForItem, engagements: publicInteractions + privateInteractions };
+  }));
+  const content = contentResults.filter(item => item.status === 'fulfilled').map(item => item.value);
+  const sumKnown = key => {
+    const values = content.map(item => item[key]).filter(value => value !== null && value !== undefined);
+    return values.length ? values.reduce((sum, value) => sum + Number(value || 0), 0) : null;
+  };
+  const mediaSummary = {
+    posts_count: recentMedia.length,
+    covered_posts: content.filter(item => ['reach', 'views', 'saved', 'shares'].some(key => item[key] !== null)).length,
+    limit: 12,
+    totals: {
+      reach: sumKnown('reach'),
+      views: sumKnown('views'),
+      saved: sumKnown('saved'),
+      shares: sumKnown('shares'),
+      engagements: sumKnown('engagements'),
+    },
+  };
+
+  return { ok: true, period_days: days, reach: series, totals, media, media_summary: mediaSummary, updated_at: new Date().toISOString() };
 }
 
 // ─── Disparo de Resposta Privada ao Comentário (Via ID da Página do Facebook) ───────────
@@ -460,7 +505,9 @@ async function runDiagnostics(db) {
           } : null,
         }));
       }
-    } catch (_) {}
+    } catch {
+      // Diagnóstico auxiliar: a consulta principal abaixo continua mesmo se a listagem falhar.
+    }
 
     // 3b. Consulta direta à Página esperada (1640332469521785) para verificar o vínculo oficial com o Instagram
     try {
