@@ -32,7 +32,8 @@ export const INITIAL_ROLES = [
       dashboard: { ver: true, edit: true },
       relatorios: { ver: true, edit: true },
       comissoes: { ver: true, edit: true },
-      financeiro: { ver: true, edit: true }
+      financeiro: { ver: true, edit: true },
+      franquia: { ver: true, edit: true }
     }
   },
   {
@@ -47,7 +48,8 @@ export const INITIAL_ROLES = [
       estoque: { ver: true, edit: true },
       relatorios: { ver: true, edit: true },
       marketing: { ver: true, edit: true },
-      crm: { ver: true, edit: true }
+      crm: { ver: true, edit: true },
+      franquia: { ver: true, edit: true }
     }
   }
 ];

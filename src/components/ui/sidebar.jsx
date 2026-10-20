@@ -20,7 +20,8 @@ import {
   Shield,
   BookOpen,
   UserPlus,
-  Video
+  Video,
+  Building2
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { fetchQueuePendingCount } from '../../services/supabaseService';
@@ -42,6 +43,7 @@ const menuItems = [
   { key: 'marketing', name: 'Guia Marketing', path: '/guia-marketing', icon: BookOpen },
   { key: 'comissoes', name: 'Comissões', path: '/comissoes', icon: Coins },
   { key: 'financeiro', name: 'Financeiro', path: '/financial', icon: Wallet },
+  { key: 'franquia', name: 'Franquia & Viabilidade', path: '/franquia', icon: Building2 },
   { key: 'integracoes', name: 'Integrações', path: '/integration', icon: Zap },
   { key: 'marketing', name: 'Editor de Vídeo', path: '/editor-video', icon: Video },
 ];

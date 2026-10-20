@@ -24,6 +24,7 @@ const MODULE_LIST = [
   { key: 'motor', label: 'Motor' },
   { key: 'comissoes', label: 'Comissões' },
   { key: 'financeiro', label: 'Financeiro' },
+  { key: 'franquia', label: 'Franquia & Viabilidade' },
   { key: 'integracoes', label: 'Integrações' },
   { key: 'acessos', label: 'Acessos' },
 ];

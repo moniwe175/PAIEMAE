@@ -70,7 +70,8 @@ INSERT INTO public.roles (id, name, permissions) VALUES
     "dashboard": {"ver": true, "edit": true},
     "relatorios": {"ver": true, "edit": true},
     "comissoes": {"ver": true, "edit": true},
-    "financeiro": {"ver": true, "edit": true}
+    "financeiro": {"ver": true, "edit": true},
+    "franquia": {"ver": true, "edit": true}
   }'::jsonb
 ),
 (
@@ -86,7 +87,8 @@ INSERT INTO public.roles (id, name, permissions) VALUES
     "pacotes": {"ver": true, "edit": true},
     "relatorios": {"ver": true, "edit": true},
     "tarefas": {"ver": true, "edit": true},
-    "marketing": {"ver": true, "edit": true}
+    "marketing": {"ver": true, "edit": true},
+    "franquia": {"ver": true, "edit": true}
   }'::jsonb
 )
 ON CONFLICT (name) DO NOTHING;

@@ -38,6 +38,7 @@ import ExclusaoDados from './pages/ExclusaoDados';
 
 // Lazy-loaded pages (separate chunks, no main-bundle init impact)
 const GerenciarAcessos = lazy(() => import('./pages/GerenciarAcessos'));
+const Franquia = lazy(() => import('./pages/Franquia'));
 
 // Import Sidebar component
 import Sidebar from './components/ui/sidebar';
@@ -75,6 +76,13 @@ function MainLayout() {
           <Route path="/estrategia" element={<ModuleGate module="estrategia"><Estrategia /></ModuleGate>} />
           <Route path="/crm" element={<ModuleGate module="crm"><CrmInteressados /></ModuleGate>} />
           <Route path="/editor-video" element={<ModuleGate module="marketing"><EditorVideo /></ModuleGate>} />
+          <Route path="/franquia" element={
+            <ModuleGate module="franquia">
+              <Suspense fallback={<div style={{padding:40,textAlign:'center',color:'#8C7573'}}>Carregando...</div>}>
+                <Franquia />
+              </Suspense>
+            </ModuleGate>
+          } />
           <Route path="/gerenciar-acessos" element={
             <ModuleGate adminOnly>
               <Suspense fallback={<div style={{padding:40,textAlign:'center',color:'#8C7573'}}>Carregando...</div>}>
