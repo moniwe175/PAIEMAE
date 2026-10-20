@@ -3,13 +3,14 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import {
   Upload, Download, Play, Pause, SkipBack, SkipForward,
   CheckCircle2, AlertCircle, Loader2, Volume2, VolumeX,
-  Sparkles, Settings2, RefreshCw, Clock, Film, Trash2, Info, ImagePlus, X
+  Sparkles, RefreshCw, Clock, Film, Trash2, Info, ImagePlus, X
 } from "lucide-react";
 import {
   buildAutomaticBrollCues,
+  buildCaptionPhrases,
   buildKeepSegments,
   detectAdaptiveSilences,
-  fitCover,
+  fitContain,
 } from "../lib/videoAutoEdit";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -152,64 +153,44 @@ function removeRepetitions(segs, words) {
   return result;
 }
 
-function groupIntoPhrases(words, maxN = 4) {
-  const phrases = [];
-  for (let i = 0; i < words.length; i += maxN) {
-    const sl = words.slice(i, i + maxN);
-    phrases.push({
-      id: Date.now() + i,
-      text: sl.map((w) => w.text).join(" "),
-      startTime: sl[0].start,
-      endTime: sl[sl.length - 1].end,
-      words: sl,
-    });
-  }
-  return phrases;
-}
+function drawWordCaption(ctx, phrases, ct, cw, ch) {
+  const phrase = phrases.find(item => ct >= item.startTime - 0.05 && ct < item.endTime + 0.12);
+  if (!phrase?.words?.length) return;
 
-function drawWordCaption(ctx, words, ct, cw, ch) {
-  const ci = words.findIndex((w) => ct >= w.start && ct < w.end);
-  if (ci < 0) return;
-
-  const st = Math.max(0, ci - 1);
-  const sl = words.slice(st, st + 4);
-  const fs = Math.max(24, Math.floor(Math.min(cw, ch) / 22));
-  ctx.font = `800 ${fs}px Inter, sans-serif`;
+  const fs = Math.max(28, Math.floor(cw / 18));
+  ctx.font = `900 ${fs}px Inter, Arial, sans-serif`;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
 
-  const line = sl.map((w) => w.text).join(" ");
-  const lw = ctx.measureText(line).width;
-  const yb = ch * 0.86;
-  const pad = 14;
+  const maxLineWidth = cw * 0.82;
+  const lines = [[]];
+  phrase.words.forEach(word => {
+    const line = lines[lines.length - 1];
+    const candidate = [...line, word].map(item => item.text).join(" ");
+    if (line.length && ctx.measureText(candidate).width > maxLineWidth && lines.length < 2) {
+      lines.push([word]);
+    } else {
+      line.push(word);
+    }
+  });
 
-  // Background pill
-  ctx.fillStyle = "rgba(0, 0, 0, 0.65)";
-  ctx.beginPath();
-  if (ctx.roundRect) {
-    ctx.roundRect(cw / 2 - lw / 2 - pad, yb - fs / 2 - 8, lw + pad * 2, fs + 20, 8);
-  } else {
-    ctx.rect(cw / 2 - lw / 2 - pad, yb - fs / 2 - 8, lw + pad * 2, fs + 20);
-  }
-  ctx.fill();
-
-  let x = cw / 2 - lw / 2;
-  sl.forEach((w, i) => {
-    const isCur = st + i === ci;
-    const wordWidth = ctx.measureText(w.text).width;
-    const spaceWidth = ctx.measureText(" ").width;
-
-    // Stroke
-    ctx.font = `800 ${fs}px Inter, sans-serif`;
-    ctx.lineWidth = 4;
-    ctx.strokeStyle = "rgba(0,0,0,0.8)";
-    ctx.strokeText(w.text, x + wordWidth / 2, yb);
-
-    // Text fill with gold highlight for the active word
-    ctx.fillStyle = isCur ? "#FFE600" : "#FFFFFF";
-    ctx.fillText(w.text, x + wordWidth / 2, yb);
-
-    x += wordWidth + spaceWidth;
+  const lineHeight = fs * 1.08;
+  const centerY = ch * 0.82;
+  lines.forEach((line, lineIndex) => {
+    const lineWidth = ctx.measureText(line.map(word => word.text).join(" ")).width;
+    let x = cw / 2 - lineWidth / 2;
+    const y = centerY + (lineIndex - (lines.length - 1) / 2) * lineHeight;
+    line.forEach(word => {
+      const wordWidth = ctx.measureText(word.text).width;
+      const isCurrent = ct >= word.start && ct < word.end;
+      ctx.lineJoin = "round";
+      ctx.lineWidth = Math.max(5, fs * 0.14);
+      ctx.strokeStyle = "rgba(0,0,0,0.9)";
+      ctx.strokeText(word.text, x + wordWidth / 2, y);
+      ctx.fillStyle = isCurrent ? "#F5C451" : "#FFFFFF";
+      ctx.fillText(word.text, x + wordWidth / 2, y);
+      x += wordWidth + ctx.measureText(" ").width;
+    });
   });
 }
 
@@ -270,8 +251,9 @@ export default function EditorVideo() {
   }, [segments]);
 
   useEffect(() => {
-    setBrollCues(buildAutomaticBrollCues(segments, brollAssets));
-  }, [segments, brollAssets]);
+    const words = captions.flatMap(caption => caption.words || []);
+    setBrollCues(buildAutomaticBrollCues(segments, brollAssets, { words }));
+  }, [segments, brollAssets, captions]);
 
   useEffect(() => {
     brollAssetsRef.current = brollAssets;
@@ -447,19 +429,36 @@ export default function EditorVideo() {
       const sourceWidth = activeAsset.type === "image" ? media.naturalWidth : media.videoWidth;
       const sourceHeight = activeAsset.type === "image" ? media.naturalHeight : media.videoHeight;
       if (sourceWidth && sourceHeight) {
-        const rect = fitCover(sourceWidth, sourceHeight, c.width, c.height);
+        const cardWidth = c.width * 0.82;
+        const cardHeight = c.height * 0.46;
+        const fitted = fitContain(sourceWidth, sourceHeight, cardWidth, cardHeight);
+        const rect = {
+          x: (c.width - cardWidth) / 2 + fitted.x,
+          y: c.height * 0.49 - fitted.height / 2,
+          width: fitted.width,
+          height: fitted.height,
+        };
         const fade = Math.min(1, (ct - activeCue.start) / 0.16, (activeCue.end - ct) / 0.16);
         ctx.save();
         ctx.globalAlpha = Math.max(0, fade);
+        ctx.shadowColor = "rgba(0,0,0,.38)";
+        ctx.shadowBlur = Math.max(12, c.width * 0.025);
+        ctx.shadowOffsetY = Math.max(5, c.height * 0.006);
+        ctx.beginPath();
+        if (ctx.roundRect) {
+          ctx.roundRect(rect.x, rect.y, rect.width, rect.height, Math.max(8, c.width * 0.014));
+        } else {
+          ctx.rect(rect.x, rect.y, rect.width, rect.height);
+        }
+        ctx.clip();
         ctx.drawImage(media, rect.x, rect.y, rect.width, rect.height);
         ctx.restore();
       }
     }
 
     // Word captions
-    const captionWords = captions.flatMap(caption => caption.words || []);
-    if (settings.enableCaptions && captionWords.length > 0) {
-      drawWordCaption(ctx, captionWords, v.currentTime, c.width, c.height);
+    if (settings.enableCaptions && captions.length > 0) {
+      drawWordCaption(ctx, captions, v.currentTime, c.width, c.height);
     }
 
     rafRef.current = requestAnimationFrame(drawFrame);
@@ -573,7 +572,7 @@ export default function EditorVideo() {
       setOrigDur(videoRef.current.duration);
       setFinalDur(fDur);
       if (words.length > 0) {
-        setCaptions(groupIntoPhrases(words, 4));
+        setCaptions(buildCaptionPhrases(words));
       }
       setStepPct(100);
 
@@ -796,7 +795,7 @@ export default function EditorVideo() {
           {/* Settings & Action */}
           {!isRunning && !isExp && (
             <div style={C.sec}>
-              <div style={C.secT}><Settings2 size={11} /> Configurações de Edição</div>
+              <div style={C.secT}><Sparkles size={11} /> Edição automática para Reels</div>
 
               <label style={C.lbl}>Sensibilidade de corte dos silêncios</label>
               <select
@@ -842,7 +841,7 @@ export default function EditorVideo() {
                   <ImagePlus size={13} /> Adicionar fotos ou vídeos
                 </button>
                 <p style={{ fontSize: 9.5, color: "var(--text-light)", margin: "5px 0 0", lineHeight: 1.4 }}>
-                  O editor distribui as mídias sobre a fala e mantém o áudio principal. Máximo de 8 arquivos.
+                  Dica: use nomes como &quot;drenagem.jpg&quot; ou &quot;antes e depois.mp4&quot;. O editor procura essas palavras na fala e coloca a mídia no momento certo.
                 </p>
 
                 {brollAssets.length > 0 && (
@@ -945,6 +944,9 @@ export default function EditorVideo() {
                     </div>
                     <div style={{ fontSize: 10, color: "var(--success)", marginTop: 3 }}>
                       {Math.max(0, Math.round((1 - finalDur / (origDur || 1)) * 100))}% mais dinâmico · {segments.length} trechos
+                    </div>
+                    <div style={{ fontSize: 10, color: "var(--text-light)", marginTop: 2 }}>
+                      {captions.length} legendas curtas · {brollCues.length} inserções de B-roll
                     </div>
                   </div>
 

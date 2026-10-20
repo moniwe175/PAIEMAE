@@ -110,14 +110,94 @@ export function buildKeepSegments(silences = [], duration = 0, minKeepS = 0.14) 
 
 function sourceTimeAtEditedOffset(segments, editedOffset) {
   let elapsed = 0;
-  for (const segment of segments) {
+  for (let index = 0; index < segments.length; index += 1) {
+    const segment = segments[index];
     const length = segment.end - segment.start;
-    if (editedOffset <= elapsed + length) {
+    if (editedOffset < elapsed + length || index === segments.length - 1) {
       return { segment, sourceTime: segment.start + Math.max(0, editedOffset - elapsed) };
     }
     elapsed += length;
   }
   return null;
+}
+
+function normalizedWords(value = "") {
+  return String(value)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\.[a-z0-9]{2,5}$/i, "")
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+}
+
+const BROLL_STOP_WORDS = new Set([
+  "a", "as", "o", "os", "de", "da", "das", "do", "dos", "e", "em", "na", "nas", "no", "nos",
+  "para", "por", "com", "sem", "um", "uma", "uns", "umas", "foto", "video", "img", "imagem", "arquivo",
+]);
+
+function assetKeywords(asset) {
+  return normalizedWords(asset?.name).filter(word => word.length > 2 && !BROLL_STOP_WORDS.has(word));
+}
+
+function segmentAtTime(segments, time) {
+  return segments.find(segment => time >= segment.start && time <= segment.end);
+}
+
+function cueOverlaps(cues, start, end, gap = 0.35) {
+  return cues.some(cue => start < cue.end + gap && end > cue.start - gap);
+}
+
+/**
+ * Agrupa palavras em blocos curtos de legenda. O limite considera tempo,
+ * pontuação e tamanho para manter no máximo duas linhas em um Reel.
+ */
+export function buildCaptionPhrases(words = [], options = {}) {
+  const {
+    maxWords = 6,
+    maxChars = 34,
+    maxDuration = 2.6,
+    gapS = 0.48,
+  } = options;
+  const valid = words
+    .map(word => ({
+      ...word,
+      text: String(word?.text || "").trim(),
+      start: Number(word?.start),
+      end: Number(word?.end),
+    }))
+    .filter(word => word.text && Number.isFinite(word.start) && Number.isFinite(word.end));
+
+  const phrases = [];
+  let current = [];
+  const flush = () => {
+    if (!current.length) return;
+    phrases.push({
+      id: `caption-${phrases.length}-${current[0].start.toFixed(3)}`,
+      text: current.map(word => word.text).join(" "),
+      startTime: current[0].start,
+      endTime: current[current.length - 1].end,
+      words: current,
+    });
+    current = [];
+  };
+
+  valid.forEach(word => {
+    const previous = current[current.length - 1];
+    const candidate = [...current, word];
+    const candidateText = candidate.map(item => item.text).join(" ");
+    const shouldBreak = current.length > 0 && (
+      current.length >= maxWords ||
+      candidateText.length > maxChars ||
+      word.end - current[0].start > maxDuration ||
+      word.start - previous.end > gapS ||
+      /[.!?]$/.test(previous.text)
+    );
+    if (shouldBreak) flush();
+    current.push(word);
+  });
+  flush();
+  return phrases;
 }
 
 /**
@@ -126,35 +206,53 @@ function sourceTimeAtEditedOffset(segments, editedOffset) {
  */
 export function buildAutomaticBrollCues(segments = [], assets = [], options = {}) {
   if (!segments.length || !assets.length) return [];
-  const cueDuration = options.cueDuration || 2.5;
-  const gap = options.gap || 5;
+  const cueDuration = options.cueDuration || 2.8;
+  const gap = options.gap || 6;
+  const words = options.words || [];
   const total = segments.reduce((sum, segment) => sum + Math.max(0, segment.end - segment.start), 0);
   if (total < 1) return [];
 
   const cues = [];
   assets.forEach((asset, index) => {
-    const desiredOffset = Math.min(Math.max(0.5, 2 + index * gap), Math.max(0.5, total - 0.5));
-    const location = sourceTimeAtEditedOffset(segments, desiredOffset);
-    if (!location) return;
+    const keywords = assetKeywords(asset);
+    const matchedWord = words.find(word => {
+      const spoken = normalizedWords(word.text)[0];
+      if (!spoken || !segmentAtTime(segments, word.start)) return false;
+      return keywords.some(keyword => keyword === spoken || (keyword.length > 4 && spoken.startsWith(keyword)));
+    });
+    const fallbackOffset = Math.min(
+      Math.max(1.2, 3.2 + index * gap),
+      Math.max(1.2, total - 1),
+    );
+    const location = matchedWord
+      ? { segment: segmentAtTime(segments, matchedWord.start), sourceTime: Math.max(0, matchedWord.start - 0.3) }
+      : sourceTimeAtEditedOffset(segments, fallbackOffset);
+    if (!location?.segment) return;
 
-    const available = location.segment.end - location.sourceTime;
-    const duration = Math.min(cueDuration, available);
+    let start = Math.max(location.segment.start + 0.08, location.sourceTime);
+    let duration = Math.min(cueDuration, location.segment.end - start);
+    if (cueOverlaps(cues, start, start + duration)) {
+      start = Math.max(location.segment.start + 0.08, location.segment.end - cueDuration);
+      duration = Math.min(cueDuration, location.segment.end - start);
+    }
     if (duration < 0.65) return;
     cues.push({
       id: `broll-cue-${asset.id}-${index}`,
       assetId: asset.id,
-      start: location.sourceTime,
-      end: location.sourceTime + duration,
+      start,
+      end: start + duration,
+      placement: "card",
+      matchedBy: matchedWord ? "filename" : "automatic",
     });
   });
   return cues;
 }
 
-export function fitCover(sourceWidth, sourceHeight, targetWidth, targetHeight) {
+export function fitContain(sourceWidth, sourceHeight, targetWidth, targetHeight) {
   if (!sourceWidth || !sourceHeight || !targetWidth || !targetHeight) {
     return { x: 0, y: 0, width: targetWidth, height: targetHeight };
   }
-  const scale = Math.max(targetWidth / sourceWidth, targetHeight / sourceHeight);
+  const scale = Math.min(targetWidth / sourceWidth, targetHeight / sourceHeight);
   const width = sourceWidth * scale;
   const height = sourceHeight * scale;
   return {
@@ -164,4 +262,3 @@ export function fitCover(sourceWidth, sourceHeight, targetWidth, targetHeight) {
     height,
   };
 }
-

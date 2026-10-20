@@ -4,9 +4,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {
   buildAutomaticBrollCues,
+  buildCaptionPhrases,
   buildKeepSegments,
   detectAdaptiveSilences,
-  fitCover,
+  fitContain,
 } from '../src/lib/videoAutoEdit.js';
 
 function audioFrames(duration, levelAt, step = 0.02) {
@@ -68,16 +69,56 @@ test('distribui B-roll no tempo editado e converte para o vídeo original', () =
   );
 
   assert.deepEqual(cues.map(cue => cue.assetId), ['foto-1', 'video-2']);
-  assert.equal(cues[0].start, 2);
-  assert.equal(cues[1].start, 8);
+  assert.equal(cues[0].start, 5.2);
+  assert.equal(cues[1].start, 9.2);
   assert.ok(cues.every(cue => cue.end > cue.start));
+  assert.ok(cues.every(cue => cue.placement === 'card'));
 });
 
-test('fitCover preenche o quadro sem deformar a mídia', () => {
-  const rect = fitCover(1920, 1080, 1080, 1920);
-  assert.equal(rect.height, 1920);
-  assert.ok(rect.width > 1080);
-  assert.ok(rect.x < 0);
+test('posiciona B-roll quando o nome do arquivo aparece na fala', () => {
+  const cues = buildAutomaticBrollCues(
+    [{ start: 0, end: 12 }],
+    [{ id: 'foto-drenagem', name: 'drenagem linfatica.jpg' }],
+    {
+      words: [
+        { text: 'A', start: 1, end: 1.2 },
+        { text: 'drenagem', start: 4.1, end: 4.6 },
+        { text: 'ajuda', start: 4.7, end: 5.1 },
+      ],
+    },
+  );
+
+  assert.equal(cues.length, 1);
+  assert.equal(cues[0].matchedBy, 'filename');
+  assert.ok(cues[0].start >= 3.7 && cues[0].start <= 3.9);
+});
+
+test('agrupa legendas em frases curtas respeitando pausa e pontuação', () => {
+  const phrases = buildCaptionPhrases([
+    { text: 'Você', start: 0, end: 0.3 },
+    { text: 'treina,', start: 0.32, end: 0.7 },
+    { text: 'mas', start: 1.4, end: 1.7 },
+    { text: 'ainda', start: 1.72, end: 2 },
+    { text: 'sente', start: 2.02, end: 2.3 },
+    { text: 'inchaço?', start: 2.32, end: 2.7 },
+    { text: 'Entenda.', start: 2.75, end: 3.1 },
+    { text: 'Agora', start: 3.15, end: 3.5 },
+  ]);
+
+  assert.deepEqual(phrases.map(phrase => phrase.text), [
+    'Você treina,',
+    'mas ainda sente inchaço?',
+    'Entenda.',
+    'Agora',
+  ]);
+  assert.ok(phrases.every(phrase => phrase.words.length <= 6));
+});
+
+test('fitContain mantém a mídia inteira dentro do cartão central', () => {
+  const rect = fitContain(1080, 1920, 800, 700);
+  assert.equal(rect.height, 700);
+  assert.ok(rect.width < 800);
+  assert.ok(rect.x > 0);
 });
 
 test('interface remove zoom e oferece B-roll local com legendas sincronizadas', () => {
@@ -86,7 +127,8 @@ test('interface remove zoom e oferece B-roll local com legendas sincronizadas', 
   assert.doesNotMatch(source, /enableZoom|zoomRef|Zoom dinâmico/);
   assert.match(source, /B-roll automático/);
   assert.match(source, /accept="image\/\*,video\/\*"/);
-  assert.match(source, /const captionWords = captions\.flatMap/);
+  assert.match(source, /drawWordCaption\(ctx, captions/);
   assert.match(source, /detectAdaptiveSilences/);
+  assert.match(source, /buildCaptionPhrases/);
+  assert.match(source, /fitContain/);
 });
-
