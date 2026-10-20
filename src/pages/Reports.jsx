@@ -10,10 +10,12 @@ import {
   Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend
 } from 'recharts';
 import { supabase } from '../lib/supabase';
-import { todayBRT, fetchInventory } from '../services/supabaseService';
+import { todayBRT, fetchAppointments, fetchInventory } from '../services/supabaseService';
 import { useServicos } from '../lib/servicos';
+import { useProfissionais } from '../lib/profissionais';
 import { useSync } from '../contexts/SyncContext';
 import SheetSyncStatus from '../components/integration/SheetSyncStatus';
+import AgendaPerformancePanel from '../components/reports/AgendaPerformancePanel';
 
 // ─── Helpers ──────────────────────────────────────────────────
 /** Brazilian currency format: R$ 1.234,56 */
@@ -87,6 +89,7 @@ const DEFAULT_SERVICE_INSUMOS = {
 export default function Reports() {
   const { transactions, comissoes, cashierHistory } = useSync();
   const { servicos: catalogoServicos } = useServicos();
+  const { profissionais } = useProfissionais();
 
   // ─── State ──────────────────────────────────────────────────
   const [periodo, setPeriodo] = useState('30d');
@@ -124,6 +127,8 @@ export default function Reports() {
   const [sheetTxData, setSheetTxData] = useState([]);
   const [sangriasList, setSangriasList] = useState([]);
   const [despesasSheetList, setDespesasSheetList] = useState([]);
+  const [agendaAppointments, setAgendaAppointments] = useState([]);
+  const [agendaLoading, setAgendaLoading] = useState(true);
 
   // Load Inventory for Supplies Linking
   useEffect(() => {
@@ -132,6 +137,20 @@ export default function Reports() {
       if (data) setInventoryItems(data);
     }
     loadStock();
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadAgendaPerformance() {
+      setAgendaLoading(true);
+      const { data, error } = await fetchAppointments();
+      if (cancelled) return;
+      if (error) console.warn('[Reports] Erro ao buscar indicadores da agenda:', error?.message || error);
+      setAgendaAppointments(data || []);
+      setAgendaLoading(false);
+    }
+    loadAgendaPerformance();
+    return () => { cancelled = true; };
   }, []);
 
   // ─── Date range computation ─────────────────────────────────
@@ -751,6 +770,12 @@ export default function Reports() {
           </span>
         </div>
       )}
+
+      <AgendaPerformancePanel
+        appointments={agendaAppointments}
+        professionals={profissionais}
+        loading={agendaLoading}
+      />
 
       {/* ─── 1. KPI Cards (Faturamento, Sessões, Ticket Médio, Crescimento, Médio Diário) ─── */}
       <div className="grid-5 section-gap" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 16 }}>
