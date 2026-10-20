@@ -1214,14 +1214,25 @@ export async function fetchClients() {
 export async function insertClient(client) {
   if (!isSupabaseConfigured()) return handleError('Supabase not configured');
   const userId = client.user_id || await getUserId();
-  const { data, error } = await supabase.from('clients').insert([{ ...client, user_id: userId }]).select().single();
+  const payload = { ...client, user_id: userId };
+  let { data, error } = await supabase.from('clients').insert([payload]).select().single();
+  if (error && Object.prototype.hasOwnProperty.call(payload, 'source_confirmed_at') && /source_confirmed_at/i.test(error.message || '')) {
+    const compatiblePayload = { ...payload };
+    delete compatiblePayload.source_confirmed_at;
+    ({ data, error } = await supabase.from('clients').insert([compatiblePayload]).select().single());
+  }
   if (error) return handleError(error);
   return { data, error: null };
 }
 
 export async function updateClient(id, updates) {
   if (!isSupabaseConfigured()) return handleError('Supabase not configured');
-  const { data, error } = await supabase.from('clients').update(updates).eq('id', id).select().single();
+  let { data, error } = await supabase.from('clients').update(updates).eq('id', id).select().single();
+  if (error && Object.prototype.hasOwnProperty.call(updates, 'source_confirmed_at') && /source_confirmed_at/i.test(error.message || '')) {
+    const compatibleUpdates = { ...updates };
+    delete compatibleUpdates.source_confirmed_at;
+    ({ data, error } = await supabase.from('clients').update(compatibleUpdates).eq('id', id).select().single());
+  }
   if (error) return handleError(error);
   return { data, error: null };
 }

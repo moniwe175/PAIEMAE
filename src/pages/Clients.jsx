@@ -1,16 +1,18 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { UserCheck, Plus, Search, Phone, XCircle, ChevronRight, Mail, Star, Upload, Trash2, Loader2 } from 'lucide-react';
 import { fetchClients, insertClient, deleteClient } from '../services/supabaseService';
 import { getCurrentUser } from '../lib/supabase';
+import { resolvePatientSource } from '../lib/patientAnalytics';
 
 function mapFromSupabase(client) {
+  const sourceInfo = resolvePatientSource(client);
   return {
     id: client.id,
     nome: client.name || '',
     telefone: client.phone || '(00) 00000-0000',
     email: client.email || '',
     nascimento: client.birthdate || '',
-    origem: client.source || 'Instagram',
+    origem: sourceInfo.source,
     totalCompras: client.total_purchases || 0,
     totalGasto: Number(client.total_spent) || 0,
     status: client.status || 'ativo',
@@ -24,7 +26,8 @@ function mapToSupabase(client) {
     phone: client.telefone,
     email: client.email,
     birthdate: client.nascimento || null,
-    source: client.origem,
+    source: client.origem || null,
+    source_confirmed_at: client.origem ? new Date().toISOString() : null,
     total_purchases: client.totalCompras || 0,
     total_spent: client.totalGasto || 0,
     status: client.status || 'ativo',
@@ -129,13 +132,13 @@ export default function Clients() {
         const nome = cleanAndTitleCaseName(rawNome);
         const telefone = telIdx !== -1 && cols[telIdx] ? cols[telIdx].replace(/^["']|["']$/g, '').trim() : '';
         const email = emailIdx !== -1 && cols[emailIdx] ? cols[emailIdx].replace(/^["']|["']$/g, '').trim() : '';
-        const origem = origemIdx !== -1 && cols[origemIdx] ? cols[origemIdx].replace(/^["']|["']$/g, '').trim() : 'Planilha';
+        const origem = origemIdx !== -1 && cols[origemIdx] ? cols[origemIdx].replace(/^["']|["']$/g, '').trim() : '';
 
         importedClients.push({
           nome,
           telefone: telefone || '(00) 00000-0000',
           email: email || '',
-          origem: origem || 'Planilha',
+          origem,
           totalCompras: 0,
           totalGasto: 0,
           status: 'ativo',
@@ -181,7 +184,7 @@ export default function Clients() {
       telefone: form.telefone,
       email: form.email || '',
       nascimento: form.nascimento,
-      origem: form.origem || 'Instagram',
+      origem: form.origem || '',
       totalCompras: 0,
       totalGasto: 0,
       status: 'ativo',

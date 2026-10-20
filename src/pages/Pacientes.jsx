@@ -1,18 +1,23 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useLocation } from 'react-router-dom';
 import {
-  Users, Plus, Search, Phone, Calendar, FileText, Star, XCircle,
+  Users, Plus, Search, Phone, Calendar, FileText, XCircle,
   ChevronRight, Mail, Instagram, Upload, Trash2, AlertTriangle,
-  RefreshCw, UserCheck, UserPlus, Clock, Sparkles, TrendingUp,
-  Share2, PieChart as PieIcon, ArrowRight
+  RefreshCw, UserCheck, UserPlus, Clock, Sparkles, Share2
 } from 'lucide-react';
 import {
-  ResponsiveContainer, PieChart, Pie, Cell, Tooltip, BarChart, Bar,
-  XAxis, YAxis, CartesianGrid, Legend
+  ResponsiveContainer, PieChart, Pie, Cell, Tooltip
 } from 'recharts';
 import { fetchClients, insertClient, deleteClient, updateClient, fetchAppointments } from '../services/supabaseService';
 import { getCurrentUser, supabase } from '../lib/supabase';
+import {
+  appointmentPatientKey,
+  derivePatientRelationship,
+  isCompletedAppointment,
+  resolvePatientSource,
+  UNKNOWN_PATIENT_SOURCE,
+} from '../lib/patientAnalytics';
 
 // ─── Search helpers ──────────────────────────────────────────
 function normalizeSearchText(str) {
@@ -81,9 +86,11 @@ const CANAL_COLORS = {
   'Passou na rua': '#F59E0B',
   'WhatsApp / Motor': '#25D366',
   'Outro': '#8B5CF6',
+  [UNKNOWN_PATIENT_SOURCE]: '#6B7280',
 };
 
 // ─── Modal Novo / Editar Paciente ─────────────────────────────
+// eslint-disable-next-line react/prop-types
 function PacienteModal({ onClose, onSave, initialData }) {
   const [form, setForm] = useState(
     initialData || {
@@ -93,7 +100,7 @@ function PacienteModal({ onClose, onSave, initialData }) {
       instagram: '',
       nascimento: '',
       cidade: '',
-      origem: 'Instagram',
+      origem: '',
       obs: '',
     }
   );
@@ -168,14 +175,15 @@ function PacienteModal({ onClose, onSave, initialData }) {
           {/* 5. Origem do Cliente (Canal de Aquisição) */}
           <div className="form-group" style={{ gridColumn: 'span 2' }}>
             <label className="form-label">
-              Origem do Cliente (Como nos conheceu?) *
+              Origem do Cliente (Como nos conheceu?)
             </label>
             <select
               className="form-input"
-              value={form.origem || 'Instagram'}
+              value={form.origem || ''}
               onChange={(e) => set('origem', e.target.value)}
               style={{ fontWeight: 600, color: 'var(--text-dark)' }}
             >
+              <option value="">Não informado — configurar depois</option>
               {CANAIS_AQUISICAO.map((canal) => (
                 <option key={canal} value={canal}>
                   {canal === 'Indicação' ? '⭐ Indicação de Amigo/Cliente' : canal}
@@ -228,7 +236,7 @@ export default function Pacientes() {
   const [periodoRetencao, setPeriodoRetencao] = useState('60d');
 
   // Dias sem retorno para churn: padrão 60 dias
-  const [churnDiasLimite, setChurnDiasLimite] = useState(60);
+  const churnDiasLimite = 60;
 
   // Calcula quantos dias o serviço está atrasado em relação ao prazo ideal
   function calcDiasAtraso(nomeServico, dataIso) {
@@ -279,10 +287,14 @@ export default function Pacientes() {
         today.setHours(0, 0, 0, 0);
 
         const mapped = data.map((item) => {
+          const sourceInfo = resolvePatientSource(item);
           const clientAppts = appts.filter(
             (a) =>
-              (a.client_name && item.name && a.client_name.trim().toLowerCase() === item.name.trim().toLowerCase()) &&
-              a.status === 'finalizado'
+              (
+                (a.client_id != null && String(a.client_id) === String(item.id)) ||
+                (a.client_id == null && a.client_name && item.name && a.client_name.trim().toLowerCase() === item.name.trim().toLowerCase())
+              ) &&
+              isCompletedAppointment(a)
           );
           clientAppts.sort((a, b) => new Date(b.appointment_date) - new Date(a.appointment_date));
 
@@ -316,7 +328,9 @@ export default function Pacientes() {
             tempoMedioDias = Math.round(totalDiff / (sortedAsc.length - 1));
           }
 
-          const totalSessoes = clientAppts.length > 0 ? clientAppts.length : (item.points || 0);
+          const totalSessoes = clientAppts.length > 0
+            ? clientAppts.length
+            : (Number(item.total_consultas_concluidas) || Number(item.total_purchases) || 0);
 
           let calculadoGasto = clientAppts.reduce((acc, a) => {
             let v = 0;
@@ -324,7 +338,9 @@ export default function Pacientes() {
               if (a.notes && a.notes.startsWith('{')) {
                 v = Number(JSON.parse(a.notes).valor) || 0;
               }
-            } catch (e) {}
+            } catch {
+              // Mantém valor zero quando notas antigas não contêm JSON válido.
+            }
             return acc + v;
           }, 0);
           const totalGasto = clientAppts.length > 0 ? calculadoGasto : (Number(item.total_spent) || 0);
@@ -335,7 +351,9 @@ export default function Pacientes() {
               if (a.notes && a.notes.startsWith('{')) {
                 v = Number(JSON.parse(a.notes).valor) || 0;
               }
-            } catch (e) {}
+            } catch {
+              // Mantém valor zero quando notas antigas não contêm JSON válido.
+            }
             return {
               dataIso: a.appointment_date || '',
               data: a.appointment_date ? a.appointment_date.split('-').reverse().join('/') : '',
@@ -346,6 +364,7 @@ export default function Pacientes() {
 
           // 2. Churn Risk status: sem visita há mais de 60 dias ou inativo
           const isEmRisco = (diasSemVisita !== null && diasSemVisita >= 60) || item.status === 'inativo';
+          const relacionamento = derivePatientRelationship(totalSessoes, isEmRisco);
 
           return {
             id: item.id,
@@ -355,7 +374,9 @@ export default function Pacientes() {
             instagram: item.instagram || '',
             cidade: 'Não informada',
             nascimento: item.birthdate ? item.birthdate.split('-').reverse().join('/') : '',
-            origem: item.source || 'Instagram',
+            origem: sourceInfo.source,
+            origemOriginal: sourceInfo.originalSource,
+            origemConfirmada: sourceInfo.confirmed,
             ultimaVisita,
             ultimaVisitaIso,
             diasSemVisita,
@@ -363,6 +384,7 @@ export default function Pacientes() {
             tempoMedioDias,
             totalSessoes,
             totalGasto,
+            relacionamento,
             status: item.status || 'ativo',
             whatsapp_opt_out: !!item.whatsapp_opt_out,
             avatar: item.avatar || (item.name ? item.name.charAt(0).toUpperCase() : 'U'),
@@ -414,7 +436,8 @@ export default function Pacientes() {
       email: formData.email || '',
       instagram: formData.instagram || '',
       birthdate: formData.nascimento || null,
-      source: formData.origem || 'Instagram',
+      source: formData.origem || null,
+      source_confirmed_at: formData.origem ? new Date().toISOString() : null,
       status: 'ativo',
       avatar: formData.nome.charAt(0).toUpperCase(),
       total_spent: 0,
@@ -437,13 +460,16 @@ export default function Pacientes() {
         instagram: data.instagram || '',
         cidade: 'Não informada',
         nascimento: data.birthdate ? data.birthdate.split('-').reverse().join('/') : '',
-        origem: data.source || 'Instagram',
+        origem: formData.origem || UNKNOWN_PATIENT_SOURCE,
+        origemOriginal: formData.origem || '',
+        origemConfirmada: Boolean(formData.origem),
         ultimaVisita: 'Nunca',
         diasSemVisita: null,
         isEmRisco: false,
         tempoMedioDias: null,
-        totalSessoes: data.points || 0,
+        totalSessoes: 0,
         totalGasto: Number(data.total_spent) || 0,
+        relacionamento: 'Sem histórico',
         status: data.status,
         avatar: data.avatar,
         historico: [],
@@ -461,7 +487,8 @@ export default function Pacientes() {
       email: formData.email || '',
       instagram: formData.instagram || '',
       birthdate: formData.nascimento || null,
-      source: formData.origem || 'Instagram',
+      source: formData.origem || editModal.origemOriginal || null,
+      source_confirmed_at: formData.origem ? new Date().toISOString() : null,
       avatar: formData.nome.charAt(0).toUpperCase(),
       whatsapp_opt_out: !!formData.whatsapp_opt_out,
     };
@@ -482,7 +509,9 @@ export default function Pacientes() {
               telefone: data.phone,
               email: data.email,
               instagram: data.instagram || '',
-              origem: data.source || 'Instagram',
+              origem: formData.origem || UNKNOWN_PATIENT_SOURCE,
+              origemOriginal: data.source || editModal.origemOriginal || '',
+              origemConfirmada: Boolean(formData.origem),
               nascimento: data.birthdate ? data.birthdate.split('-').reverse().join('/') : '',
               avatar: data.avatar,
             };
@@ -509,14 +538,7 @@ export default function Pacientes() {
     setDeleteModal(null);
   };
 
-  const isNovo = (createdAt) => {
-    if (!createdAt) return false;
-    const date = new Date(createdAt);
-    const now = new Date();
-    return date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear();
-  };
-
-  // ─── 1. Taxa de Retenção (30d / 60d / 90d) ───────────────────
+  // ─── 1. Taxa de retorno no período (30d / 60d / 90d) ─────────
   const retencaoStats = useMemo(() => {
     const days = periodoRetencao === '30d' ? 30 : periodoRetencao === '90d' ? 90 : 60;
     const cutoff = new Date();
@@ -524,14 +546,14 @@ export default function Pacientes() {
     const cutoffStr = cutoff.toISOString().split('T')[0];
 
     const visitsInPeriod = allAppointments.filter(
-      (a) => a.appointment_date >= cutoffStr && a.status === 'finalizado'
+      (a) => a.appointment_date >= cutoffStr && isCompletedAppointment(a)
     );
 
     const clientVisitCounts = {};
     visitsInPeriod.forEach((a) => {
-      const name = (a.client_name || '').trim().toLowerCase();
-      if (!name) return;
-      clientVisitCounts[name] = (clientVisitCounts[name] || 0) + 1;
+      const key = appointmentPatientKey(a);
+      if (!key) return;
+      clientVisitCounts[key] = (clientVisitCounts[key] || 0) + 1;
     });
 
     const totalAtendidos = Object.keys(clientVisitCounts).length;
@@ -575,7 +597,7 @@ export default function Pacientes() {
     const cutoffStr = cutoff.toISOString().split('T')[0];
 
     // Agrupamento de agendamentos finalizados no período
-    const apptsPeriodo = allAppointments.filter((a) => a.appointment_date >= cutoffStr && a.status === 'finalizado');
+    const apptsPeriodo = allAppointments.filter((a) => a.appointment_date >= cutoffStr && isCompletedAppointment(a));
 
     let faturamentoNovos = 0;
     let faturamentoRecorrentes = 0;
@@ -583,28 +605,29 @@ export default function Pacientes() {
     const setRecorrentes = new Set();
 
     apptsPeriodo.forEach((a) => {
-      const name = (a.client_name || '').trim().toLowerCase();
-      if (!name) return;
+      const patientKey = appointmentPatientKey(a);
+      if (!patientKey) return;
 
       let v = 0;
       try {
         if (a.notes && a.notes.startsWith('{')) v = Number(JSON.parse(a.notes).valor) || 0;
-      } catch (e) {}
+      } catch {
+        // Mantém valor zero quando notas antigas não contêm JSON válido.
+      }
 
       // Verifica se o cliente tem agendamentos ANTERIORES ao cutoffStr
       const temHistoricoAnterior = allAppointments.some(
         (prevApt) =>
-          prevApt.client_name &&
-          prevApt.client_name.trim().toLowerCase() === name &&
-          prevApt.status === 'finalizado' &&
+          appointmentPatientKey(prevApt) === patientKey &&
+          isCompletedAppointment(prevApt) &&
           prevApt.appointment_date < cutoffStr
       );
 
       if (temHistoricoAnterior) {
-        setRecorrentes.add(name);
+        setRecorrentes.add(patientKey);
         faturamentoRecorrentes += v;
       } else {
-        setNovos.add(name);
+        setNovos.add(patientKey);
         faturamentoNovos += v;
       }
     });
@@ -630,7 +653,7 @@ export default function Pacientes() {
     CANAIS_AQUISICAO.forEach((c) => (map[c] = 0));
 
     pacientes.forEach((p) => {
-      const orig = p.origem || 'Instagram';
+      const orig = p.origem || UNKNOWN_PATIENT_SOURCE;
       map[orig] = (map[orig] || 0) + 1;
     });
 
@@ -647,10 +670,15 @@ export default function Pacientes() {
 
   // ─── 6. Taxa de Indicação ────────────────────────────────────
   const indicacaoStats = useMemo(() => {
-    const indicados = pacientes.filter((p) => (p.origem || '').toLowerCase().includes('indica')).length;
-    const total = pacientes.length;
-    const taxa = total > 0 ? Math.round((indicados / total) * 100) : 0;
-    return { indicados, total, taxa };
+    const origemConfirmada = pacientes.filter((p) => p.origemConfirmada);
+    const indicados = origemConfirmada.filter((p) => (p.origem || '').toLowerCase().includes('indica')).length;
+    const taxa = origemConfirmada.length > 0 ? Math.round((indicados / origemConfirmada.length) * 100) : 0;
+    return {
+      indicados,
+      totalConfirmado: origemConfirmada.length,
+      semOrigem: pacientes.length - origemConfirmada.length,
+      taxa,
+    };
   }, [pacientes]);
 
   // ─── Filtro e Busca ──────────────────────────────────────────
@@ -674,10 +702,10 @@ export default function Pacientes() {
     }
 
     return list.filter((p) => {
-      const novo = isNovo(p.createdAt);
-      if (filtro === 'Novo') return novo;
-      if (filtro === 'Ativo') return p.status === 'ativo' && !novo && !p.isEmRisco;
-      if (filtro === 'Inativo') return p.status === 'inativo' || p.isEmRisco;
+      if (filtro === 'Fidelizado') return p.relacionamento === 'Fidelizado';
+      if (filtro === 'Recorrente') return p.relacionamento === 'Recorrente';
+      if (filtro === 'Novo') return p.relacionamento === 'Primeira visita';
+      if (filtro === 'SemHistorico') return p.relacionamento === 'Sem histórico';
       if (filtro === 'Risco') return p.isEmRisco;
       return true;
     });
@@ -721,7 +749,7 @@ export default function Pacientes() {
             telefone: editModal.telefone,
             email: editModal.email,
             instagram: editModal.instagram,
-            origem: editModal.origem || 'Instagram',
+            origem: editModal.origemConfirmada ? editModal.origem : '',
             nascimento: editModal.nascimento ? editModal.nascimento.split('/').reverse().join('-') : '',
             cidade: editModal.cidade,
             whatsapp_opt_out: !!editModal.whatsapp_opt_out,
@@ -738,7 +766,7 @@ export default function Pacientes() {
               </div>
               <div style={{ fontSize: 20, fontWeight: 700, color: '#111827', marginBottom: 12 }}>Excluir Paciente</div>
               <div style={{ fontSize: 14, color: '#4B5563', marginBottom: 24 }}>
-                Deseja realmente excluir o paciente <strong>"{deleteModal.nome}"</strong>?
+                Deseja realmente excluir o paciente <strong>&quot;{deleteModal.nome}&quot;</strong>?
               </div>
               <div style={{ display: 'flex', gap: 12, width: '100%' }}>
                 <button onClick={() => setDeleteModal(null)} style={{ flex: 1, padding: '12px 0', borderRadius: 12, border: '1.5px solid #E5E7EB', background: '#fff', fontSize: 14, fontWeight: 600, color: '#374151', cursor: 'pointer' }}>
@@ -753,9 +781,9 @@ export default function Pacientes() {
         </div>
       )}
 
-      {/* ─── 1. Top KPI Cards (Taxa de Retenção, Churn, Tempo Médio, Indicação) ─── */}
+      {/* ─── 1. Top KPI Cards (Retorno, Risco, Tempo Médio, Indicação) ─── */}
       <div className="grid-4 section-gap">
-        {/* 1. Taxa de Retenção */}
+        {/* 1. Taxa de retorno no período */}
         <div className="stat-card" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
           <div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
@@ -787,7 +815,7 @@ export default function Pacientes() {
             <div className="stat-value" style={{ color: '#10B981' }}>
               {retencaoStats.taxa}%
             </div>
-            <div className="stat-label">Taxa de Retenção ({periodoRetencao})</div>
+            <div className="stat-label">Retorno no período ({periodoRetencao})</div>
           </div>
           <div className="stat-sub" style={{ marginTop: 6 }}>
             {retencaoStats.retornaram} de {retencaoStats.totalAtendidos} clientes retornaram
@@ -808,10 +836,10 @@ export default function Pacientes() {
             <div className="stat-value" style={{ color: churnStats.taxa > 30 ? '#DC2626' : 'var(--text-dark)' }}>
               {churnStats.taxa}%
             </div>
-            <div className="stat-label">Churn Rate (Risco de Perda)</div>
+            <div className="stat-label">Clientes em Risco de Retorno</div>
           </div>
           <div className="stat-sub" style={{ marginTop: 6, color: '#DC2626', fontWeight: 600 }}>
-            {churnStats.emRiscoQtd} cliente(s) em risco de churn
+            {churnStats.emRiscoQtd} de {churnStats.totalComHistorico} com histórico · {pacientes.length - churnStats.totalComHistorico} sem histórico
           </div>
         </div>
 
@@ -847,7 +875,7 @@ export default function Pacientes() {
             <div className="stat-label">Taxa de Indicação</div>
           </div>
           <div className="stat-sub" style={{ marginTop: 6 }}>
-            {indicacaoStats.indicados} de {indicacaoStats.total} vieram por indicação
+            {indicacaoStats.indicados} de {indicacaoStats.totalConfirmado} com origem confirmada · {indicacaoStats.semOrigem} não informados
           </div>
         </div>
       </div>
@@ -957,7 +985,7 @@ export default function Pacientes() {
                   {formatBRL(novosVsRecorrentes.faturamentoNovos)}
                 </div>
                 <div style={{ fontSize: 11, color: '#0284C7', marginTop: 2 }}>
-                  {novosVsRecorrentes.qtdNovos} pacientes ({novosVsRecorrentes.pctNovos.toFixed(1)}% da receita)
+                  {novosVsRecorrentes.qtdNovos} pacientes ({novosVsRecorrentes.pctNovos.toFixed(1)}% do valor registrado)
                 </div>
               </div>
 
@@ -970,7 +998,7 @@ export default function Pacientes() {
                   {formatBRL(novosVsRecorrentes.faturamentoRecorrentes)}
                 </div>
                 <div style={{ fontSize: 11, color: '#059669', marginTop: 2 }}>
-                  {novosVsRecorrentes.qtdRecorrentes} pacientes ({novosVsRecorrentes.pctRecorrentes.toFixed(1)}% da receita)
+                  {novosVsRecorrentes.qtdRecorrentes} pacientes ({novosVsRecorrentes.pctRecorrentes.toFixed(1)}% do valor registrado)
                 </div>
               </div>
             </div>
@@ -990,10 +1018,11 @@ export default function Pacientes() {
               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                 {[
                   { k: 'Todos', l: 'Todos' },
-                  { k: 'Ativo', l: 'Ativos' },
-                  { k: 'Novo', l: 'Novos' },
-                  { k: 'Risco', l: '⚠️ Em Risco de Churn' },
-                  { k: 'Inativo', l: 'Inativos' },
+                  { k: 'Fidelizado', l: 'Fidelizados' },
+                  { k: 'Recorrente', l: 'Recorrentes' },
+                  { k: 'Novo', l: 'Primeira visita' },
+                  { k: 'Risco', l: '⚠️ Em risco' },
+                  { k: 'SemHistorico', l: 'Sem histórico' },
                 ].map((f) => (
                   <button
                     key={f.k}
@@ -1075,7 +1104,7 @@ export default function Pacientes() {
                             color: CANAL_COLORS[p.origem] || '#6B7280',
                           }}
                         >
-                          {p.origem || 'Instagram'}
+                          {p.origem || UNKNOWN_PATIENT_SOURCE}
                         </span>
                       </td>
                       <td style={{ fontSize: 13 }}>
@@ -1113,13 +1142,15 @@ export default function Pacientes() {
                             <AlertTriangle style={{ width: 10, height: 10 }} />
                             Risco Churn
                           </span>
-                        ) : isNovo(p.createdAt) ? (
-                          <span className="badge" style={{ background: '#E0F2FE', color: '#0284C7' }}>
-                            Novo
-                          </span>
                         ) : (
-                          <span className={`badge ${p.status === 'ativo' ? 'badge-success' : 'badge-neutral'}`}>
-                            {p.status === 'ativo' ? 'Ativo' : 'Inativo'}
+                          <span
+                            className="badge"
+                            style={{
+                              background: p.relacionamento === 'Fidelizado' ? '#DCFCE7' : p.relacionamento === 'Recorrente' ? '#ECFDF5' : p.relacionamento === 'Primeira visita' ? '#E0F2FE' : '#F3F4F6',
+                              color: p.relacionamento === 'Fidelizado' ? '#15803D' : p.relacionamento === 'Recorrente' ? '#047857' : p.relacionamento === 'Primeira visita' ? '#0284C7' : '#6B7280',
+                            }}
+                          >
+                            {p.relacionamento}
                           </span>
                         )}
                       </td>
@@ -1182,7 +1213,7 @@ export default function Pacientes() {
                       color: CANAL_COLORS[selected.origem] || '#6B7280',
                     }}
                   >
-                    Origem: {selected.origem || 'Instagram'}
+                    Origem: {selected.origem || UNKNOWN_PATIENT_SOURCE}
                   </span>
                   {selected.isEmRisco ? (
                     <span className="badge" style={{ background: '#FEE2E2', color: '#DC2626' }}>
