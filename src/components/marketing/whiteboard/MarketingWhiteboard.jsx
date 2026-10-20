@@ -108,6 +108,7 @@ function WhiteboardInner({
   onOpenFicha,
   onNewIdeaQuick,
   onUsarModeloLive,
+  onUsarModeloParcerias,
   onArchiveIdea,
   onDeleteIdea,
   onApproveIdea,
@@ -747,6 +748,13 @@ function WhiteboardInner({
               <Sparkles style={{ width: 13, height: 13 }} /> Modelo Live
             </button>
           )}
+          {onUsarModeloParcerias && !isReadOnly && (
+            <button type="button" className="btn btn-ghost" onClick={onUsarModeloParcerias}
+              style={{ padding: '6px 10px', fontSize: 12, color: '#0F766E' }}
+              title="Preencher modelo de canal de aquisição por parcerias">
+              <Sparkles style={{ width: 13, height: 13 }} /> Modelo Parcerias
+            </button>
+          )}
         </div>
 
         {/* Controles de Visualização e Status */}
@@ -830,6 +838,12 @@ function WhiteboardInner({
                 <button className="btn btn-ghost" onClick={onUsarModeloLive}
                   style={{ fontSize: 12, color: '#7C3AED' }}>
                   Modelo Live
+                </button>
+              )}
+              {onUsarModeloParcerias && (
+                <button className="btn btn-ghost" onClick={onUsarModeloParcerias}
+                  style={{ fontSize: 12, color: '#0F766E' }}>
+                  Modelo Parcerias
                 </button>
               )}
             </div>

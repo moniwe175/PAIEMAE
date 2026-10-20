@@ -110,6 +110,61 @@ const MODELO_LIVE_EVELYN = {
   ],
 };
 
+// Modelo de crescimento inspirado no princípio do vídeo “Ganhar mais trabalhando menos”:
+// parceiros complementares viram canais de indicação mensuráveis, sem confundir ideia com resultado.
+const MODELO_CANAL_PARCERIAS = {
+  titulo: 'Canal de aquisição por parcerias estratégicas',
+  formato: 'Parceria',
+  canal: 'Parcerias locais',
+  tipo: 'parceria',
+  etapa: 'ideia',
+  descricao:
+    'Criar uma rede de parceiros que atendem o mesmo público da clínica, sem competir diretamente. O parceiro apresenta a clínica quando houver aderência e a clínica também gera oportunidades para o parceiro. A proposta deve entregar valor real ao cliente, ter origem rastreável no CRM e ser validada antes de qualquer escala.',
+  servico_tema: 'Aquisição, indicação e recorrência',
+  objetivo: 'Gerar novos clientes com CAC menor e construir uma fonte previsível de indicações qualificadas.',
+  publico: 'Pessoas da região que já compram serviços de saúde, bem-estar, beleza ou qualidade de vida.',
+  regiao: 'Região atendida pela clínica',
+  canais_divulgacao: ['Parceria', 'Indicação', 'Instagram orgânico'],
+  destino: 'WhatsApp ou Agenda com identificação do parceiro de origem',
+  cta: 'Agende sua avaliação pelo benefício indicado pelo parceiro',
+  roteiro:
+`HIPÓTESE
+Parceiros complementares podem gerar clientes qualificados com CAC menor que mídia paga.
+
+PARCEIROS PARA O PRIMEIRO TESTE
+Academias, nutricionistas, dermatologistas, salões, lojas de noivas, empresas locais e influenciadores regionais.
+
+OFERTA DE VALOR
+Criar uma ação útil para o público do parceiro, com benefício claro e sem promessas clínicas. Definir também como a clínica gera valor ou oportunidades para o parceiro.
+
+TESTE DE 30 DIAS
+Selecionar 3 parceiros, criar um link ou código diferente para cada um e registrar a origem de todo lead no CRM.
+
+MÉTRICAS DE DECISÃO
+Leads recebidos, agendamentos, clientes atendidos, receita, taxa de conversão, CAC por parceiro e recompra em até 90 dias.
+
+REGRA PARA ESCALAR
+Manter apenas parceiros que gerem clientes atendidos com margem positiva. Antes de comissão ou troca de dados, validar LGPD e regras dos conselhos profissionais aplicáveis.`,
+  participantes: 'Gestor da clínica + responsáveis dos parceiros selecionados',
+  materiais: 'Proposta de parceria, benefício, link/QR code por parceiro e origem configurada no CRM',
+  orcamento_estimado: null,
+  data_prevista: null,
+  responsavel_id: null,
+  responsavel_nome: '',
+  tarefas_iniciais: [
+    'Listar 10 possíveis parceiros complementares da região',
+    'Escolher os 3 parceiros com maior aderência ao público da clínica',
+    'Definir o benefício real para cliente, clínica e parceiro',
+    'Validar LGPD e regras profissionais antes de comissão ou compartilhamento de dados',
+    'Criar link, código ou campo de origem diferente para cada parceiro',
+    'Preparar uma proposta curta de parceria',
+    'Abordar os 3 parceiros e registrar o retorno',
+    'Executar o teste por 30 dias',
+    'Conferir leads, agendamentos, vendas, CAC e margem por parceiro',
+    'Registrar o aprendizado e decidir: escalar, ajustar ou encerrar',
+  ],
+};
+
 function getEtapaCfg(val) {
   if (val === 'executada') return ETAPAS[4]; // compatibilidade
   return ETAPAS.find(e => e.value === val) || ETAPAS[0];
@@ -478,6 +533,7 @@ function FichaIdeiaModal({
   onClose,
   onUpdated,
   onArchived,
+  onDeleted,
   onDuplicated,
   onApproveToggle,
   onConvertCampanha,
@@ -1970,6 +2026,10 @@ export default function IdeiasPlanejamento({ campanhas = [], onCampanhaCreated }
     setFichaModalData({ initialData: MODELO_LIVE_EVELYN });
   };
 
+  const handleUsarModeloParcerias = () => {
+    setFichaModalData({ initialData: MODELO_CANAL_PARCERIAS });
+  };
+
   // Bloqueio por permissão
   if (!hasMarketingView) {
     return (
@@ -2163,6 +2223,7 @@ export default function IdeiasPlanejamento({ campanhas = [], onCampanhaCreated }
           onOpenFicha={(id) => setFichaModalData({ id })}
           onNewIdeaQuick={() => setModalRapidoOpen(true)}
           onUsarModeloLive={handleUsarModeloLive}
+          onUsarModeloParcerias={handleUsarModeloParcerias}
           onArchiveIdea={handleArchive}
           onDeleteIdea={(id, titulo) => handleDeleteIdea(id, titulo, { skipConfirm: true })}
           onApproveIdea={handleApproveIdea}

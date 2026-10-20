@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import {
   formatDateTimeBR,
   formatDateBR,
@@ -16,6 +17,18 @@ import {
 } from '../src/services/marketingIdeasService.js';
 import { supabase } from '../src/lib/supabase.js';
 import { createClient } from '@supabase/supabase-js';
+
+test('Lousa oferece modelo estruturado de aquisição por parcerias', () => {
+  const ideasSource = fs.readFileSync(new URL('../src/components/marketing/IdeiasPlanejamento.jsx', import.meta.url), 'utf8');
+  const whiteboardSource = fs.readFileSync(new URL('../src/components/marketing/whiteboard/MarketingWhiteboard.jsx', import.meta.url), 'utf8');
+
+  assert.match(ideasSource, /MODELO_CANAL_PARCERIAS/);
+  assert.match(ideasSource, /Canal de aquisição por parcerias estratégicas/);
+  assert.match(ideasSource, /CAC por parceiro e recompra em até 90 dias/);
+  assert.match(ideasSource, /validar LGPD e regras dos conselhos profissionais/i);
+  assert.match(whiteboardSource, /Modelo Parcerias/);
+  assert.match(whiteboardSource, /onUsarModeloParcerias/);
+});
 
 // ─── 1. Formatação de Datas em Fuso America/Sao_Paulo ─────────────────────────
 
