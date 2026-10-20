@@ -41,6 +41,11 @@ import {
 import MarketingIdeaNode from './MarketingIdeaNode';
 import MarketingNoteNode from './MarketingNoteNode';
 import MarketingTextNode from './MarketingTextNode';
+import {
+  buildPartnershipAcquisitionMap,
+  getPartnershipMapOrigin,
+  hasPartnershipAcquisitionMap,
+} from '../../../lib/partnershipAcquisitionMap';
 
 const nodeTypes = {
   ideaNode: MarketingIdeaNode,
@@ -125,6 +130,7 @@ function WhiteboardInner({
   // 'idle' | 'pending' | 'saving' | 'saved' | 'error' | 'conflict' | 'load_error'
   const [saveStatus, setSaveStatus] = useState('idle');
   const [saveError, setSaveError] = useState('');
+  const [templateNotice, setTemplateNotice] = useState('');
 
   // Refs de estado síncrono para evitar closures desatualizadas
   const versionRef = useRef(layoutVersion != null ? layoutVersion : 0);
@@ -620,6 +626,47 @@ function WhiteboardInner({
     triggerSave(nextNodes, null);
   };
 
+  const handleAddPartnershipMap = () => {
+    if (isReadOnly) return;
+    const currentNodes = latestNodesRef.current;
+
+    if (hasPartnershipAcquisitionMap(currentNodes)) {
+      setTemplateNotice('O mapa de parcerias já está na lousa.');
+      fitView({ padding: 0.15, duration: 450 });
+      return;
+    }
+
+    const template = buildPartnershipAcquisitionMap(getPartnershipMapOrigin(currentNodes));
+    const templateNodes = template.nodes.map((node) => ({
+      ...node,
+      data: {
+        ...node.data,
+        isReadOnly,
+        isConnectingMode,
+        isConnectionSource: false,
+        onNodeSelectForConnect: handleNodeSelectForConnect,
+        onChangeText: handleNoteTextChange,
+        onChangeColor: handleNoteColorChange,
+        onDeleteNote: handleDeleteCustomNode,
+        onDeleteText: handleDeleteCustomNode,
+      },
+    }));
+    const templateEdges = template.edges.map((edge) => ({ ...edge, ...defaultEdgeOptions }));
+    const nextNodes = [...currentNodes, ...templateNodes];
+    const nextEdges = [...latestEdgesRef.current, ...templateEdges];
+
+    undoStackRef.current.push({
+      type: 'add_template',
+      nodeIds: templateNodes.map((node) => node.id),
+      edgeIds: templateEdges.map((edge) => edge.id),
+    });
+    setNodes(nextNodes);
+    setEdges(nextEdges);
+    setTemplateNotice('Mapa adicionado — salvando automaticamente.');
+    triggerSave(nextNodes, nextEdges);
+    setTimeout(() => fitView({ padding: 0.12, duration: 500 }), 50);
+  };
+
   // ─── 8. Desfazer (Undo) Confiável ──────────────────────────────────────────
 
   const handleUndo = () => {
@@ -655,6 +702,15 @@ function WhiteboardInner({
       );
       setNodes(nextNodes);
       triggerSave(nextNodes, null);
+    } else if (action.type === 'add_template') {
+      const nodeIds = new Set(action.nodeIds || []);
+      const edgeIds = new Set(action.edgeIds || []);
+      const nextNodes = latestNodesRef.current.filter(n => !nodeIds.has(n.id));
+      const nextEdges = latestEdgesRef.current.filter(e => !edgeIds.has(e.id));
+      setNodes(nextNodes);
+      setEdges(nextEdges);
+      setTemplateNotice('Mapa removido.');
+      triggerSave(nextNodes, nextEdges);
     }
   };
 
@@ -755,6 +811,16 @@ function WhiteboardInner({
               <Sparkles style={{ width: 13, height: 13 }} /> Modelo Parcerias
             </button>
           )}
+          {!isReadOnly && (
+            <button type="button" className="btn btn-ghost" onClick={handleAddPartnershipMap}
+              style={{ padding: '6px 10px', fontSize: 12, color: '#0369A1' }}
+              title="Montar o mapa visual completo da estratégia de parcerias">
+              <LinkIcon style={{ width: 13, height: 13 }} /> Mapa Parcerias
+            </button>
+          )}
+          {templateNotice && (
+            <span style={{ fontSize: 10, color: '#64748B', marginLeft: 4 }}>{templateNotice}</span>
+          )}
         </div>
 
         {/* Controles de Visualização e Status */}
@@ -846,6 +912,10 @@ function WhiteboardInner({
                   Modelo Parcerias
                 </button>
               )}
+              <button className="btn btn-ghost" onClick={handleAddPartnershipMap}
+                style={{ fontSize: 12, color: '#0369A1' }}>
+                Montar Mapa
+              </button>
             </div>
           )}
         </div>
