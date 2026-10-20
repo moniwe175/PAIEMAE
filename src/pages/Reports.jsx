@@ -1,20 +1,21 @@
 import { useState, useMemo, useEffect } from 'react';
 import {
-  BarChart3, TrendingUp, Users, Calendar,
-  Wallet, Zap, Percent, Award,
-  Edit3, Plus, Trash2, Check, X,
-  CircleDollarSign
+  BarChart3, TrendingUp, TrendingDown, Users, Calendar, DollarSign,
+  FileSpreadsheet, Wallet, Zap, Loader2, Tag, Percent, Award,
+  SlidersHorizontal, Edit3, Plus, Trash2, Check, X, Layers, Boxes,
+  CircleDollarSign, ArrowUpRight, ArrowDownRight, Package
 } from 'lucide-react';
 import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid,
-  Tooltip, ResponsiveContainer, PieChart, Pie, Cell
+  LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid,
+  Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend
 } from 'recharts';
 import { supabase } from '../lib/supabase';
-import { fetchAppointments, fetchInventory } from '../services/supabaseService';
+import { todayBRT, fetchAppointments, fetchInventory } from '../services/supabaseService';
 import { useServicos } from '../lib/servicos';
+import { useProfissionais } from '../lib/profissionais';
 import { useSync } from '../contexts/SyncContext';
 import SheetSyncStatus from '../components/integration/SheetSyncStatus';
-import ClinicManagementPanel from '../components/reports/ClinicManagementPanel';
+import AgendaPerformancePanel from '../components/reports/AgendaPerformancePanel';
 
 // ─── Helpers ──────────────────────────────────────────────────
 /** Brazilian currency format: R$ 1.234,56 */
@@ -86,8 +87,9 @@ const DEFAULT_SERVICE_INSUMOS = {
 };
 
 export default function Reports() {
-  const { comissoes, cashierHistory } = useSync();
+  const { transactions, comissoes, cashierHistory } = useSync();
   const { servicos: catalogoServicos } = useServicos();
+  const { profissionais } = useProfissionais();
 
   // ─── State ──────────────────────────────────────────────────
   const [periodo, setPeriodo] = useState('30d');
@@ -101,9 +103,7 @@ export default function Reports() {
     try {
       const saved = localStorage.getItem('erp_servico_insumos_v1');
       if (saved) return JSON.parse(saved);
-    } catch {
-      // Usa a composição padrão quando o armazenamento local estiver inválido.
-    }
+    } catch {}
     return DEFAULT_SERVICE_INSUMOS;
   });
 
@@ -603,6 +603,74 @@ export default function Reports() {
     });
   }, [cashierHistory, startDateStr, endDateStr]);
 
+  // Synced count from legacy transactions (for badge compat)
+  const syncedCount = useMemo(
+    () => transactions.filter((t) => t.origem === 'planilha').length,
+    [transactions]
+  );
+
+  // ─── 5. Crescimento de Faturamento Real ─────────────────────
+  const growthCardData = useMemo(() => {
+    const atual = sheetKpis.faturamento || 0;
+    const anterior = sheetKpis.faturamentoAnterior || 0;
+
+    if (atual === 0 && anterior === 0) {
+      return {
+        val: 'Sem dados',
+        sub: 'nenhuma receita registrada no período',
+        cor: 'var(--text-muted)',
+        icon: TrendingUp,
+        bgIcon: 'rgba(107, 114, 128, 0.1)',
+      };
+    }
+
+    if (anterior === 0) {
+      return {
+        val: '+100%',
+        sub: `1º período registrado (${formatBRL(atual)})`,
+        cor: 'var(--success)',
+        icon: TrendingUp,
+        bgIcon: 'var(--success-bg)',
+      };
+    }
+
+    const pct = ((atual - anterior) / anterior) * 100;
+    const sinal = pct > 0 ? '+' : '';
+    const formatted = `${sinal}${pct.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`;
+
+    if (pct > 0) {
+      return {
+        val: formatted,
+        sub: `vs ${formatBRL(anterior)} no período ant.`,
+        cor: 'var(--success)',
+        icon: TrendingUp,
+        bgIcon: 'var(--success-bg)',
+      };
+    }
+    if (pct < 0) {
+      return {
+        val: formatted,
+        sub: `vs ${formatBRL(anterior)} no período ant.`,
+        cor: 'var(--danger)',
+        icon: TrendingDown,
+        bgIcon: 'rgba(239, 68, 68, 0.12)',
+      };
+    }
+    return {
+      val: '0.0%',
+      sub: `igual ao período anterior (${formatBRL(anterior)})`,
+      cor: 'var(--text-muted)',
+      icon: TrendingUp,
+      bgIcon: 'rgba(107, 114, 128, 0.1)',
+    };
+  }, [sheetKpis.faturamento, sheetKpis.faturamentoAnterior]);
+
+  // Ticket Médio por Cliente
+  const ticketMedioPorCliente = useMemo(() => {
+    if (!sheetKpis.novosPacientes || sheetKpis.novosPacientes === 0) return 0;
+    return (sheetKpis.faturamento || 0) / sheetKpis.novosPacientes;
+  }, [sheetKpis.faturamento, sheetKpis.novosPacientes]);
+
   // ─── Period tabs ────────────────────────────────────────────
   const periodTabs = [
     { k: '7d', l: '7 dias' },
@@ -703,15 +771,122 @@ export default function Reports() {
         </div>
       )}
 
-      <ClinicManagementPanel
+      <AgendaPerformancePanel
         appointments={agendaAppointments}
-        transactions={sheetTxData}
-        previousRevenue={sheetKpis.faturamentoAnterior}
-        startDate={startDateStr}
-        endDate={endDateStr}
-        daysCount={daysCount}
-        loading={agendaLoading || sheetKpis.loading}
+        professionals={profissionais}
+        loading={agendaLoading}
       />
+
+      {/* ─── 1. KPI Cards (Faturamento, Sessões, Ticket Médio, Crescimento, Médio Diário) ─── */}
+      <div className="grid-5 section-gap" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 16 }}>
+        {sheetKpis.loading ? (
+          <div
+            style={{
+              gridColumn: '1 / -1',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: 40,
+              color: 'var(--text-muted)',
+            }}
+          >
+            <Loader2
+              style={{
+                width: 20,
+                height: 20,
+                marginRight: 8,
+                animation: 'spin 1s linear infinite',
+              }}
+            />
+            Carregando indicadores financeiros...
+          </div>
+        ) : (
+          <>
+            {/* Faturamento Total */}
+            <div className="stat-card">
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                <div className="stat-card-icon" style={{ background: 'var(--success-bg)', marginBottom: 8 }}>
+                  <DollarSign style={{ color: 'var(--success)' }} />
+                </div>
+                {syncedCount > 0 && (
+                  <span className="stat-badge up">
+                    <FileSpreadsheet style={{ width: 10, height: 10 }} />
+                    sync
+                  </span>
+                )}
+              </div>
+              <div className="stat-value" style={{ color: 'var(--success)' }}>
+                {formatBRL(sheetKpis.faturamento)}
+              </div>
+              <div className="stat-label">Faturamento Total</div>
+              <div className="stat-sub">
+                {syncedCount > 0 ? `${syncedCount} registros sincronizados` : `${sheetKpis.totalSessoes} sessões no período`}
+              </div>
+            </div>
+
+            {/* Total de Sessões */}
+            <div className="stat-card">
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                <div className="stat-card-icon" style={{ background: 'var(--info-bg)', marginBottom: 8 }}>
+                  <Calendar style={{ color: 'var(--info)' }} />
+                </div>
+              </div>
+              <div className="stat-value">
+                {sheetKpis.totalSessoes}
+              </div>
+              <div className="stat-label">Total de Sessões</div>
+              <div className="stat-sub">
+                {daysCount > 0 ? (sheetKpis.totalSessoes / daysCount).toFixed(1) : 0} sessões/dia no período
+              </div>
+            </div>
+
+            {/* 1. Ticket Médio (por Sessão & por Cliente) */}
+            <div className="stat-card">
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                <div className="stat-card-icon" style={{ background: '#F3E8FF', marginBottom: 8 }}>
+                  <Tag style={{ color: '#8B5CF6' }} />
+                </div>
+              </div>
+              <div className="stat-value" style={{ color: '#8B5CF6' }}>
+                {formatBRL(sheetKpis.ticketMedio)}
+              </div>
+              <div className="stat-label">Ticket Médio por Sessão</div>
+              <div className="stat-sub" style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                <span><strong>Cliente:</strong> {formatBRL(ticketMedioPorCliente)}</span>
+                <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>({sheetKpis.novosPacientes} clientes únicos)</span>
+              </div>
+            </div>
+
+            {/* 5. Crescimento de Faturamento (Corrigido) */}
+            <div className="stat-card">
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                <div className="stat-card-icon" style={{ background: growthCardData.bgIcon, marginBottom: 8 }}>
+                  <growthCardData.icon style={{ color: growthCardData.cor }} />
+                </div>
+              </div>
+              <div className="stat-value" style={{ color: growthCardData.cor }}>
+                {growthCardData.val}
+              </div>
+              <div className="stat-label">Crescimento de Faturamento</div>
+              <div className="stat-sub">{growthCardData.sub}</div>
+            </div>
+
+            {/* Faturamento Médio Diário */}
+            <div className="stat-card">
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                <div className="stat-card-icon" style={{ background: 'var(--warning-bg)', marginBottom: 8 }}>
+                  <TrendingUp style={{ color: 'var(--warning)' }} />
+                </div>
+              </div>
+              <div className="stat-value">
+                {formatBRL(daysCount > 0 ? sheetKpis.faturamento / daysCount : 0)}
+              </div>
+              <div className="stat-label">Média Diária</div>
+              <div className="stat-sub">por dia no período ({daysCount}d)</div>
+            </div>
+          </>
+        )}
+      </div>
 
       {/* ─── Cashier History Table (100% Preservado) ──────────── */}
       <div className="card section-gap" style={{ padding: 0, overflow: 'hidden' }}>
@@ -1086,7 +1261,7 @@ export default function Reports() {
                     width={150}
                   />
                   <Tooltip
-                    formatter={(v) => [
+                    formatter={(v, name) => [
                       serviceRankingSort === 'qtd' ? `${v} sessões` : formatBRL(v),
                       serviceRankingSort === 'qtd' ? 'Sessões' : 'Faturamento',
                     ]}
