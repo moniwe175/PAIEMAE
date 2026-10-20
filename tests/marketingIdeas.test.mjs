@@ -24,6 +24,8 @@ test('Lousa oferece modelo estruturado de aquisição por parcerias', () => {
 
   assert.match(ideasSource, /MODELO_CANAL_PARCERIAS/);
   assert.match(ideasSource, /Canal de aquisição por parcerias estratégicas/);
+  assert.match(ideasSource, /canal: 'Outro'/);
+  assert.match(ideasSource, /tipo: 'campanha'/);
   assert.match(ideasSource, /CAC por parceiro e recompra em até 90 dias/);
   assert.match(ideasSource, /validar LGPD e regras dos conselhos profissionais/i);
   assert.match(whiteboardSource, /Modelo Parcerias/);

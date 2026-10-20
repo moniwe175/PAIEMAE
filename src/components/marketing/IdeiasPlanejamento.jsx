@@ -115,8 +115,9 @@ const MODELO_LIVE_EVELYN = {
 const MODELO_CANAL_PARCERIAS = {
   titulo: 'Canal de aquisição por parcerias estratégicas',
   formato: 'Parceria',
-  canal: 'Parcerias locais',
-  tipo: 'parceria',
+  // O banco legado restringe `canal` e `tipo`; o formato mantém a classificação visível como Parceria.
+  canal: 'Outro',
+  tipo: 'campanha',
   etapa: 'ideia',
   descricao:
     'Criar uma rede de parceiros que atendem o mesmo público da clínica, sem competir diretamente. O parceiro apresenta a clínica quando houver aderência e a clínica também gera oportunidades para o parceiro. A proposta deve entregar valor real ao cliente, ter origem rastreável no CRM e ser validada antes de qualquer escala.',
