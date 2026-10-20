@@ -3,6 +3,26 @@ const COMPLETED_STATUSES = new Set(['finalizado', 'concluido', 'concluído', 'at
 const NO_SHOW_STATUSES = new Set(['falta', 'cliente_faltou', 'nao_compareceu', 'não_compareceu']);
 const CANCELED_STATUSES = new Set(['cancelado', 'cancelada', 'desmarcado', 'desmarcada']);
 
+export const DEFAULT_FRANCHISE_HEALTH_TARGETS = [
+  { metricKey: 'data_quality_score', label: 'Qualidade dos dados', category: 'Base confiável', targetValue: 90, warningValue: 75, criticalValue: 50, direction: 'higher_better', unit: '%', action: 'Completar custos, investimentos e vínculos que ainda estão pendentes.' },
+  { metricKey: 'history_months', label: 'Histórico fechado', category: 'Base confiável', targetValue: 6, warningValue: 3, criticalValue: 1, direction: 'higher_better', unit: ' meses', action: 'Fechar competências consecutivas para provar repetibilidade do modelo.' },
+  { metricKey: 'profitable_months_pct', label: 'Meses com EBITDA positivo', category: 'Base confiável', targetValue: 80, warningValue: 60, criticalValue: 40, direction: 'higher_better', unit: '%', action: 'Identificar os meses negativos e corrigir preço, mix, ocupação ou estrutura de custos.' },
+  { metricKey: 'ebitda_margin_pct', label: 'Margem EBITDA da unidade', category: 'Financeiro', targetValue: 15, warningValue: 10, criticalValue: 0, direction: 'higher_better', unit: '%', action: 'Aumentar margem de contribuição e revisar custos fixos antes de expandir.' },
+  { metricKey: 'net_cash_margin_pct', label: 'Lucratividade líquida', category: 'Financeiro', targetValue: 10, warningValue: 5, criticalValue: 0, direction: 'higher_better', unit: '%', action: 'Garantir que sobre caixa após custos, pró-labore e serviço da dívida.' },
+  { metricKey: 'contribution_margin_pct', label: 'Margem de contribuição', category: 'Financeiro', targetValue: 40, warningValue: 30, criticalValue: 20, direction: 'higher_better', unit: '%', action: 'Revisar preços, insumos, comissões, impostos e taxas de recebimento.' },
+  { metricKey: 'safety_margin_pct', label: 'Margem acima do equilíbrio', category: 'Financeiro', targetValue: 20, warningValue: 10, criticalValue: 0, direction: 'higher_better', unit: '%', action: 'Elevar receita recorrente ou reduzir o ponto de equilíbrio da operação.' },
+  { metricKey: 'cash_reserve_months', label: 'Reserva de caixa', category: 'Financeiro', targetValue: 6, warningValue: 3, criticalValue: 1, direction: 'higher_better', unit: ' meses', action: 'Formar capital de giro suficiente para absorver sazonalidade e imprevistos.' },
+  { metricKey: 'debt_coverage_ratio', label: 'Cobertura da dívida (DSCR)', category: 'Financeiro', targetValue: 1.5, warningValue: 1.2, criticalValue: 1, direction: 'higher_better', unit: 'x', action: 'Renegociar dívida ou elevar geração de caixa antes de assumir expansão.' },
+  { metricKey: 'payback_months', label: 'Payback do franqueado', category: 'Investimento', targetValue: 36, warningValue: 48, criticalValue: 60, direction: 'lower_better', unit: ' meses', action: 'Reduzir investimento inicial ou melhorar o caixa mensal projetado.' },
+  { metricKey: 'ltv_cac_ratio', label: 'Relação LTV/CAC', category: 'Clientes', targetValue: 3, warningValue: 2, criticalValue: 1, direction: 'higher_better', unit: 'x', action: 'Reduzir CAC e aumentar retenção, frequência e margem dos clientes.' },
+  { metricKey: 'returning_share_pct', label: 'Clientes recorrentes no mês', category: 'Clientes', targetValue: 30, warningValue: 20, criticalValue: 10, direction: 'higher_better', unit: '%', action: 'Criar jornada de retorno baseada no procedimento e no ciclo real do paciente.' },
+  { metricKey: 'no_show_rate_pct', label: 'Taxa de faltas', category: 'Operação', targetValue: 5, warningValue: 8, criticalValue: 12, direction: 'lower_better', unit: '%', action: 'Reforçar confirmação, lembrete e política de reagendamento.' },
+  { metricKey: 'cancellation_rate_pct', label: 'Taxa de cancelamento', category: 'Operação', targetValue: 10, warningValue: 15, criticalValue: 20, direction: 'lower_better', unit: '%', action: 'Analisar motivos e ajustar confirmação, oferta e disponibilidade.' },
+  { metricKey: 'occupancy_pct', label: 'Ocupação da capacidade real', category: 'Operação', targetValue: 70, warningValue: 55, criticalValue: 40, direction: 'higher_better', unit: '%', action: 'Configurar a capacidade real e equilibrar demanda, salas e profissionais.' },
+  { metricKey: 'audit_score', label: 'Auditoria de padrão', category: 'Governança', targetValue: 85, warningValue: 70, criticalValue: 50, direction: 'higher_better', unit: '%', action: 'Realizar auditoria e concluir o plano de ação da unidade-piloto.' },
+  { metricKey: 'required_documents_pct', label: 'Documentação essencial', category: 'Governança', targetValue: 100, warningValue: 75, criticalValue: 50, direction: 'higher_better', unit: '%', action: 'Validar COF, contrato, manuais, treinamento e demonstrações financeiras.' },
+];
+
 export const toNumber = (value, fallback = 0) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
@@ -117,6 +137,9 @@ export function calculateUnitDre({ transactions = [], monthlyInput = {}, model =
     availableCash: roundMetric(availableCash),
     cashRunwayMonths: ebitda < 0 && toNumber(monthlyInput.closing_cash) > 0
       ? roundMetric(toNumber(monthlyInput.closing_cash) / Math.abs(ebitda), 1)
+      : null,
+    cashReserveMonths: fixedObligations > 0
+      ? roundMetric(toNumber(monthlyInput.closing_cash) / fixedObligations, 1)
       : null,
     profitabilityPct: roundMetric(safeDivide(availableCash, netRevenue, 0) * 100),
     breakEvenRevenue: roundMetric(breakEvenRevenue),
@@ -405,6 +428,135 @@ export function assessFranchiseDataQuality({ model, monthlyInput, transactions =
   ];
   const score = checks.reduce((sum, check) => sum + (check.ok ? check.weight : 0), 0);
   return { score, checks, missing: checks.filter((check) => !check.ok) };
+}
+
+const REQUIRED_FRANCHISE_DOCUMENTS = [
+  ['cof', 'circular_oferta_franquia'],
+  ['contrato', 'contrato_franquia'],
+  ['manual_operacional', 'manual_operacao'],
+  ['manual_marca', 'manual_identidade'],
+  ['treinamento', 'plano_treinamento'],
+  ['demonstracoes_financeiras', 'demonstracao_financeira'],
+];
+
+const latestTargets = (targets = [], referenceDate = '9999-12-31') => {
+  const map = new Map();
+  targets
+    .filter((target) => !target.valid_from || target.valid_from <= referenceDate)
+    .sort((a, b) => String(a.valid_from || '').localeCompare(String(b.valid_from || '')))
+    .forEach((target) => map.set(target.metric_key || target.metricKey, target));
+  return map;
+};
+
+const evaluateTargetStatus = (value, target) => {
+  if (value === null || value === undefined || !Number.isFinite(Number(value))) return 'pending';
+  const current = Number(value);
+  const goal = toNumber(target.targetValue);
+  const warning = toNumber(target.warningValue, goal);
+  if (target.direction === 'lower_better') {
+    if (current <= goal) return 'met';
+    if (current <= warning) return 'attention';
+    return 'critical';
+  }
+  if (current >= goal) return 'met';
+  if (current >= warning) return 'attention';
+  return 'critical';
+};
+
+export function calculateFranchiseReadiness({
+  snapshot, targets = [], closes = [], audits = [], documents = [], unitId, referenceDate,
+} = {}) {
+  const targetOverrides = latestTargets(targets, referenceDate);
+  const resolvedTargets = DEFAULT_FRANCHISE_HEALTH_TARGETS.map((defaultTarget) => {
+    const override = targetOverrides.get(defaultTarget.metricKey);
+    return override ? {
+      ...defaultTarget,
+      id: override.id,
+      targetValue: toNumber(override.target_value, defaultTarget.targetValue),
+      warningValue: toNumber(override.warning_value, defaultTarget.warningValue),
+      criticalValue: toNumber(override.critical_value, defaultTarget.criticalValue),
+      direction: override.direction || defaultTarget.direction,
+    } : defaultTarget;
+  });
+
+  const unitCloses = closes
+    .filter((close) => !unitId || close.unit_id === unitId)
+    .filter((close) => close.status === 'fechado' && close.snapshot?.dre)
+    .sort((a, b) => String(b.period_month).localeCompare(String(a.period_month)))
+    .slice(0, 12);
+  const currentMonth = referenceDate ? String(referenceDate).slice(0, 7) : '';
+  const hasCurrentClose = unitCloses.some((close) => String(close.period_month).slice(0, 7) === currentMonth);
+  const evidenceDres = [...unitCloses.map((close) => close.snapshot.dre)];
+  if (snapshot?.dre && !hasCurrentClose) evidenceDres.unshift(snapshot.dre);
+  const profitableMonths = evidenceDres.filter((dre) => toNumber(dre.ebitda) > 0).length;
+  const historyMonths = unitCloses.length;
+
+  const validDocumentTypes = new Set(
+    documents
+      .filter((document) => document.status === 'valido' && (!document.unit_id || !unitId || document.unit_id === unitId))
+      .map((document) => normalizeText(document.document_type).replaceAll(' ', '_')),
+  );
+  const validRequiredDocuments = REQUIRED_FRANCHISE_DOCUMENTS.filter((aliases) => aliases.some((alias) => validDocumentTypes.has(alias))).length;
+  const latestAudit = audits.find((audit) => audit.status === 'concluida' || audit.status === 'regularizada') || audits[0];
+  const values = {
+    data_quality_score: snapshot?.quality?.score,
+    history_months: historyMonths,
+    profitable_months_pct: evidenceDres.length ? (profitableMonths / evidenceDres.length) * 100 : null,
+    ebitda_margin_pct: snapshot?.dre?.ebitdaMarginPct,
+    net_cash_margin_pct: snapshot?.dre?.profitabilityPct,
+    contribution_margin_pct: snapshot?.dre?.contributionMarginPct,
+    safety_margin_pct: snapshot?.dre?.safetyMarginPct,
+    cash_reserve_months: snapshot?.dre?.cashReserveMonths,
+    debt_coverage_ratio: snapshot?.dre?.debtService > 0 ? snapshot?.dre?.debtCoverageRatio : null,
+    payback_months: snapshot?.scenario?.paybackMonth,
+    ltv_cac_ratio: snapshot?.customers?.ltvCacRatio,
+    returning_share_pct: snapshot?.customers?.returningSharePct,
+    no_show_rate_pct: snapshot?.operations?.noShowRatePct,
+    cancellation_rate_pct: snapshot?.operations?.cancellationRatePct,
+    occupancy_pct: snapshot?.operations?.capacityConfigured ? snapshot?.operations?.occupancyPct : null,
+    audit_score: latestAudit?.overall_score ?? null,
+    required_documents_pct: (validRequiredDocuments / REQUIRED_FRANCHISE_DOCUMENTS.length) * 100,
+  };
+
+  const metrics = resolvedTargets.map((target) => {
+    const value = values[target.metricKey];
+    const status = target.metricKey === 'debt_coverage_ratio' && snapshot?.dre?.debtService <= 0
+      ? 'not_applicable'
+      : evaluateTargetStatus(value, target);
+    const gap = value === null || value === undefined
+      ? null
+      : target.direction === 'lower_better'
+        ? Math.max(0, Number(value) - target.targetValue)
+        : Math.max(0, target.targetValue - Number(value));
+    return { ...target, value: roundMetric(value, 1), gap: roundMetric(gap, 1), status };
+  });
+  const statusWeights = { met: 1, attention: 0.55, critical: 0, pending: 0, not_applicable: 1 };
+  const score = roundMetric(
+    metrics.reduce((sum, metric) => sum + statusWeights[metric.status], 0) / metrics.length * 100,
+    0,
+  );
+  const blockers = metrics.filter((metric) => metric.status === 'critical' || metric.status === 'pending');
+  const insufficientHistory = historyMonths < (resolvedTargets.find((target) => target.metricKey === 'history_months')?.targetValue || 6);
+  const minimumDataQuality = resolvedTargets.find((target) => target.metricKey === 'data_quality_score')?.targetValue || 90;
+  const readinessStatus = insufficientHistory || snapshot?.quality?.score < minimumDataQuality
+    ? 'building_evidence'
+    : blockers.length > 0 || score < 75
+      ? 'not_ready'
+      : score < 90
+        ? 'almost_ready'
+        : 'ready';
+  return {
+    score,
+    status: readinessStatus,
+    metrics,
+    blockers,
+    metCount: metrics.filter((metric) => metric.status === 'met').length,
+    attentionCount: metrics.filter((metric) => metric.status === 'attention').length,
+    criticalCount: metrics.filter((metric) => metric.status === 'critical').length,
+    pendingCount: metrics.filter((metric) => metric.status === 'pending').length,
+    historyMonths,
+    profitableMonths,
+  };
 }
 
 export function buildFranchiseSnapshot({

@@ -3,7 +3,7 @@ import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
 } from 'recharts';
 import {
-  DollarSign, Calendar, Users, AlertTriangle,
+  DollarSign, Calendar, Repeat2,
   TrendingUp, Package, ChevronRight, Clock, Star,
   Tag, CalendarCheck, Target, Edit3, Check, X
 } from 'lucide-react';
@@ -15,6 +15,7 @@ import { useProfissionais } from '../lib/profissionais';
 import { fetchStickyNotes, insertStickyNote, updateStickyNote, fetchActiveOKRTasks } from '../services/okrService';
 import { fetchInventory, fetchAppointments, fetchSheetTransactionsRange, todayBRT } from '../services/supabaseService';
 import { getCurrentUser } from '../lib/supabase';
+import { calculateMonthlyCareMetrics } from '../lib/dashboardMetrics';
 
 // ─── Sub-components ───────────────────────────────────────────
 function StatCard({ icon: Icon, iconBg, iconColor, badge, badgeClass, value, label, sub, action, children }) {
@@ -173,8 +174,8 @@ export default function Dashboard() {
   const txHoje = sheetTx.filter(r => r.date_ref === hoje);
   const faturamentoHoje = txHoje.reduce((sum, r) => sum + gross(r), 0);
 
-  // Unique active patients count (clientes com receita no mês)
-  const activePatients = new Set(txMes.filter(r => r.client).map(r => r.client)).size;
+  // Produção e recorrência reais a partir dos atendimentos concluídos na Agenda.
+  const monthlyCare = calculateMonthlyCareMetrics(allAppointments, startMes, hoje);
 
   // 1. Ticket Médio
   const totalSessoesMes = txMes.length || allAppointments.filter(a => a.appointment_date >= startMes && a.status !== 'bloqueado' && a.status !== 'cancelado').length || 0;
@@ -313,20 +314,20 @@ export default function Dashboard() {
           sub={`${txHoje.length} receitas`}
         />
         <StatCard
-          icon={Users}
+          icon={CalendarCheck}
           iconBg="var(--info-bg)"
           iconColor="var(--info)"
-          value={String(activePatients)}
-          label="Clientes Ativos"
-          sub="com receitas no mês"
+          value={String(monthlyCare.completedAppointments)}
+          label="Atendimentos Concluídos"
+          sub={`${monthlyCare.uniquePatients} ${monthlyCare.uniquePatients === 1 ? 'paciente único' : 'pacientes únicos'} no mês`}
         />
         <StatCard
-          icon={AlertTriangle}
-          iconBg="var(--danger-bg)"
-          iconColor="var(--danger)"
-          value={String(stockAlerts.length)}
-          label="Estoque Crítico"
-          sub="produtos abaixo do mínimo"
+          icon={Repeat2}
+          iconBg="#EFF7F2"
+          iconColor="var(--success)"
+          value={String(monthlyCare.recurringPatients)}
+          label="Pacientes Recorrentes"
+          sub={monthlyCare.returnRatePct === null ? 'sem atendimentos concluídos no mês' : `${monthlyCare.returnRatePct}% dos pacientes atendidos já retornaram`}
         />
       </div>
 

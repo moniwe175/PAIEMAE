@@ -8,11 +8,12 @@ import {
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { useAuth } from '../contexts/AuthContext';
 import {
-  buildFranchiseSnapshot, calculateFranchisorResult, projectFranchiseScenario,
+  buildFranchiseSnapshot, calculateFranchiseReadiness, calculateFranchisorResult,
+  DEFAULT_FRANCHISE_HEALTH_TARGETS, projectFranchiseScenario,
 } from '../lib/franchiseMetrics';
 import {
   addMarketingInvestment, createFranchiseUnit, loadFranchiseBundle,
-  saveEconomicModel, saveMonthlyClose, saveMonthlyInput,
+  saveEconomicModel, saveFranchiseTarget, saveMonthlyClose, saveMonthlyInput,
   saveNetworkMonthlyInput,
 } from '../services/franchiseService';
 import './franquia.css';
@@ -24,6 +25,18 @@ const pct = (value) => value === null || value === undefined ? 'Pendente' : `${N
 const number = (value) => Number(value || 0).toLocaleString('pt-BR');
 const monthLabel = (month) => new Date(`${month}-01T12:00:00`).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
 const inputNumber = (value) => value === null || value === undefined ? '' : value;
+const healthValue = (metric, value = metric.value) => {
+  if (metric.status === 'not_applicable') return 'Não se aplica';
+  if (value === null || value === undefined) return 'Pendente';
+  if (metric.unit === '%') return `${Number(value).toFixed(1)}%`;
+  if (metric.unit === 'x') return `${Number(value).toFixed(1)}x`;
+  return `${Number(value).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}${metric.unit}`;
+};
+const READINESS_LABELS = {
+  building_evidence: 'Construindo comprovação', not_ready: 'Modelo ainda não saudável',
+  almost_ready: 'Quase pronto para franquear', ready: 'Pronto para avaliação de expansão',
+};
+const HEALTH_STATUS_LABELS = { met: 'Meta atingida', attention: 'Atenção', critical: 'Crítico', pending: 'Pendente', not_applicable: 'Não se aplica' };
 
 const TABS = [
   { id: 'resumo', label: 'Resumo executivo' },
@@ -109,6 +122,14 @@ function ConfigurationModal({ bundle, canEdit, onClose, onSaved }) {
   const [monthly, setMonthly] = useState({ ...bundle.monthlyInput });
   const [network, setNetwork] = useState({ ...bundle.networkInput });
   const [marketing, setMarketing] = useState({ channel: '', campaign: '', amount: '', leads: '', new_paying_clients: '' });
+  const [healthTargets, setHealthTargets] = useState(() => Object.fromEntries(
+    DEFAULT_FRANCHISE_HEALTH_TARGETS.map((target) => {
+      const saved = [...bundle.targets]
+        .filter((item) => item.metric_key === target.metricKey)
+        .sort((a, b) => String(b.valid_from || '').localeCompare(String(a.valid_from || '')))[0];
+      return [target.metricKey, saved?.target_value ?? target.targetValue];
+    }),
+  ));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const update = (setter, key) => (value) => setter((current) => ({ ...current, [key]: value }));
@@ -120,6 +141,21 @@ function ConfigurationModal({ bundle, canEdit, onClose, onSaved }) {
         saveEconomicModel({ ...model, unit_id: bundle.selectedUnit.id, configured: true }),
         saveMonthlyInput({ ...monthly, unit_id: bundle.selectedUnit.id, period_month: bundle.period.month }),
         saveNetworkMonthlyInput({ ...network, network_id: bundle.selectedUnit.network_id, period_month: bundle.period.month }),
+        ...DEFAULT_FRANCHISE_HEALTH_TARGETS.map((target) => {
+          const saved = [...bundle.targets]
+            .filter((item) => item.metric_key === target.metricKey)
+            .sort((a, b) => String(b.valid_from || '').localeCompare(String(a.valid_from || '')))[0];
+          return saveFranchiseTarget({
+            id: saved?.id,
+            unit_id: bundle.selectedUnit.id,
+            metric_key: target.metricKey,
+            target_value: Number(healthTargets[target.metricKey]),
+            warning_value: saved?.warning_value ?? target.warningValue,
+            critical_value: saved?.critical_value ?? target.criticalValue,
+            direction: saved?.direction || target.direction,
+            valid_from: saved?.valid_from || bundle.period.month,
+          });
+        }),
       ]);
       if (marketing.channel && Number(marketing.amount) >= 0) {
         await addMarketingInvestment({
@@ -182,6 +218,9 @@ function ConfigurationModal({ bundle, canEdit, onClose, onSaved }) {
           </div></section>
           <section><h3>6. Custos da franqueadora</h3><div className="fq-form-grid">
             {[['Equipe da franqueadora', 'franchisor_payroll'], ['Tecnologia da rede', 'technology_cost'], ['Suporte de campo', 'field_support_cost'], ['Expansão e vendas', 'sales_expansion_cost'], ['Administrativo', 'administrative_cost'], ['Outros custos', 'other_costs'], ['Uso do fundo de marketing', 'marketing_fund_spend'], ['Margem em produtos', 'product_margin_revenue'], ['Outras receitas', 'other_operating_revenue']].map(([label, key]) => <Field key={key} label={label} value={network[key]} onChange={update(setNetwork, key)} />)}
+          </div></section>
+          <section><h3>7. Metas para um modelo saudável</h3><p className="fq-help">Valores iniciais recomendados para gestão. Ajuste com sua contabilidade e com o histórico real da unidade-piloto.</p><div className="fq-form-grid">
+            {DEFAULT_FRANCHISE_HEALTH_TARGETS.map((target) => <Field key={target.metricKey} label={target.label} value={healthTargets[target.metricKey]} onChange={(value) => setHealthTargets((current) => ({ ...current, [target.metricKey]: value }))} suffix={target.unit.trim()} />)}
           </div></section>
           {error && <div className="fq-error"><AlertTriangle size={16} />{error}</div>}
         </div>
@@ -283,7 +322,7 @@ function Network({ bundle, snapshot, franchisor, onCreateUnit }) {
   </>;
 }
 
-function FullReport({ bundle, snapshot, franchisor, onCloseMonth, closing }) {
+function FullReport({ bundle, snapshot, franchisor, readiness, onCloseMonth, closing }) {
   const exportCsv = () => {
     const rows = [
       ['RELATORIO DE FRANQUIA', bundle.selectedUnit.name], ['Competencia', bundle.period.month],
@@ -292,6 +331,8 @@ function FullReport({ bundle, snapshot, franchisor, onCloseMonth, closing }) {
       ['CAC', snapshot.customers.cac ?? 'Pendente'], ['LTV observado', snapshot.customers.observedLtv ?? 'Pendente'],
       ['Payback meses', snapshot.scenario.paybackMonth ?? 'Nao atingido'], ['VPL', snapshot.scenario.npv],
       ['EBITDA franqueadora', franchisor.ebitda], ['Qualidade dos dados', snapshot.quality.score],
+      ['Prontidao para franquear', readiness.score], ['Status da prontidao', READINESS_LABELS[readiness.status]],
+      ...readiness.metrics.map((metric) => [metric.label, metric.value ?? 'Pendente', `Meta: ${metric.targetValue}${metric.unit}`]),
     ];
     const csv = rows.map((row) => row.map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(';')).join('\n');
     const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8' });
@@ -300,7 +341,13 @@ function FullReport({ bundle, snapshot, franchisor, onCloseMonth, closing }) {
   };
   return <>
     <div className="fq-report-actions"><div><small>RELATÓRIO GERENCIAL</small><h2>Diagnóstico completo da competência</h2><p>Base pronta para prestação de contas, conselho e acompanhamento do franqueado.</p></div><div><button className="fq-btn fq-btn-ghost" onClick={exportCsv}><Download size={16}/> Exportar CSV</button><button className="fq-btn fq-btn-ghost" onClick={() => window.print()}><FileCheck2 size={16}/> Imprimir/PDF</button><button className="fq-btn fq-btn-primary" onClick={onCloseMonth} disabled={closing}>{closing ? <Loader2 className="spin" size={16}/> : <LockKeyhole size={16}/>} Fechar mês</button></div></div>
-    <section className="fq-report-cover"><div><span>EVELYN ESTHETIC CENTER</span><h1>Relatório de franquia e viabilidade</h1><p>{bundle.selectedUnit.name} · {monthLabel(bundle.period.month.slice(0, 7))}</p></div><div className="fq-score"><strong>{snapshot.quality.score}%</strong><span>qualidade dos dados</span></div></section>
+    <section className="fq-report-cover"><div><span>EVELYN ESTHETIC CENTER</span><h1>Saúde da matriz e prontidão para franquear</h1><p>{bundle.selectedUnit.name} · {monthLabel(bundle.period.month.slice(0, 7))}</p></div><div className="fq-score"><strong>{readiness.score}%</strong><span>prontidão comprovada</span></div></section>
+    <section className={`fq-readiness fq-readiness-${readiness.status}`}>
+      <div className="fq-readiness-main"><small>DECISÃO DE EXPANSÃO</small><h2>{READINESS_LABELS[readiness.status]}</h2><p>Uma boa competência isolada não libera a franquia. O sistema exige histórico fechado, resultado, caixa, clientes, operação e governança.</p></div>
+      <div className="fq-readiness-counts"><span><strong>{readiness.metCount}</strong> metas atingidas</span><span><strong>{readiness.attentionCount}</strong> em atenção</span><span><strong>{readiness.criticalCount}</strong> críticas</span><span><strong>{readiness.pendingCount}</strong> pendentes</span></div>
+    </section>
+    <section className="fq-panel"><header><div><small>METAS DO MODELO SAUDÁVEL</small><h2>Atual x meta x distância</h2></div><Target size={20}/></header><div className="fq-table-wrap"><table className="fq-table fq-health-table"><thead><tr><th>Área</th><th>Indicador</th><th>Atual</th><th>Meta</th><th>Falta</th><th>Situação</th></tr></thead><tbody>{readiness.metrics.map((metric) => <tr key={metric.metricKey}><td>{metric.category}</td><td><strong>{metric.label}</strong></td><td>{healthValue(metric)}</td><td>{metric.direction === 'lower_better' ? 'até ' : 'mín. '}{healthValue(metric, metric.targetValue)}</td><td>{metric.gap === null || metric.gap === 0 ? '—' : healthValue(metric, metric.gap)}</td><td><span className={`fq-health-status fq-health-${metric.status}`}>{HEALTH_STATUS_LABELS[metric.status]}</span></td></tr>)}</tbody></table></div></section>
+    {readiness.blockers.length > 0 && <section className="fq-panel"><header><div><small>PLANO DE AÇÃO</small><h2>O que impede franquear agora</h2></div><AlertTriangle size={20}/></header><div className="fq-action-grid">{readiness.blockers.map((metric) => <article key={metric.metricKey}><span className={`fq-health-status fq-health-${metric.status}`}>{HEALTH_STATUS_LABELS[metric.status]}</span><strong>{metric.label}</strong><p>{metric.action}</p></article>)}</div></section>}
     <div className="fq-two-columns">
       <section className="fq-panel"><header><div><small>RESUMO</small><h2>Diagnóstico</h2></div><Target size={20}/></header><div className="fq-stat-list">
         <StatusLine label="Unidade operacionalmente lucrativa" value={bundle.model.configured ? (snapshot.dre.ebitda > 0 ? 'Sim' : 'Não') : 'Pendente'} good={snapshot.dre.ebitda > 0} />
@@ -314,9 +361,13 @@ function FullReport({ bundle, snapshot, franchisor, onCloseMonth, closing }) {
     <div className="fq-two-columns">
       <section className="fq-panel"><header><div><small>ECONOMIA DA UNIDADE</small><h2>Indicadores de sobrevivência</h2></div><TrendingUp size={20}/></header><div className="fq-stat-list">
         <StatusLine label="Margem EBITDA" value={pct(snapshot.dre.ebitdaMarginPct)} good={snapshot.dre.ebitdaMarginPct > 0} />
+        <StatusLine label="Lucratividade líquida" value={pct(snapshot.dre.profitabilityPct)} good={snapshot.dre.profitabilityPct >= 10} />
         <StatusLine label="Cobertura da dívida (DSCR)" value={snapshot.dre.debtCoverageRatio === null ? 'Sem dívida configurada' : `${snapshot.dre.debtCoverageRatio}x`} good={snapshot.dre.debtCoverageRatio === null || snapshot.dre.debtCoverageRatio >= 1.2} />
-        <StatusLine label="Fôlego de caixa" value={snapshot.dre.cashRunwayMonths === null ? (snapshot.dre.ebitda >= 0 ? 'Operação positiva' : 'Pendente') : `${snapshot.dre.cashRunwayMonths} meses`} good={snapshot.dre.ebitda >= 0 || snapshot.dre.cashRunwayMonths >= 6} />
+        <StatusLine label="Reserva de caixa" value={snapshot.dre.cashReserveMonths === null ? 'Pendente' : `${snapshot.dre.cashReserveMonths} meses`} good={snapshot.dre.cashReserveMonths >= 6} />
         <StatusLine label="Margem de segurança" value={pct(snapshot.dre.safetyMarginPct)} good={snapshot.dre.safetyMarginPct >= 10} />
+        <StatusLine label="Payback projetado" value={snapshot.scenario.paybackMonth ? `${snapshot.scenario.paybackMonth} meses` : 'Não atingido'} good={snapshot.scenario.paybackMonth && snapshot.scenario.paybackMonth <= 36} />
+        <StatusLine label="VPL do investimento" value={brl(snapshot.scenario.npv)} good={snapshot.scenario.npv > 0} />
+        <StatusLine label="TIR anual" value={pct(snapshot.scenario.irrAnnualPct)} good={snapshot.scenario.irrAnnualPct > 0} />
       </div></section>
       <section className="fq-panel"><header><div><small>CLIENTES</small><h2>Retenção e valor</h2></div><Users size={20}/></header><div className="fq-stat-list">
         <StatusLine label="Frequência média histórica" value={snapshot.customers.averagePurchaseFrequency === null ? 'Pendente' : `${snapshot.customers.averagePurchaseFrequency} compras`} good={snapshot.customers.averagePurchaseFrequency > 1} />
@@ -382,12 +433,24 @@ export default function Franquia() {
       networkInput: bundle.networkInput,
     });
   }, [bundle, snapshot]);
+  const readiness = useMemo(() => {
+    if (!bundle || !snapshot) return null;
+    return calculateFranchiseReadiness({
+      snapshot,
+      targets: bundle.targets,
+      closes: bundle.closes,
+      audits: bundle.audits,
+      documents: bundle.documents,
+      unitId: bundle.selectedUnit.id,
+      referenceDate: bundle.period.end,
+    });
+  }, [bundle, snapshot]);
 
   const closeMonth = async () => {
     if (!bundle || !snapshot) return;
     if (!window.confirm(`Fechar ${monthLabel(month)} com qualidade de dados em ${snapshot.quality.score}%?`)) return;
     setClosing(true);
-    try { await saveMonthlyClose({ unit_id: bundle.selectedUnit.id, period_month: bundle.period.month, status: 'fechado', data_quality_score: snapshot.quality.score, snapshot: { ...snapshot, franchisor }, missing_items: snapshot.quality.missing, closed_at: new Date().toISOString() }); await load(); }
+    try { await saveMonthlyClose({ unit_id: bundle.selectedUnit.id, period_month: bundle.period.month, status: 'fechado', data_quality_score: snapshot.quality.score, snapshot: { ...snapshot, franchisor, readiness }, missing_items: snapshot.quality.missing, closed_at: new Date().toISOString() }); await load(); }
     catch (closeError) { window.alert(closeError.message || 'Não foi possível fechar o mês.'); }
     finally { setClosing(false); }
   };
@@ -414,7 +477,7 @@ export default function Franquia() {
         {activeTab === 'dre' && <><div className="fq-section-heading"><div><small>DEMONSTRAÇÃO GERENCIAL</small><h2>DRE da unidade</h2><p>Do faturamento ao caixa que realmente sobra para o franqueado.</p></div><SourceTag type={bundle.model.configured ? 'calculated' : 'pending'}/></div><section className="fq-panel"><DreTable dre={snapshot.dre}/></section><div className="fq-metrics-grid fq-three"><Metric label="Margem de contribuição" value={pct(snapshot.dre.contributionMarginPct)} detail={brl(snapshot.dre.contributionAfterFranchiseFees)} /><Metric label="Margem EBITDA" value={pct(snapshot.dre.ebitdaMarginPct)} detail={brl(snapshot.dre.ebitda)} tone={snapshot.dre.ebitda >= 0 ? 'success' : 'danger'} /><Metric label="Margem de segurança" value={pct(snapshot.dre.safetyMarginPct)} detail={`Equilíbrio em ${brl(snapshot.dre.breakEvenRevenue)}`} tone={snapshot.dre.safetyMarginPct >= 10 ? 'success' : 'warning'} /></div></>}
         {activeTab === 'viabilidade' && <Viability snapshot={snapshot} model={bundle.model}/>} 
         {activeTab === 'rede' && <Network bundle={bundle} snapshot={snapshot} franchisor={franchisor} onCreateUnit={() => editable && setUnitModalOpen(true)}/>} 
-        {activeTab === 'relatorio' && <FullReport bundle={bundle} snapshot={snapshot} franchisor={franchisor} onCloseMonth={closeMonth} closing={closing}/>} 
+        {activeTab === 'relatorio' && <FullReport bundle={bundle} snapshot={snapshot} franchisor={franchisor} readiness={readiness} onCloseMonth={closeMonth} closing={closing}/>}
       </div>
       {settingsOpen && <ConfigurationModal bundle={bundle} canEdit={editable} onClose={() => setSettingsOpen(false)} onSaved={load}/>} 
       {unitModalOpen && <NewUnitModal networkId={bundle.selectedUnit.network_id} onClose={() => setUnitModalOpen(false)} onCreated={load}/>} 

@@ -132,6 +132,28 @@ export async function saveNetworkMonthlyInput(payload) {
   return data;
 }
 
+export async function saveFranchiseTarget(payload) {
+  const cleaned = cleanPayload(payload);
+  if (cleaned.id) {
+    const { id, ...updates } = cleaned;
+    const { data, error } = await supabase
+      .from('franchise_targets')
+      .update(updates)
+      .eq('id', id)
+      .select()
+      .single();
+    if (error) throw error;
+    return data;
+  }
+  const { data, error } = await supabase
+    .from('franchise_targets')
+    .insert(cleaned)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
 export async function addMarketingInvestment(payload) {
   const { data, error } = await supabase
     .from('franchise_marketing_investments')

@@ -5,11 +5,13 @@ import {
   assessFranchiseDataQuality,
   calculateCustomerMetrics,
   calculateFranchisorResult,
+  calculateFranchiseReadiness,
   calculateInitialInvestment,
   calculateOperationalMetrics,
   calculateUnitDre,
   projectFranchiseScenario,
 } from '../src/lib/franchiseMetrics.js';
+import { calculateMonthlyCareMetrics } from '../src/lib/dashboardMetrics.js';
 
 const model = {
   configured: true,
@@ -134,11 +136,74 @@ test('qualidade de dados revela pendências em vez de fabricar indicador', () =>
   assert.equal(quality.missing.length, 5);
 });
 
+test('painel troca contagens duplicadas por produção e recorrência reais', () => {
+  const result = calculateMonthlyCareMetrics([
+    { client_phone: '21999990001', appointment_date: '2026-09-10', status: 'finalizado' },
+    { client_phone: '21999990001', appointment_date: '2026-10-05', status: 'finalizado' },
+    { client_phone: '21999990002', appointment_date: '2026-10-06', status: 'completed' },
+    { client_phone: '21999990003', appointment_date: '2026-10-07', status: 'cancelado' },
+  ], '2026-10-01', '2026-10-31');
+  assert.deepEqual(result, {
+    completedAppointments: 2,
+    uniquePatients: 2,
+    recurringPatients: 1,
+    returnRatePct: 50,
+  });
+});
+
+test('prontidão só aprova unidade-piloto com histórico, resultado, operação e governança', () => {
+  const snapshot = {
+    quality: { score: 95 },
+    dre: {
+      ebitda: 10000, ebitdaMarginPct: 20, profitabilityPct: 12, contributionMarginPct: 50,
+      safetyMarginPct: 30, cashReserveMonths: 6, debtService: 0, debtCoverageRatio: null,
+    },
+    scenario: { paybackMonth: 24 },
+    customers: { ltvCacRatio: 3.5, returningSharePct: 40 },
+    operations: { noShowRatePct: 3, cancellationRatePct: 5, capacityConfigured: true, occupancyPct: 75 },
+  };
+  const closes = Array.from({ length: 6 }, (_, index) => ({
+    unit_id: 'unit-1', period_month: `2026-${String(index + 4).padStart(2, '0')}-01`,
+    status: 'fechado', snapshot: { dre: { ebitda: 9000 } },
+  }));
+  const documents = [
+    'cof', 'contrato', 'manual_operacional', 'manual_marca', 'treinamento', 'demonstracoes_financeiras',
+  ].map((document_type) => ({ document_type, status: 'valido', unit_id: 'unit-1' }));
+  const readiness = calculateFranchiseReadiness({
+    snapshot, closes, documents, unitId: 'unit-1', referenceDate: '2026-10-31',
+    audits: [{ status: 'concluida', overall_score: 90 }],
+  });
+  assert.equal(readiness.status, 'ready');
+  assert.equal(readiness.score, 100);
+  assert.equal(readiness.historyMonths, 6);
+  assert.equal(readiness.criticalCount, 0);
+  assert.equal(readiness.pendingCount, 0);
+});
+
+test('um mês bom não libera franquia sem evidência histórica', () => {
+  const readiness = calculateFranchiseReadiness({
+    snapshot: {
+      quality: { score: 95 },
+      dre: { ebitda: 10000, ebitdaMarginPct: 20, profitabilityPct: 12, contributionMarginPct: 50, safetyMarginPct: 30, cashReserveMonths: 6, debtService: 0 },
+      scenario: { paybackMonth: 24 },
+      customers: { ltvCacRatio: 4, returningSharePct: 40 },
+      operations: { noShowRatePct: 2, cancellationRatePct: 4, capacityConfigured: true, occupancyPct: 75 },
+    },
+    closes: [], documents: [], audits: [], unitId: 'unit-1', referenceDate: '2026-10-31',
+  });
+  assert.equal(readiness.status, 'building_evidence');
+  assert.equal(readiness.historyMonths, 0);
+  assert.ok(readiness.blockers.some((metric) => metric.metricKey === 'history_months'));
+  assert.ok(readiness.blockers.some((metric) => metric.metricKey === 'required_documents_pct'));
+});
+
 test('contrato da tela, navegação, permissões e banco está completo', () => {
   const page = fs.readFileSync(new URL('../src/pages/Franquia.jsx', import.meta.url), 'utf8');
   const app = fs.readFileSync(new URL('../src/App.jsx', import.meta.url), 'utf8');
   const sidebar = fs.readFileSync(new URL('../src/components/ui/sidebar.jsx', import.meta.url), 'utf8');
   const migration = fs.readFileSync(new URL('../franchise_management_migration.sql', import.meta.url), 'utf8');
+  const healthMigration = fs.readFileSync(new URL('../franchise_health_targets_migration.sql', import.meta.url), 'utf8');
+  const dashboard = fs.readFileSync(new URL('../src/pages/Dashboard.jsx', import.meta.url), 'utf8');
 
   assert.match(app, /path="\/franquia"/);
   assert.match(sidebar, /Franquia & Viabilidade/);
@@ -152,5 +217,12 @@ test('contrato da tela, navegação, permissões e banco está completo', () => 
   assert.match(migration, /franchise_compliance_documents/i);
   assert.match(migration, /ENABLE ROW LEVEL SECURITY/i);
   assert.match(migration, /WHEN require_write THEN/i);
+  assert.match(healthMigration, /profitable_months_pct/i);
+  assert.match(healthMigration, /ON CONFLICT \(unit_id, metric_key, valid_from\) DO NOTHING/i);
+  assert.match(page, /O que impede franquear agora/);
+  assert.match(page, /Atual x meta x distância/);
+  assert.doesNotMatch(dashboard, /label="Clientes Ativos"/);
+  assert.doesNotMatch(dashboard, /label="Estoque Crítico"/);
+  assert.match(dashboard, /label="Atendimentos Concluídos"/);
+  assert.match(dashboard, /label="Pacientes Recorrentes"/);
 });
-
