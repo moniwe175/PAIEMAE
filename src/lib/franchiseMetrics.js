@@ -66,7 +66,7 @@ const resolveFee = (override, type, value, base) => {
 const configuredFixedCosts = (monthlyInput = {}, model = {}) => {
   const detailed = [
     'payroll', 'payroll_charges', 'rent', 'utilities', 'systems',
-    'accounting_legal', 'maintenance', 'insurance', 'other_fixed_costs',
+    'accounting_legal', 'maintenance', 'insurance', 'marketing_expense', 'other_fixed_costs',
   ].reduce((sum, key) => sum + toNumber(monthlyInput[key]), 0);
   return detailed > 0 ? detailed : toNumber(model.monthly_fixed_costs);
 };

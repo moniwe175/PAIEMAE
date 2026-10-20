@@ -13,6 +13,7 @@ import { fetchInventory } from '../services/supabaseService';
 import { useServicos } from '../lib/servicos';
 import { useSync } from '../contexts/SyncContext';
 import SheetSyncStatus from '../components/integration/SheetSyncStatus';
+import FinancialHealthCenter from '../components/reports/FinancialHealthCenter';
 
 // ─── Helpers ──────────────────────────────────────────────────
 /** Brazilian currency format: R$ 1.234,56 */
@@ -1790,6 +1791,11 @@ export default function Reports() {
           </div>
         )}
       </div>
+
+      <FinancialHealthCenter
+        transactions={sheetTxData}
+        periodEnd={endDateStr}
+      />
     </div>
   );
 }
