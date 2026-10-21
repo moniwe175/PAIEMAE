@@ -1,4 +1,5 @@
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { attributionLeadFields, getCurrentMarketingAttribution } from '../lib/marketingAttribution';
 
 // ─── Helper ───────────────────────────────────────────────────
 
@@ -918,6 +919,17 @@ export function mapCampaignFromDb(c) {
     abertos: Number(extra.abertos || 0),
     cliques: Number(extra.cliques || 0),
     conversoes: Number(extra.conversoes || 0),
+    impressoes: Number(extra.impressoes || 0),
+    investimento_real: Number(extra.investimento_real || 0),
+    landing_url: extra.landing_url || '',
+    objetivo: extra.objetivo || '',
+    utm_source: extra.utm_source || '',
+    utm_medium: extra.utm_medium || '',
+    utm_campaign: extra.utm_campaign || '',
+    utm_content: extra.utm_content || '',
+    utm_term: extra.utm_term || '',
+    external_campaign_id: extra.external_campaign_id || '',
+    dados_anuncio_status: extra.dados_anuncio_status || 'pendente',
     created_at: c.created_at,
   };
 }
@@ -938,6 +950,17 @@ export function mapCampaignToDb(form) {
     cliques: Number(form.cliques || 0),
     conversoes: Number(form.conversoes || 0),
     enviados: Number(form.enviados || 0),
+    impressoes: Number(form.impressoes || 0),
+    investimento_real: Number(form.investimento_real || 0),
+    landing_url: form.landing_url || '',
+    objetivo: form.objetivo || '',
+    utm_source: form.utm_source || '',
+    utm_medium: form.utm_medium || '',
+    utm_campaign: form.utm_campaign || '',
+    utm_content: form.utm_content || '',
+    utm_term: form.utm_term || '',
+    external_campaign_id: form.external_campaign_id || '',
+    dados_anuncio_status: form.dados_anuncio_status || 'pendente',
   };
 
   const payload = {
@@ -1556,12 +1579,28 @@ export async function fetchCrmLeads() {
 
 export async function insertCrmLead(lead) {
   if (!isSupabaseConfigured()) return handleError('Supabase not configured');
-  const userId = lead.user_id || await getUserId();
-  const { data, error } = await supabase
+  const { capture_marketing_attribution: shouldCaptureAttribution, ...leadPayload } = lead;
+  const userId = leadPayload.user_id || await getUserId();
+  // Só formulários públicos/integrados devem ativar esta opção. Um cadastro feito
+  // pela recepção não pode herdar, por engano, a UTM existente no navegador do ERP.
+  const attributionFields = shouldCaptureAttribution
+    ? attributionLeadFields(getCurrentMarketingAttribution())
+    : {};
+  const enrichedLead = { ...attributionFields, ...leadPayload, user_id: userId };
+  let { data, error } = await supabase
     .from('crm_leads')
-    .insert([{ ...lead, user_id: userId }])
+    .insert([enrichedLead])
     .select()
     .single();
+
+  // Compatibilidade enquanto a migração de atribuição ainda não foi aplicada.
+  if (error?.code === 'PGRST204' && Object.keys(attributionFields).length > 0) {
+    ({ data, error } = await supabase
+      .from('crm_leads')
+      .insert([{ ...leadPayload, user_id: userId }])
+      .select()
+      .single());
+  }
   if (error) return handleError(error);
   return { data, error: null };
 }

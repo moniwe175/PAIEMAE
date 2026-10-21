@@ -1,4 +1,4 @@
-import { lazy, Suspense } from 'react';
+import { lazy, Suspense, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 
 // Import AuthContext provider and ProtectedRoute
@@ -45,10 +45,20 @@ import Sidebar from './components/ui/sidebar';
 
 // Import sheet sync hook for auto-connect
 import useSheetSync from './hooks/useSheetSync';
+import { captureMarketingAttribution } from './lib/marketingAttribution';
+import { persistMarketingTouch } from './services/marketingAttributionService';
 
 // Global component that triggers Google Sheets auto-sync
 function SheetAutoSync() {
   useSheetSync(); // auto-connect useEffect fires on mount
+  return null;
+}
+
+function MarketingAttributionCapture() {
+  useEffect(() => {
+    const attribution = captureMarketingAttribution(window.location.href, document.referrer);
+    if (attribution?.last_touch) persistMarketingTouch(attribution);
+  }, []);
   return null;
 }
 
@@ -103,6 +113,7 @@ function App() {
         <SyncProvider>
           <OKRProvider>
             <SheetAutoSync />
+            <MarketingAttributionCapture />
             <Routes>
               {/* Public Routes */}
               <Route path="/login" element={<Login />} />

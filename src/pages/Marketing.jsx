@@ -3,7 +3,8 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Megaphone, Plus, XCircle, Users, TrendingUp, Send, MessageSquare, Camera,
   Star, Search, Edit3, Trash2, CheckCircle, Pause, Play, Archive, Eye,
-  Target, DollarSign, RefreshCw, Mail, Smartphone, Sparkles, Brain
+  Target, DollarSign, RefreshCw, Mail, Smartphone, Sparkles, Brain,
+  Globe2, Link2, Copy, CalendarCheck, BadgeDollarSign
 } from 'lucide-react';
 import {
   fetchCampaigns, insertCampaign, updateCampaign, deleteCampaign
@@ -20,6 +21,8 @@ import InstagramInsightsPanel from '../components/marketing/InstagramInsightsPan
 import IdeiasPlanejamento from '../components/marketing/IdeiasPlanejamento';
 import InteligenicaComercial from '../components/marketing/inteligencia/InteligenicaComercial';
 import { fetchLinkedIdeasForCampaign } from '../services/marketingIdeasService';
+import { fetchCampaignPerformance } from '../services/marketingAttributionService';
+import { buildTrackedUrl, slugifyCampaign } from '../lib/marketingAttribution';
 import {
   getInstagramStatus,
   getInstagramMedia,
@@ -33,7 +36,8 @@ import {
 
 // ─── Constants ─────────────────────────────────────────────────
 
-const CANAIS = ['WhatsApp', 'Instagram', 'Email', 'SMS'];
+const CANAIS = ['Meta Ads', 'Google Ads', 'WhatsApp', 'Instagram', 'Email', 'SMS'];
+const PAID_CHANNELS = new Set(['Meta Ads', 'Google Ads']);
 const STATUS_LIST = ['rascunho', 'ativo', 'pausado', 'concluido'];
 
 const CANAL_ICON = {
@@ -41,6 +45,8 @@ const CANAL_ICON = {
   Instagram: Camera,
   Email: Mail,
   SMS: Smartphone,
+  'Meta Ads': Target,
+  'Google Ads': Globe2,
 };
 
 const CANAL_COLOR = {
@@ -48,7 +54,12 @@ const CANAL_COLOR = {
   Instagram: '#E1306C',
   Email: '#7A95B8',
   SMS: '#D4956A',
+  'Meta Ads': '#2563EB',
+  'Google Ads': '#4285F4',
 };
+
+const fmtMoney = (value) => Number(value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+const safeRate = (part, total) => total > 0 ? (Number(part || 0) / Number(total)) * 100 : null;
 
 const STATUS_CONFIG = {
   rascunho:  { label: 'Rascunho',  badge: 'badge-neutral',  icon: Edit3,   color: '#8C7573' },
@@ -61,6 +72,7 @@ const STATUS_CONFIG = {
 
 function CampanhaModal({ onClose, onSave, campanha }) {
   const isEdit = !!campanha;
+  const defaultLandingUrl = '';
   const [form, setForm] = useState({
     nome: campanha?.nome || '',
     canal: campanha?.canal || 'WhatsApp',
@@ -74,12 +86,52 @@ function CampanhaModal({ onClose, onSave, campanha }) {
     abertos: campanha?.abertos || 0,
     cliques: campanha?.cliques || 0,
     conversoes: campanha?.conversoes || 0,
+    impressoes: campanha?.impressoes || 0,
+    investimento_real: campanha?.investimento_real || 0,
+    landing_url: campanha?.landing_url || defaultLandingUrl,
+    objetivo: campanha?.objetivo || 'Agendamentos',
+    utm_source: campanha?.utm_source || '',
+    utm_medium: campanha?.utm_medium || '',
+    utm_campaign: campanha?.utm_campaign || '',
+    utm_content: campanha?.utm_content || '',
+    utm_term: campanha?.utm_term || '',
+    external_campaign_id: campanha?.external_campaign_id || '',
+    dados_anuncio_status: campanha?.dados_anuncio_status || 'pendente',
+    utm_id: campanha?.id ? String(campanha.id) : '',
   });
   const [saving, setSaving] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [formError, setFormError] = useState('');
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+  const isPaid = PAID_CHANNELS.has(form.canal);
+  const trackedUrl = useMemo(() => buildTrackedUrl(form.landing_url, form), [form]);
+
+  const setChannel = (canal) => {
+    setForm(current => ({
+      ...current,
+      canal,
+      utm_source: canal === 'Meta Ads' ? 'meta' : canal === 'Google Ads' ? 'google' : current.utm_source,
+      utm_medium: canal === 'Google Ads' ? 'cpc' : canal === 'Meta Ads' ? 'paid_social' : current.utm_medium,
+    }));
+  };
+
+  const copyTrackedUrl = async () => {
+    if (!trackedUrl || !navigator?.clipboard) return;
+    await navigator.clipboard.writeText(trackedUrl);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1600);
+  };
 
   const handleSubmit = async () => {
-    if (!form.nome.trim()) return;
+    if (!form.nome.trim()) {
+      setFormError('Informe o nome da campanha.');
+      return;
+    }
+    if (isPaid && !trackedUrl) {
+      setFormError('Informe uma página de destino válida para gerar o rastreamento.');
+      return;
+    }
+    setFormError('');
     setSaving(true);
     const saved = await onSave(form);
     setSaving(false);
@@ -88,7 +140,7 @@ function CampanhaModal({ onClose, onSave, campanha }) {
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 560 }}>
+      <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 720, maxHeight: '92vh', overflowY: 'auto' }}>
         <div className="modal-header">
           <span className="modal-title">{isEdit ? 'Editar Campanha' : 'Nova Campanha'}</span>
           <button className="modal-close" onClick={onClose}><XCircle /></button>
@@ -96,11 +148,15 @@ function CampanhaModal({ onClose, onSave, campanha }) {
         <div className="form-grid-2">
           <div className="form-group" style={{ gridColumn: 'span 2' }}>
             <label className="form-label">Nome da Campanha</label>
-            <input className="form-input" placeholder="Ex: Promoção de Verão" value={form.nome} onChange={e => set('nome', e.target.value)} />
+            <input className="form-input" placeholder="Ex: Campanha Botox Outubro" value={form.nome} onChange={e => setForm(current => ({
+              ...current,
+              nome: e.target.value,
+              utm_campaign: slugifyCampaign(e.target.value),
+            }))} />
           </div>
           <div className="form-group">
             <label className="form-label">Canal</label>
-            <select className="form-select" value={form.canal} onChange={e => set('canal', e.target.value)}>
+            <select className="form-select" value={form.canal} onChange={e => setChannel(e.target.value)}>
               {CANAIS.map(c => <option key={c}>{c}</option>)}
             </select>
           </div>
@@ -123,16 +179,67 @@ function CampanhaModal({ onClose, onSave, campanha }) {
             <input className="form-input" placeholder="Ex: Clientes sem visita há 60 dias" value={form.publico_alvo} onChange={e => set('publico_alvo', e.target.value)} />
           </div>
           <div className="form-group" style={{ gridColumn: 'span 2' }}>
-            <label className="form-label">Orçamento (R$)</label>
+            <label className="form-label">Orçamento planejado (R$)</label>
             <input className="form-input" type="number" placeholder="0" value={form.orcamento} onChange={e => set('orcamento', parseFloat(e.target.value) || 0)} />
           </div>
+          {isPaid && (
+            <>
+              <div className="form-group">
+                <label className="form-label">Objetivo</label>
+                <select className="form-select" value={form.objetivo} onChange={e => set('objetivo', e.target.value)}>
+                  {['Leads', 'Agendamentos', 'Vendas', 'Reconhecimento'].map(item => <option key={item}>{item}</option>)}
+                </select>
+              </div>
+              <div className="form-group">
+                <label className="form-label">ID da campanha na plataforma</label>
+                <input className="form-input" placeholder="Usado quando a API for conectada" value={form.external_campaign_id} onChange={e => set('external_campaign_id', e.target.value)} />
+              </div>
+              <div className="form-group" style={{ gridColumn: 'span 2' }}>
+                <label className="form-label">Página de destino</label>
+                <input className="form-input" type="url" placeholder="https://..." value={form.landing_url} onChange={e => set('landing_url', e.target.value)} />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Origem (utm_source)</label>
+                <input className="form-input" value={form.utm_source} onChange={e => set('utm_source', e.target.value)} placeholder="meta ou google" />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Mídia (utm_medium)</label>
+                <input className="form-input" value={form.utm_medium} onChange={e => set('utm_medium', e.target.value)} placeholder="paid_social ou cpc" />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Campanha (utm_campaign)</label>
+                <input className="form-input" value={form.utm_campaign} onChange={e => set('utm_campaign', slugifyCampaign(e.target.value))} />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Criativo (utm_content)</label>
+                <input className="form-input" value={form.utm_content} onChange={e => set('utm_content', e.target.value)} placeholder="video-01, imagem-02..." />
+              </div>
+              <div className="form-group" style={{ gridColumn: 'span 2' }}>
+                <label className="form-label">Termo/público (utm_term) — opcional</label>
+                <input className="form-input" value={form.utm_term} onChange={e => set('utm_term', e.target.value)} placeholder="palavra-chave ou público" />
+              </div>
+              <div style={{ gridColumn: 'span 2', padding: 12, borderRadius: 10, background: '#EFF6FF', border: '1px solid #BFDBFE' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: '#1D4ED8', marginBottom: 4, display: 'flex', gap: 5, alignItems: 'center' }}><Link2 style={{ width: 13 }} /> LINK RASTREÁVEL</div>
+                    <div style={{ fontSize: 11, color: trackedUrl ? '#334155' : '#B45309', wordBreak: 'break-all' }}>
+                      {trackedUrl || 'Informe uma página de destino válida para gerar o link.'}
+                    </div>
+                  </div>
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={copyTrackedUrl} disabled={!trackedUrl}>
+                    {copied ? <CheckCircle /> : <Copy />}{copied ? 'Copiado' : 'Copiar'}
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
           <div className="form-group" style={{ gridColumn: 'span 2' }}>
             <label className="form-label">Mensagem / Conteúdo</label>
             <textarea className="form-textarea" style={{ minHeight: 90 }} placeholder="Digite o conteúdo da campanha..." value={form.mensagem} onChange={e => set('mensagem', e.target.value)} />
           </div>
         </div>
 
-        {isEdit && (
+        {isEdit && !isPaid && (
           <>
             <div className="divider" />
             <div style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--text-muted)', marginBottom: 10 }}>Métricas</div>
@@ -151,6 +258,14 @@ function CampanhaModal({ onClose, onSave, campanha }) {
             </div>
           </>
         )}
+
+        {isPaid && (
+          <div style={{ marginTop: 12, padding: 12, borderRadius: 10, background: '#F8FAFC', border: '1px solid #E2E8F0', fontSize: 12, color: '#475569', lineHeight: 1.5 }}>
+            <strong>Dados automáticos:</strong> leads, agendamentos, comparecimentos e receita vêm do ERP. Impressões, cliques e investimento serão importados da API oficial do {form.canal === 'Meta Ads' ? 'Meta' : 'Google'} quando a conta for conectada.
+          </div>
+        )}
+
+        {formError && <div role="alert" style={{ marginTop: 10, color: '#B91C1C', fontSize: 12 }}>{formError}</div>}
 
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 12 }}>
           <button className="btn btn-ghost" onClick={onClose}>Cancelar</button>
@@ -214,6 +329,12 @@ function CampanhaDetail({ campanha, onClose, onEdit }) {
   const taxClique = campanha.abertos > 0 ? Math.round((campanha.cliques / campanha.abertos) * 100) : 0;
   const taxConversao = campanha.cliques > 0 ? Math.round((campanha.conversoes / campanha.cliques) * 100) : 0;
   const custoConversao = campanha.conversoes > 0 && campanha.orcamento > 0 ? Math.round(campanha.orcamento / campanha.conversoes) : 0;
+  const isPaid = PAID_CHANNELS.has(campanha.canal);
+  const perf = campanha.performance || {};
+  const spend = Number(perf.spend || campanha.investimento_real || 0);
+  const revenue = Number(perf.revenue || 0);
+  const roas = spend > 0 ? revenue / spend : null;
+  const trackedUrl = buildTrackedUrl(campanha.landing_url, { ...campanha, utm_id: String(campanha.id) });
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -241,12 +362,17 @@ function CampanhaDetail({ campanha, onClose, onEdit }) {
         )}
 
         <div className="grid-4" style={{ marginBottom: 16 }}>
-          {[
+          {(isPaid ? [
+            { label: 'Leads', val: Number(perf.leads || 0), cor: 'var(--info)', icon: Users },
+            { label: 'Agendados', val: Number(perf.scheduled || 0), cor: 'var(--warning)', icon: CalendarCheck },
+            { label: 'Atendidos', val: Number(perf.attended || 0), cor: 'var(--success)', icon: CheckCircle },
+            { label: 'Receita', val: fmtMoney(revenue), cor: 'var(--success)', icon: BadgeDollarSign },
+          ] : [
             { label: 'Enviados', val: campanha.enviados || campanha.abertos, cor: 'var(--text-dark)', icon: Send },
             { label: 'Abertos', val: campanha.abertos, cor: 'var(--info)', icon: Eye },
             { label: 'Cliques', val: campanha.cliques, cor: 'var(--warning)', icon: Target },
             { label: 'Conversões', val: campanha.conversoes, cor: 'var(--success)', icon: Users },
-          ].map(({ label, val, cor: c, icon: I }) => (
+          ]).map(({ label, val, cor: c, icon: I }) => (
             <div key={label} style={{ textAlign: 'center', padding: 12, background: 'var(--bg-main)', borderRadius: 10 }}>
               <I style={{ width: 16, height: 16, color: c, marginBottom: 4 }} />
               <div style={{ fontSize: 20, fontWeight: 700, color: c }}>{val}</div>
@@ -256,12 +382,17 @@ function CampanhaDetail({ campanha, onClose, onEdit }) {
         </div>
 
         <div className="grid-2" style={{ marginBottom: 16 }}>
-          {[
+          {(isPaid ? [
+            { label: 'Investimento real', val: spend > 0 ? fmtMoney(spend) : 'Pendente da API' },
+            { label: 'ROAS', val: roas == null ? 'Pendente' : `${roas.toFixed(2)}x` },
+            { label: 'Custo por lead', val: spend > 0 && perf.leads > 0 ? fmtMoney(spend / perf.leads) : 'Pendente' },
+            { label: 'Conversão em atendimento', val: perf.leads > 0 ? `${safeRate(perf.attended, perf.leads).toFixed(1)}%` : '—' },
+          ] : [
             { label: 'Taxa de Abertura', val: `${taxaAbertura}%` },
             { label: 'Taxa de Cliques', val: `${taxClique}%` },
             { label: 'Taxa de Conversão', val: `${taxConversao}%` },
             { label: 'Custo/Conversão', val: custoConversao > 0 ? `R$ ${custoConversao}` : '—' },
-          ].map(({ label, val }) => (
+          ]).map(({ label, val }) => (
             <div key={label} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid var(--border-light)', fontSize: 13 }}>
               <span style={{ color: 'var(--text-muted)' }}>{label}</span>
               <span style={{ fontWeight: 700 }}>{val}</span>
@@ -274,6 +405,21 @@ function CampanhaDetail({ campanha, onClose, onEdit }) {
           {campanha.orcamento > 0 && <div><strong>Orçamento:</strong> R$ {campanha.orcamento.toLocaleString('pt-BR')}</div>}
           {campanha.data_inicio && <div><strong>Período:</strong> {campanha.data_inicio} → {campanha.data_fim || '—'}</div>}
         </div>
+
+        {isPaid && (
+          <div style={{ marginBottom: 16, padding: 12, borderRadius: 10, background: '#F8FAFC', border: '1px solid #E2E8F0' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginBottom: 6, fontSize: 12 }}>
+              <strong>Rastreamento próprio do PAIEMAE</strong>
+              <span className={`badge ${perf.ad_data_status === 'api' ? 'badge-success' : 'badge-warning'}`}>
+                {perf.ad_data_status === 'api' ? 'Anúncios via API' : 'API de anúncios pendente'}
+              </span>
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', wordBreak: 'break-all' }}>{trackedUrl || 'Link rastreável ainda não configurado.'}</div>
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 6 }}>
+              Receita considerada somente quando o cliente e o lançamento financeiro estão conciliados no ERP.
+            </div>
+          </div>
+        )}
 
         {linkedIdeas.length > 0 && (
           <div style={{ marginBottom: 16, background: '#F5F3FF', border: '1px solid #DDD6FE', borderRadius: 8, padding: 12 }}>
@@ -308,6 +454,7 @@ export default function Marketing() {
   // ── Campanhas State ──
   const [campanhas, setCampanhas] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [attributionReady, setAttributionReady] = useState(true);
   const [modal, setModal] = useState(null); // null | 'new' | campaign obj
   const [deleteId, setDeleteId] = useState(null);
   const [detailId, setDetailId] = useState(null);
@@ -332,8 +479,16 @@ export default function Marketing() {
   // ── Load Campaigns ──
   const load = useCallback(async () => {
     setLoading(true);
-    const { data } = await fetchCampaigns();
-    setCampanhas(data || []);
+    const [{ data }, performanceResult] = await Promise.all([
+      fetchCampaigns(),
+      fetchCampaignPerformance(),
+    ]);
+    const performanceMap = new Map((performanceResult.data || []).map(item => [String(item.campaign_key), item]));
+    setAttributionReady(!performanceResult.error);
+    setCampanhas((data || []).map(campaign => ({
+      ...campaign,
+      performance: performanceMap.get(String(campaign.id)) || performanceMap.get(campaign.utm_campaign) || null,
+    })));
     setLoading(false);
   }, []);
 
@@ -402,7 +557,7 @@ export default function Marketing() {
         alert('Erro ao atualizar campanha: ' + (error.message || JSON.stringify(error)));
         return false;
       }
-      if (data) setCampanhas(prev => prev.map(c => c.id === modal.id ? data : c));
+      if (data) setCampanhas(prev => prev.map(c => c.id === modal.id ? { ...data, performance: c.performance } : c));
     } else {
       const { data, error } = await insertCampaign(form);
       if (error) {
@@ -432,7 +587,7 @@ export default function Marketing() {
   const handleStatusChange = async (campanha, newStatus) => {
     const { data, error } = await updateCampaign(campanha.id, { status: newStatus });
     if (error) { alert(`Erro ao alterar status: ${error.message || error}`); return; }
-    if (data) setCampanhas(prev => prev.map(c => c.id === campanha.id ? data : c));
+    if (data) setCampanhas(prev => prev.map(c => c.id === campanha.id ? { ...data, performance: c.performance } : c));
   };
 
   // ── Instagram Rule Handlers ──
@@ -493,11 +648,13 @@ export default function Marketing() {
   );
 
   const ativas = campanhas.filter(c => c.status === 'ativo');
-  const totalEnviados = campanhas.reduce((a, c) => a + (c.enviados || 0), 0);
-  const totalAbertos = campanhas.reduce((a, c) => a + (c.abertos || 0), 0);
-  const totalConversoes = campanhas.reduce((a, c) => a + (c.conversoes || 0), 0);
   const totalOrcamento = campanhas.reduce((a, c) => a + (c.orcamento || 0), 0);
-  const taxaConversao = totalEnviados > 0 ? Math.round((totalConversoes / totalEnviados) * 100) : (totalAbertos > 0 ? Math.round((totalConversoes / totalAbertos) * 100) : 0);
+  const totalLeadsReais = campanhas.reduce((a, c) => a + Number(c.performance?.leads || 0), 0);
+  const totalAgendadosReais = campanhas.reduce((a, c) => a + Number(c.performance?.scheduled || 0), 0);
+  const totalAtendidosReais = campanhas.reduce((a, c) => a + Number(c.performance?.attended || 0), 0);
+  const receitaAtribuida = campanhas.reduce((a, c) => a + Number(c.performance?.revenue || 0), 0);
+  const investimentoReal = campanhas.reduce((a, c) => a + Number(c.performance?.spend || c.investimento_real || 0), 0);
+  const roasTotal = investimentoReal > 0 ? receitaAtribuida / investimentoReal : null;
 
   const detailCampanha = detailId ? campanhas.find(c => c.id === detailId) : null;
   const deleteCampanha = deleteId ? campanhas.find(c => c.id === deleteId) : null;
@@ -509,6 +666,10 @@ export default function Marketing() {
       total: items.length,
       enviados: items.reduce((a, c) => a + (c.enviados || 0), 0),
       conversoes: items.reduce((a, c) => a + (c.conversoes || 0), 0),
+      leads: items.reduce((a, c) => a + Number(c.performance?.leads || 0), 0),
+      agendados: items.reduce((a, c) => a + Number(c.performance?.scheduled || 0), 0),
+      atendidos: items.reduce((a, c) => a + Number(c.performance?.attended || 0), 0),
+      receita: items.reduce((a, c) => a + Number(c.performance?.revenue || 0), 0),
       ativas: items.filter(c => c.status === 'ativo').length,
     };
   }).filter(s => s.total > 0);
@@ -649,13 +810,20 @@ export default function Marketing() {
       {/* ────────────────── SUB-ABA 1: CAMPANHAS ────────────────── */}
       {subTab === 'campanhas' && (
         <>
+          {!attributionReady && (
+            <div role="alert" className="card" style={{ marginBottom: 16, borderColor: '#F59E0B', background: '#FFFBEB', color: '#92400E', fontSize: 13 }}>
+              <strong>Rastreamento preparado, aguardando ativação no banco.</strong> Execute o arquivo <code>marketing_attribution_migration.sql</code> no Supabase para começar a registrar UTMs e resultados reais.
+            </div>
+          )}
           {/* KPI Cards */}
-          <div className="grid-4 section-gap">
+          <div className="section-gap" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
             {[
               { label: 'Campanhas Ativas', val: ativas.length, cor: 'var(--color-primary)', icon: Megaphone },
-              { label: 'Mensagens Enviadas', val: totalEnviados.toLocaleString('pt-BR'), cor: 'var(--info)', icon: Send },
-              { label: 'Conversões', val: totalConversoes, cor: 'var(--success)', icon: Users },
-              { label: 'Taxa de Conversão', val: `${taxaConversao}%`, cor: 'var(--warning)', icon: TrendingUp },
+              { label: 'Leads Rastreados', val: totalLeadsReais, cor: 'var(--info)', icon: Users },
+              { label: 'Agendamentos', val: totalAgendadosReais, cor: 'var(--warning)', icon: CalendarCheck },
+              { label: 'Atendimentos', val: totalAtendidosReais, cor: 'var(--success)', icon: CheckCircle },
+              { label: 'Receita Atribuída', val: fmtMoney(receitaAtribuida), cor: 'var(--success)', icon: BadgeDollarSign },
+              { label: 'ROAS Real', val: roasTotal == null ? 'Pendente' : `${roasTotal.toFixed(2)}x`, cor: 'var(--color-primary)', icon: TrendingUp },
             ].map(({ label, val, cor, icon: Icon }) => (
               <div key={label} className="stat-card">
                 <div className="stat-card-icon" style={{ background: `${cor}18` }}><Icon style={{ color: cor }} /></div>
@@ -668,9 +836,10 @@ export default function Marketing() {
           {/* Channel Cards */}
           {channelStats.length > 0 && (
             <div className={`grid-${Math.min(channelStats.length, 4)} section-gap`} style={{ gridTemplateColumns: `repeat(${Math.min(channelStats.length, 4)}, 1fr)` }}>
-              {channelStats.map(({ canal, total, enviados, conversoes, ativas: at }) => {
+              {channelStats.map(({ canal, total, enviados, conversoes, leads, agendados, atendidos, receita, ativas: at }) => {
                 const Icon = CANAL_ICON[canal] || Send;
                 const cor = CANAL_COLOR[canal] || '#7A95B8';
+                const isPaid = PAID_CHANNELS.has(canal);
                 return (
                   <div
                     key={canal}
@@ -694,12 +863,12 @@ export default function Marketing() {
                       </div>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Enviados</div>
-                      <span style={{ fontWeight: 600, fontSize: 13 }}>{enviados.toLocaleString('pt-BR')}</span>
+                      <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{isPaid ? 'Leads / agendados' : 'Enviados'}</div>
+                      <span style={{ fontWeight: 600, fontSize: 13 }}>{isPaid ? `${leads} / ${agendados}` : enviados.toLocaleString('pt-BR')}</span>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 }}>
-                      <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Conversões</div>
-                      <span style={{ fontWeight: 700, color: cor, fontSize: 16 }}>{conversoes}</span>
+                      <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{isPaid ? 'Atendidos / receita' : 'Conversões'}</div>
+                      <span style={{ fontWeight: 700, color: cor, fontSize: isPaid ? 13 : 16 }}>{isPaid ? `${atendidos} · ${fmtMoney(receita)}` : conversoes}</span>
                     </div>
                   </div>
                 );
@@ -761,10 +930,10 @@ export default function Marketing() {
                       <th>Campanha</th>
                       <th>Canal</th>
                       <th>Período</th>
-                      <th style={{ textAlign: 'center' }}>Enviados</th>
-                      <th style={{ textAlign: 'center' }}>Abertos</th>
-                      <th style={{ textAlign: 'center' }}>Cliques</th>
-                      <th style={{ textAlign: 'center' }}>Conv.</th>
+                      <th style={{ textAlign: 'center' }}>Leads</th>
+                      <th style={{ textAlign: 'center' }}>Agendados</th>
+                      <th style={{ textAlign: 'center' }}>Atendidos</th>
+                      <th style={{ textAlign: 'right' }}>Receita</th>
                       <th>Status</th>
                       <th style={{ textAlign: 'right' }}>Ações</th>
                     </tr>
@@ -790,10 +959,10 @@ export default function Marketing() {
                             {c.data_inicio || '—'}
                             {c.data_fim && <span> → {c.data_fim}</span>}
                           </td>
-                          <td style={{ textAlign: 'center', fontWeight: 600 }}>{c.enviados || c.abertos || '—'}</td>
-                          <td style={{ textAlign: 'center', fontWeight: 600, color: 'var(--info)' }}>{c.abertos || '—'}</td>
-                          <td style={{ textAlign: 'center', fontWeight: 600, color: 'var(--warning)' }}>{c.cliques || '—'}</td>
-                          <td style={{ textAlign: 'center', fontWeight: 700, color: 'var(--success)' }}>{c.conversoes || '—'}</td>
+                          <td style={{ textAlign: 'center', fontWeight: 600 }}>{c.performance ? Number(c.performance.leads || 0) : '—'}</td>
+                          <td style={{ textAlign: 'center', fontWeight: 600, color: 'var(--info)' }}>{c.performance ? Number(c.performance.scheduled || 0) : '—'}</td>
+                          <td style={{ textAlign: 'center', fontWeight: 600, color: 'var(--warning)' }}>{c.performance ? Number(c.performance.attended || 0) : '—'}</td>
+                          <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--success)' }}>{c.performance ? fmtMoney(c.performance.revenue) : '—'}</td>
                           <td>
                             <span className={`badge ${st.badge}`} style={{ cursor: 'pointer' }} onClick={e => {
                               e.stopPropagation();
