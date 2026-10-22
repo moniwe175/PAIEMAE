@@ -1477,6 +1477,21 @@ export async function fetchQueueHistory() {
   return { data: data || [], error: null };
 }
 
+// Leitura enxuta para o CRM: a Agenda continua definindo a etapa e o Motor
+// apenas informa quais acompanhamentos foram preparados ou enviados.
+export async function fetchCrmAutomationEvents(days = 365) {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured', []);
+  const cutoff = new Date(Date.now() - Math.max(1, Number(days) || 365) * 86400000).toISOString();
+  return fetchAllPages((from, to) => (
+    supabase
+      .from('marketing_queue')
+      .select('id, client_id, client_phone, tool_id, tool_name, status, appointment_id, scheduled_at, sent_at, created_at, updated_at, error_message')
+      .gte('created_at', cutoff)
+      .order('created_at', { ascending: false })
+      .range(from, to)
+  ));
+}
+
 export async function fetchQueuePendingCount() {
   if (!isSupabaseConfigured()) return { data: 0, error: null };
   const { count, error } = await supabase

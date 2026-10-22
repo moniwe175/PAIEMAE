@@ -12,7 +12,7 @@ import { useAuth } from '../contexts/AuthContext';
 import {
   fetchCrmLeads, insertCrmLead, updateCrmLead,
   fetchCrmInteractions, insertCrmInteraction,
-  fetchClients, fetchAppointments,
+  fetchClients, fetchAppointments, fetchCrmAutomationEvents,
 } from '../services/supabaseService';
 import {
   CRM_JOURNEY_STATUS,
@@ -20,6 +20,7 @@ import {
   matchesCrmJourneyFilter,
   summarizeCrmRevenueFromAgenda,
 } from '../lib/crmJourney';
+import { enrichCrmLeadsWithAutomation, getCrmAutomationPresentation } from '../lib/crmAutomation';
 
 // ─── Constants ────────────────────────────────────────────────
 
@@ -408,6 +409,7 @@ function LeadDrawer({ lead, onClose, onUpdate, clientes = [], agendamentos = [],
   useEffect(() => { loadInteractions(); }, [loadInteractions]);
 
   const journey = lead._journey;
+  const automation = lead._automation;
   const linkedClient = useMemo(
     () => clientes.find(c => String(c.id) === String(lead.client_id)) || journey?.client || null,
     [clientes, lead.client_id, journey?.client]
@@ -631,6 +633,27 @@ function LeadDrawer({ lead, onClose, onUpdate, clientes = [], agendamentos = [],
             </div>
           )}
 
+          {automation?.latest && (
+            <div style={{
+              margin: '10px 22px 0', padding: '10px 14px', borderRadius: 10,
+              background: automation.background, border: `1px solid ${automation.color}33`,
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+              flexShrink: 0,
+            }}>
+              <div>
+                <div style={{ fontSize: 10, color: automation.color, textTransform: 'uppercase', fontWeight: 800, letterSpacing: 0.5 }}>
+                  Acompanhamento pelo Motor
+                </div>
+                <div style={{ marginTop: 3, fontSize: 13, color: 'var(--text-dark)', fontWeight: 750 }}>
+                  {automation.label} · {automation.detail}
+                </div>
+              </div>
+              <div style={{ fontSize: 10, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+                {fmtDatetime(automation.latest.sent_at || automation.latest.updated_at || automation.latest.created_at)}
+              </div>
+            </div>
+          )}
+
           {/* Tabs */}
           <div style={{ display: 'flex', borderBottom: '1px solid var(--border-color)', flexShrink: 0 }}>
             {[
@@ -658,6 +681,41 @@ function LeadDrawer({ lead, onClose, onUpdate, clientes = [], agendamentos = [],
             {/* ── Histórico ── */}
             {activeTab === 'historico' && (
               <>
+                {automation?.events?.length > 0 && (
+                  <div style={{ marginBottom: 16 }}>
+                    <div style={{ fontSize: 11, fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 }}>
+                      Histórico automático do Motor
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+                      {automation.events.slice(0, 5).map(event => {
+                        const isError = ['failed', 'expired'].includes(event.status);
+                        const isSent = event.status === 'sent';
+                        const eventPresentation = getCrmAutomationPresentation(event.status);
+                        return (
+                          <div key={event.id} style={{
+                            padding: '8px 10px', borderRadius: 8, background: 'var(--bg-main)',
+                            border: '1px solid var(--border-light)', display: 'flex', gap: 10,
+                            alignItems: 'center', justifyContent: 'space-between',
+                          }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 7, minWidth: 0 }}>
+                              {isSent
+                                ? <CheckCircle style={{ width: 13, height: 13, color: '#059669', flexShrink: 0 }} />
+                                : isError
+                                  ? <AlertTriangle style={{ width: 13, height: 13, color: '#DC2626', flexShrink: 0 }} />
+                                  : <Clock style={{ width: 13, height: 13, color: '#2563EB', flexShrink: 0 }} />}
+                              <span style={{ fontSize: 12, color: 'var(--text-dark)' }}>{event.tool_name}</span>
+                              <span style={{ fontSize: 10, color: isError ? '#DC2626' : 'var(--text-muted)' }}>{eventPresentation.label}</span>
+                            </div>
+                            <span style={{ fontSize: 10, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+                              {fmtDatetime(event.sent_at || event.updated_at || event.created_at)}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
                 {/* Next action banner */}
                 {lead.proxima_acao_descricao && !lead.proxima_acao_concluida && (
                   <div style={{
@@ -890,6 +948,7 @@ function LeadRow({ lead, onClick, overdue, dueToday, isFila }) {
   const st = statusConfig(lead.status);
   const StIcon = st.icon;
   const journey = lead._journey;
+  const automation = lead._automation;
 
   const rawPhone = normPhone(lead.telefone);
   const hasPhone = Boolean(rawPhone && rawPhone.length >= 10);
@@ -946,6 +1005,22 @@ function LeadRow({ lead, onClick, overdue, dueToday, isFila }) {
                 {overdue && <strong>Atrasado · </strong>}{fmtDate(lead.proxima_acao_prazo)}
               </div>
             )}
+          </div>
+        ) : automation?.latest ? (
+          <div>
+            <div style={{
+              fontSize: 12, color: automation.color,
+              fontWeight: automation.requiresAttention ? 750 : 650,
+              display: 'flex', alignItems: 'center', gap: 4,
+            }}>
+              {automation.requiresAttention
+                ? <AlertTriangle style={{ width: 11, height: 11 }} />
+                : <Send style={{ width: 11, height: 11 }} />}
+              {automation.label}
+            </div>
+            <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>
+              {automation.detail}
+            </div>
           </div>
         ) : (
           <div>
@@ -1050,6 +1125,7 @@ export default function CrmInteressados() {
   const [leads, setLeads] = useState([]);
   const [clientes, setClientes] = useState([]);
   const [agendamentos, setAgendamentos] = useState([]);
+  const [automacoes, setAutomacoes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [aba, setAba] = useState('fila');
@@ -1102,13 +1178,15 @@ export default function CrmInteressados() {
         { data: leadsData, error: leadsErr },
         { data: clientsData },
         { data: appointmentsData },
+        { data: automationData },
       ] = await Promise.all([
-        fetchCrmLeads(), fetchClients(), fetchAppointments(),
+        fetchCrmLeads(), fetchClients(), fetchAppointments(), fetchCrmAutomationEvents(),
       ]);
       if (leadsErr) { setLoadError(true); }
       else { setLeads(leadsData || []); }
       setClientes(clientsData || []);
       setAgendamentos(appointmentsData || []);
+      setAutomacoes(automationData || []);
     } catch {
       setLoadError(true);
     }
@@ -1150,10 +1228,10 @@ export default function CrmInteressados() {
 
   // ── Filtering ──
 
-  const enrichedLeads = useMemo(
-    () => enrichCrmLeads(leads, clientes, agendamentos),
-    [leads, clientes, agendamentos]
-  );
+  const enrichedLeads = useMemo(() => {
+    const journeyLeads = enrichCrmLeads(leads, clientes, agendamentos);
+    return enrichCrmLeadsWithAutomation(journeyLeads, automacoes);
+  }, [leads, clientes, agendamentos, automacoes]);
 
   useEffect(() => {
     setSelectedLead(current => {
@@ -1343,7 +1421,7 @@ export default function CrmInteressados() {
       <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, marginBottom: 10 }}>
         <div>
           <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--text-dark)' }}>Visão automática do CRM</div>
-          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>Vendas, relacionamento e prioridades calculados pela Agenda.</div>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>A Agenda define a jornada; o Motor registra os acompanhamentos automáticos.</div>
         </div>
         {filtroJornada && (
           <button className="btn btn-ghost btn-sm" onClick={() => applyJourneyFilter(filtroJornada)} style={{ fontSize: 11 }}>
@@ -1358,7 +1436,7 @@ export default function CrmInteressados() {
         fontSize: 12, display: 'flex', alignItems: 'center', gap: 8, lineHeight: 1.5,
       }}>
         <CheckCircle style={{ width: 15, height: 15, flexShrink: 0 }} />
-        <span><strong>Regra provisória ativa:</strong> cada atendimento finalizado é considerado uma venda paga. Os valores abaixo vêm da Agenda e poderão ser substituídos pelo Financeiro integrado no futuro.</span>
+        <span><strong>Regra provisória ativa:</strong> cada atendimento finalizado é considerado uma venda paga. A Agenda comprova o avanço e o Motor registra mensagens programadas ou enviadas, sem precisar armazenar um inbox no ERP.</span>
       </div>
 
       <div className="grid-4 section-gap" style={{ gridTemplateColumns: 'repeat(4, minmax(0, 1fr))' }}>
@@ -1384,7 +1462,7 @@ export default function CrmInteressados() {
             <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>Da entrada no CRM até compra, recorrência e reativação.</div>
           </div>
           <span style={{ fontSize: 10, color: '#1E40AF', background: '#EFF6FF', border: '1px solid #BFDBFE', padding: '4px 8px', borderRadius: 99, fontWeight: 700 }}>
-            Fonte atual: Agenda
+            Jornada: Agenda · Follow-up: Motor
           </span>
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 8 }}>
