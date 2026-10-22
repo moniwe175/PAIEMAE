@@ -21,6 +21,7 @@ import {
   summarizeCrmRevenueFromAgenda,
 } from '../lib/crmJourney';
 import { enrichCrmLeadsWithAutomation, getCrmAutomationPresentation } from '../lib/crmAutomation';
+import CrmFunnelPanel from '../components/crm/CrmFunnelPanel';
 
 // ─── Constants ────────────────────────────────────────────────
 
@@ -1481,6 +1482,13 @@ export default function CrmInteressados() {
         </div>
         <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 8 }}>*Pagante = possui pelo menos um atendimento finalizado enquanto o Financeiro não está integrado.</div>
       </div>
+
+      <CrmFunnelPanel
+        leads={enrichedLeads}
+        clients={clientes}
+        appointments={agendamentos}
+        automationEvents={automacoes}
+      />
 
       <div style={{ marginBottom: 10 }}>
         <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--text-dark)' }}>Quem precisa de atenção</div>
