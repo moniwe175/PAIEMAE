@@ -6,6 +6,7 @@ import {
   CheckCircle, Clock, AlertTriangle, MessageSquare,
   ChevronRight, Link2, Send, Star, ArrowRight, Flag, ClipboardList,
   Check, X, Inbox, Archive, UserPlus, Filter, Camera,
+  BadgeDollarSign, Repeat2,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import {
@@ -17,6 +18,7 @@ import {
   CRM_JOURNEY_STATUS,
   enrichCrmLeads,
   matchesCrmJourneyFilter,
+  summarizeCrmRevenueFromAgenda,
 } from '../lib/crmJourney';
 
 // ─── Constants ────────────────────────────────────────────────
@@ -26,7 +28,7 @@ const STATUS_LIST = [
   { key: 'aguardando_cliente',  label: 'Aguard. cliente',   badge: 'badge-info',    color: '#7A95B8', icon: Clock },
   { key: 'retorno_agendado',    label: 'Retorno marcado',   badge: 'badge-info',    color: '#5B7FA6', icon: Calendar },
   { key: 'agendado',            label: 'Agendado',          badge: 'badge-success', color: '#6B9B7A', icon: CheckCircle },
-  { key: 'encerrado_ganho',     label: 'Concluído',         badge: 'badge-success', color: '#4A8A5A', icon: CheckCircle },
+  { key: 'encerrado_ganho',     label: 'Venda pela Agenda', badge: 'badge-success', color: '#4A8A5A', icon: CheckCircle },
   { key: 'encerrado_perdido',   label: 'Perdido',           badge: 'badge-danger',  color: '#C0706A', icon: X },
 ];
 
@@ -53,6 +55,7 @@ const JOURNEY_FILTER_LABELS = {
   em_risco: 'Clientes em risco ou inativas',
   agendadas: 'Com agendamento futuro',
   clientes: 'Clientes atendidas e recorrentes',
+  pos_venda: 'Pós-atendimento dos últimos 7 dias',
 };
 
 // ─── Helpers ──────────────────────────────────────────────────
@@ -142,6 +145,18 @@ function openInstagram(instagram) {
   const handle = (instagram || '').replace(/^@/, '').trim();
   if (!handle) return;
   window.open(`https://instagram.com/${encodeURIComponent(handle)}`, '_blank', 'noopener,noreferrer');
+}
+
+function compareAutomaticPriority(a, b) {
+  const priority = Number(b?._journey?.recommendation?.priority || 0)
+    - Number(a?._journey?.recommendation?.priority || 0);
+  if (priority !== 0) return priority;
+
+  const aDate = a?._journey?.recommendation?.dueDate || a?._journey?.nextAppointmentDate || '9999-12-31';
+  const bDate = b?._journey?.recommendation?.dueDate || b?._journey?.nextAppointmentDate || '9999-12-31';
+  const dateOrder = aDate.localeCompare(bDate);
+  if (dateOrder !== 0) return dateOrder;
+  return String(a?.created_at || '').localeCompare(String(b?.created_at || ''));
 }
 
 // ─── Nova lead modal ──────────────────────────────────────────
@@ -607,11 +622,11 @@ function LeadDrawer({ lead, onClose, onUpdate, clientes = [], agendamentos = [],
                 </div>
               </div>
               <div>
-                <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>Histórico</div>
+                <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>Receita pela Agenda</div>
                 <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-dark)', marginTop: 3 }}>
                   {journey.completedCount} atendimento(s)
                 </div>
-                <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>{fmtMoney(journey.totalSpent)}</div>
+                <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>{fmtMoney(journey.revenueFromAgenda)}</div>
               </div>
             </div>
           )}
@@ -770,8 +785,24 @@ function LeadDrawer({ lead, onClose, onUpdate, clientes = [], agendamentos = [],
             {/* ── Próxima ação ── */}
             {activeTab === 'proxima_acao' && (
               <>
+                {journey?.recommendation && (
+                  <div style={{
+                    padding: '12px 14px', marginBottom: 16, borderRadius: 10,
+                    background: journey.background, border: `1px solid ${journey.color}33`,
+                  }}>
+                    <div style={{ fontSize: 10, fontWeight: 800, color: journey.color, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                      Próxima ação sugerida automaticamente
+                    </div>
+                    <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--text-dark)', marginTop: 5 }}>
+                      {journey.recommendation.label}
+                    </div>
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4, lineHeight: 1.5 }}>
+                      {journey.recommendation.reason}
+                    </div>
+                  </div>
+                )}
                 <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 16, lineHeight: 1.6 }}>
-                  Defina o que precisa acontecer para avançar com este interessado.
+                  A recomendação acima vem da Agenda. Use os campos abaixo somente quando uma conversa exigir um combinado específico.
                 </p>
                 {lead.proxima_acao_concluida && (
                   <div style={{ background: '#F0FDF4', border: '1px solid #6B9B7A', borderRadius: 8, padding: '10px 14px', marginBottom: 16, fontSize: 13, color: '#166534', display: 'flex', gap: 8 }}>
@@ -917,9 +948,20 @@ function LeadRow({ lead, onClick, overdue, dueToday, isFila }) {
             )}
           </div>
         ) : (
-          <span style={{ fontSize: 11, color: 'var(--text-muted)', fontStyle: 'italic' }}>
-            {lead.proxima_acao_concluida ? 'Ação concluída' : 'Sem ação definida'}
-          </span>
+          <div>
+            <div style={{
+              fontSize: 12,
+              color: journey?.recommendation?.priority >= 3 ? journey.color : 'var(--text-medium)',
+              fontWeight: journey?.recommendation?.priority >= 3 ? 700 : 500,
+              display: 'flex', alignItems: 'center', gap: 4,
+            }}>
+              {journey?.recommendation?.requiresAction && <Clock style={{ width: 11, height: 11 }} />}
+              {journey?.recommendation?.label || 'Acompanhar relacionamento'}
+            </div>
+            <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>
+              Automática pela Agenda
+            </div>
+          </div>
         )}
       </td>
       <td>
@@ -1036,7 +1078,7 @@ export default function CrmInteressados() {
       setFiltroArquivados(false);
       setFiltroJornada(null);
       setFiltroOrigemParam(f);
-    } else if (['sem_agendamento', 'faltaram', 'em_risco', 'agendadas', 'clientes'].includes(f)) {
+    } else if (['sem_agendamento', 'faltaram', 'em_risco', 'agendadas', 'clientes', 'pos_venda'].includes(f)) {
       setAba(f === 'agendadas' ? 'agendados' : 'resultados');
       setFiltroSemAcao(false);
       setFiltroArquivados(false);
@@ -1153,31 +1195,40 @@ export default function CrmInteressados() {
   }, [enrichedLeads, busca, filtroMeus, filtroSemAcao, filtroArquivados, filtroJornada, filtroOrigemParam, user]);
 
   const byAba = useMemo(() => {
+    const prioritized = [...baseLeads].sort(compareAutomaticPriority);
     return {
-      fila:      baseLeads.filter(l => l.status === 'aguardando_resposta'),
-      agendados: baseLeads.filter(l => l.status === 'agendado'),
-      atendidos: baseLeads.filter(l => l.status === 'encerrado_ganho'),
-      perdidos:  baseLeads.filter(l => l.status === 'encerrado_perdido'),
-      resultados: baseLeads,
+      // As abas seguem a jornada atual, não apenas o primeiro atendimento.
+      // Assim, um cliente antigo com nova consulta volta corretamente para Agendados.
+      fila:      prioritized.filter(l => l._journey?.key === 'interessada'),
+      agendados: prioritized.filter(l => l._journey?.key === 'agendada'),
+      atendidos: prioritized.filter(l => l._journey?.isPayingClient && l._journey?.key !== 'agendada'),
+      perdidos:  prioritized.filter(l => l.status === 'encerrado_perdido' && !l._journey?.isPayingClient),
+      resultados: prioritized,
     };
   }, [baseLeads]);
 
   const abaLeads = byAba[aba] || [];
 
+  const revenueSummary = useMemo(
+    () => summarizeCrmRevenueFromAgenda(enrichedLeads),
+    [enrichedLeads]
+  );
+
   // Stats use raw leads (not filtered) for badge accuracy
   const stats = useMemo(() => {
     const activeLeads = enrichedLeads.filter(l => !l.arquivado);
-    const openLeads = activeLeads.filter(l => !['encerrado_ganho', 'encerrado_perdido'].includes(l.status));
+    const openLeads = activeLeads.filter(l => !l._journey?.isPayingClient && l.status !== 'encerrado_perdido');
     return {
-      fila:       activeLeads.filter(l => l.status === 'aguardando_resposta').length,
+      fila:       activeLeads.filter(l => l._journey?.key === 'interessada').length,
       atrasados:  activeLeads.filter(l => isOverdue(l)).length,
       hoje:       activeLeads.filter(l => isDueToday(l) && !['encerrado_ganho','encerrado_perdido'].includes(l.status)).length,
-      agendados:  activeLeads.filter(l => l.status === 'agendado').length,
-      ganhos:     enrichedLeads.filter(l => l.status === 'encerrado_ganho').length,
+      agendados:  activeLeads.filter(l => l._journey?.key === 'agendada').length,
+      ganhos:     activeLeads.filter(l => l._journey?.isPayingClient).length,
       semAgendamento: openLeads.filter(l => l._journey?.key === 'interessada').length,
-      faltaram: openLeads.filter(l => l._journey?.key === 'faltou').length,
-      emRisco: openLeads.filter(l => ['em_risco', 'inativa'].includes(l._journey?.key)).length,
-      clientes: openLeads.filter(l => ['cliente', 'recorrente'].includes(l._journey?.key)).length,
+      faltaram: activeLeads.filter(l => l._journey?.key === 'faltou').length,
+      emRisco: activeLeads.filter(l => l._journey?.isPayingClient && ['em_risco', 'inativa'].includes(l._journey?.key)).length,
+      posVenda: activeLeads.filter(l => matchesCrmJourneyFilter(l, 'pos_venda')).length,
+      clientes: activeLeads.filter(l => l._journey?.isPayingClient).length,
       semAcao:    activeLeads.filter(l => (
         !['encerrado_ganho', 'encerrado_perdido', 'arquivado'].includes(l.status) &&
         (!l.proxima_acao_prazo || !l.proxima_acao_descricao || !l.proxima_acao_descricao.trim() || l.proxima_acao_concluida === true)
@@ -1231,7 +1282,7 @@ export default function CrmInteressados() {
           <div className="page-header-label"><UserPlus />CRM</div>
           <h1 className="page-title">Interessados</h1>
           <p className="page-subtitle">
-            A Agenda atualiza vínculos e etapas automaticamente · {stats.fila} para responder · {stats.agendados} agendados
+            Da primeira conversa ao retorno · a Agenda atualiza a jornada automaticamente
           </p>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
@@ -1291,8 +1342,8 @@ export default function CrmInteressados() {
       {/* Filas automáticas baseadas na Agenda */}
       <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, marginBottom: 10 }}>
         <div>
-          <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--text-dark)' }}>Quem precisa de atenção</div>
-          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>Listas atualizadas sozinhas pelos agendamentos e atendimentos.</div>
+          <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--text-dark)' }}>Visão automática do CRM</div>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>Vendas, relacionamento e prioridades calculados pela Agenda.</div>
         </div>
         {filtroJornada && (
           <button className="btn btn-ghost btn-sm" onClick={() => applyJourneyFilter(filtroJornada)} style={{ fontSize: 11 }}>
@@ -1300,12 +1351,70 @@ export default function CrmInteressados() {
           </button>
         )}
       </div>
+
+      <div role="note" style={{
+        marginBottom: 16, padding: '10px 14px', borderRadius: 10,
+        background: '#EFF6FF', border: '1px solid #BFDBFE', color: '#1E40AF',
+        fontSize: 12, display: 'flex', alignItems: 'center', gap: 8, lineHeight: 1.5,
+      }}>
+        <CheckCircle style={{ width: 15, height: 15, flexShrink: 0 }} />
+        <span><strong>Regra provisória ativa:</strong> cada atendimento finalizado é considerado uma venda paga. Os valores abaixo vêm da Agenda e poderão ser substituídos pelo Financeiro integrado no futuro.</span>
+      </div>
+
+      <div className="grid-4 section-gap" style={{ gridTemplateColumns: 'repeat(4, minmax(0, 1fr))' }}>
+        {[
+          { label: 'Para responder', val: revenueSummary.waitingResponse, detail: 'interessados sem agendamento', cor: '#D97706', icon: Inbox },
+          { label: 'Agenda futura', val: revenueSummary.scheduled, detail: 'pessoas com horário ativo', cor: '#2563EB', icon: Calendar },
+          { label: 'Vendas do CRM no mês', val: revenueSummary.salesThisMonth, detail: 'atendimentos finalizados e vinculados', cor: '#059669', icon: CheckCircle },
+          { label: 'Receita atribuída ao CRM', val: fmtMoney(revenueSummary.revenueThisMonth), detail: 'valor informado na Agenda neste mês', cor: '#047857', icon: BadgeDollarSign },
+        ].map(({ label, val, detail, cor, icon: Icon }) => (
+          <div className="stat-card" key={label}>
+            <div className="stat-card-icon" style={{ background: `${cor}18` }}><Icon style={{ color: cor }} /></div>
+            <div className="stat-value" style={{ color: cor }}>{val}</div>
+            <div className="stat-label">{label}</div>
+            <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4 }}>{detail}</div>
+          </div>
+        ))}
+      </div>
+
+      <div className="card section-gap" style={{ padding: '14px 18px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 12, flexWrap: 'wrap' }}>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 800, color: 'var(--text-dark)' }}>Máquina de relacionamento</div>
+            <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>Da entrada no CRM até compra, recorrência e reativação.</div>
+          </div>
+          <span style={{ fontSize: 10, color: '#1E40AF', background: '#EFF6FF', border: '1px solid #BFDBFE', padding: '4px 8px', borderRadius: 99, fontWeight: 700 }}>
+            Fonte atual: Agenda
+          </span>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 8 }}>
+          {[
+            { label: 'Base do CRM', value: revenueSummary.leads },
+            { label: 'Clientes pagantes*', value: revenueSummary.payingClients },
+            { label: 'Conversão', value: revenueSummary.conversionRate == null ? '—' : `${revenueSummary.conversionRate.toFixed(1)}%` },
+            { label: 'Recorrentes', value: revenueSummary.recurringClients },
+            { label: 'Precisam reativar', value: revenueSummary.atRiskClients },
+          ].map(item => (
+            <div key={item.label} style={{ padding: '10px 12px', borderRadius: 9, background: 'var(--bg-main)', border: '1px solid var(--border-light)' }}>
+              <div style={{ fontSize: 18, fontWeight: 850, color: 'var(--text-dark)' }}>{item.value}</div>
+              <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>{item.label}</div>
+            </div>
+          ))}
+        </div>
+        <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 8 }}>*Pagante = possui pelo menos um atendimento finalizado enquanto o Financeiro não está integrado.</div>
+      </div>
+
+      <div style={{ marginBottom: 10 }}>
+        <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--text-dark)' }}>Quem precisa de atenção</div>
+        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>As filas abaixo mudam sozinhas conforme a Agenda avança.</div>
+      </div>
+
       <div className="grid-4 section-gap" style={{ gridTemplateColumns: 'repeat(4, minmax(0, 1fr))' }}>
         {[
           { key: 'sem_agendamento', label: 'Sem agendamento', val: stats.semAgendamento, cor: '#D97706', icon: Inbox },
           { key: 'faltaram', label: 'Faltaram', val: stats.faltaram, cor: '#DC2626', icon: AlertTriangle },
-          { key: 'em_risco', label: 'Em risco / inativas', val: stats.emRisco, cor: '#C2410C', icon: Clock },
-          { key: 'agendadas', label: 'Agenda futura', val: stats.agendados, cor: '#2563EB', icon: Calendar },
+          { key: 'pos_venda', label: 'Pós-atendimento', val: stats.posVenda, cor: '#059669', icon: Repeat2 },
+          { key: 'em_risco', label: 'Reativar clientes', val: stats.emRisco, cor: '#C2410C', icon: Clock },
         ].map(({ key, label, val, cor, icon: Icon }) => (
           <button
             type="button"
@@ -1346,7 +1455,7 @@ export default function CrmInteressados() {
           <Archive style={{ width: 12, height: 12 }} /> Arquivados
         </button>
         {filtroJornada && (
-          <span style={{ fontSize: 11, color: CRM_JOURNEY_STATUS[filtroJornada === 'faltaram' ? 'faltou' : filtroJornada === 'agendadas' ? 'agendada' : filtroJornada === 'sem_agendamento' ? 'interessada' : 'em_risco']?.color, fontWeight: 700 }}>
+          <span style={{ fontSize: 11, color: CRM_JOURNEY_STATUS[filtroJornada === 'faltaram' ? 'faltou' : filtroJornada === 'agendadas' ? 'agendada' : filtroJornada === 'sem_agendamento' ? 'interessada' : filtroJornada === 'pos_venda' ? 'cliente' : 'em_risco']?.color, fontWeight: 700 }}>
             {JOURNEY_FILTER_LABELS[filtroJornada]}
           </span>
         )}

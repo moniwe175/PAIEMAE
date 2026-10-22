@@ -7,6 +7,7 @@ import {
   findCrmClient,
   matchesCrmJourneyFilter,
   normalizeCrmPhone,
+  summarizeCrmRevenueFromAgenda,
 } from '../src/lib/crmJourney.js';
 
 const TODAY = '2026-10-19';
@@ -46,7 +47,8 @@ test('mantém como interessada quando ainda não existe agendamento', () => {
   const journey = deriveCrmJourney(lead(), clients, [], TODAY);
   assert.equal(journey.key, 'interessada');
   assert.equal(journey.isAutomaticallyMatched, true);
-  assert.equal(journey.recommendation.label, 'Conversar e agendar');
+  assert.equal(journey.recommendation.label, 'Responder e tentar agendar');
+  assert.equal(journey.recommendation.requiresAction, true);
 });
 
 test('agendamento futuro válido transforma a pessoa em agendada', () => {
@@ -72,6 +74,9 @@ test('primeiro atendimento finalizado transforma a pessoa em cliente', () => {
   assert.equal(journey.key, 'cliente');
   assert.equal(journey.completedCount, 1);
   assert.equal(journey.totalSpent, 350);
+  assert.equal(journey.revenueFromAgenda, 350);
+  assert.equal(journey.isPayingClient, true);
+  assert.equal(journey.revenueSource, 'agenda_finalizada');
 });
 
 test('dois atendimentos finalizados em 90 dias qualificam como recorrente', () => {
@@ -89,7 +94,7 @@ test('falta mais recente sem novo horário entra na fila de reagendamento', () =
     appointment('a2', '2026-10-15', 'cliente_faltou'),
   ], TODAY);
   assert.equal(journey.key, 'faltou');
-  assert.equal(journey.recommendation.label, 'Chamar para reagendar');
+  assert.equal(journey.recommendation.label, 'Chamar para reagendar hoje');
 });
 
 test('cliente vira em risco após 45 dias e inativa após 120 dias', () => {
@@ -104,14 +109,15 @@ test('cliente vira em risco após 45 dias e inativa após 120 dias', () => {
   assert.equal(inactive.key, 'inativa');
 });
 
-test('lead sem agendar há 30 dias vira inativa e os filtros usam a jornada derivada', () => {
+test('lead sem agendar há 30 dias vira inativa sem ser confundida com cliente para reativação', () => {
   const enriched = enrichCrmLeads([
     lead({ created_at: '2026-08-01T12:00:00Z' }),
     lead({ id: 'lead-2', telefone: '11911110000' }),
   ], clients, [], TODAY);
 
   assert.equal(enriched[0]._journey.key, 'inativa');
-  assert.equal(matchesCrmJourneyFilter(enriched[0], 'em_risco'), true);
+  assert.equal(enriched[0]._journey.isPayingClient, false);
+  assert.equal(matchesCrmJourneyFilter(enriched[0], 'em_risco'), false);
   assert.equal(matchesCrmJourneyFilter(enriched[1], 'sem_agendamento'), true);
 });
 
@@ -122,6 +128,50 @@ test('um novo horário prevalece sobre uma falta anterior', () => {
   ], TODAY);
   assert.equal(journey.key, 'agendada');
   assert.equal(journey.nextAppointment.id, 'a2');
+});
+
+test('cliente já convertido com novo horário volta à jornada agendada', () => {
+  const journey = deriveCrmJourney(lead(), clients, [
+    appointment('done', '2026-10-10', 'finalizado', { valor: 500 }),
+    appointment('future', '2026-10-25', 'confirmado', { valor: 700 }),
+  ], TODAY);
+
+  assert.equal(journey.pipelineStatus, 'encerrado_ganho', 'A conversão histórica continua preservada');
+  assert.equal(journey.key, 'agendada', 'A fila operacional deve acompanhar o próximo horário');
+  assert.equal(journey.nextAppointment.id, 'future');
+  assert.equal(journey.isPayingClient, true);
+});
+
+test('resume vendas e receita mensal pela Agenda sem duplicar appointments', () => {
+  const sharedAppointments = [
+    appointment('done-1', '2026-10-10', 'finalizado', { valor: 500 }),
+    appointment('done-2', '2026-10-12', 'finalizado', { notes: JSON.stringify({ valor: 300 }) }),
+    appointment('old', '2026-09-30', 'finalizado', { valor: 900 }),
+  ];
+  const duplicateLead = lead({ id: 'lead-duplicate', client_id: 10 });
+  const enriched = enrichCrmLeads([lead({ client_id: 10 }), duplicateLead], clients, sharedAppointments, TODAY);
+  const summary = summarizeCrmRevenueFromAgenda(enriched, TODAY);
+
+  assert.equal(summary.salesThisMonth, 2);
+  assert.equal(summary.revenueThisMonth, 800);
+  assert.equal(summary.payingClients, 1);
+  assert.equal(summary.source, 'agenda_finalizada');
+});
+
+test('filtro de pós-venda usa cliente recente sem novo agendamento', () => {
+  const [recent, old] = enrichCrmLeads([
+    lead({ id: 'recent' }),
+    lead({ id: 'old', telefone: '11988880000' }),
+  ], [
+    ...clients,
+    { id: 20, name: 'Ana', phone: '11988880000' },
+  ], [
+    appointment('recent-done', '2026-10-18', 'finalizado'),
+    appointment('old-done', '2026-08-01', 'finalizado', { client_id: 20, client_phone: '11988880000' }),
+  ], TODAY);
+
+  assert.equal(matchesCrmJourneyFilter(recent, 'pos_venda'), true);
+  assert.equal(matchesCrmJourneyFilter(old, 'pos_venda'), false);
 });
 
 test('pipeline persistido segue as quatro regras automáticas e a precedência da Agenda', () => {

@@ -302,6 +302,10 @@ test('CRM exibe somente as quatro abas automáticas e remove qualificação/stat
 
   assert.ok(code.includes('Etapa automática · atualizada pela Agenda'));
   assert.ok(code.includes('Corrigir vínculo'));
+  assert.ok(code.includes('Regra provisória ativa:'));
+  assert.ok(code.includes('Receita atribuída ao CRM'));
+  assert.ok(code.includes('Máquina de relacionamento'));
+  assert.ok(code.includes("l._journey?.key === 'agendada'"), 'Cliente antigo com novo horário deve voltar para Agendados');
   assert.ok(!code.includes("activeTab === 'qualificacao'"), 'Bloco manual qual_* não deve ser renderizado');
   assert.ok(!code.includes('handleStatusChange'), 'Status não pode mais ser alterado manualmente');
   assert.ok(!code.includes('Já respondi'), 'Ação não pode escrever status manual');
@@ -326,4 +330,8 @@ test('migração automática cria função, triggers, histórico e backfill idem
   const service = fs.readFileSync(path.resolve('src/services/supabaseService.js'), 'utf8');
   const crmFetch = service.slice(service.indexOf('export async function fetchCrmLeads'), service.indexOf('export async function insertCrmLead'));
   assert.match(crmFetch, /rpc\('fn_crm_sync_all_leads_from_agenda'\)/i, 'Abrir o CRM deve aplicar também a regra temporal de 30 dias');
+  assert.match(crmFetch, /fetchAllPages/i, 'CRM deve paginar para não cortar a base em 1.000 leads');
+
+  const appointmentsFetch = service.slice(service.indexOf('export async function fetchAppointments'), service.indexOf('export async function insertAppointment'));
+  assert.match(appointmentsFetch, /fetchAllPages/i, 'Agenda deve paginar para o CRM receber todo o histórico');
 });

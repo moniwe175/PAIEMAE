@@ -8,6 +8,17 @@ function handleError(error, fallback = null) {
   return { data: fallback, error };
 }
 
+async function fetchAllPages(makeQuery, pageSize = 1000) {
+  const rows = [];
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await makeQuery(from, from + pageSize - 1);
+    if (error) return { data: [], error };
+    const page = data || [];
+    rows.push(...page);
+    if (page.length < pageSize) return { data: rows, error: null };
+  }
+}
+
 /**
  * Dia calendário ATUAL no fuso da clínica (America/Sao_Paulo), YYYY-MM-DD.
  * NUNCA usar UTC (toISOString) para caixa/planilha: a partir das 21h de
@@ -1217,18 +1228,12 @@ export function onAuthStateChange(callback) {
 export async function fetchClients() {
   if (!isSupabaseConfigured()) return handleError('Supabase not configured', []);
   try {
-    // Fetch all clients in parallel batches of 1000 to bypass Supabase row limit
-    const [batch1, batch2, batch3] = await Promise.all([
-      supabase.from('clients').select('*').order('name', { ascending: true }).range(0, 999),
-      supabase.from('clients').select('*').order('name', { ascending: true }).range(1000, 1999),
-      supabase.from('clients').select('*').order('name', { ascending: true }).range(2000, 2999),
-    ]);
-    const allData = [
-      ...(batch1.data || []),
-      ...(batch2.data || []),
-      ...(batch3.data || []),
-    ];
-    return { data: allData, error: null };
+    return await fetchAllPages((from, to) => supabase
+      .from('clients')
+      .select('*')
+      .order('name', { ascending: true })
+      .order('id', { ascending: true })
+      .range(from, to));
   } catch (err) {
     return handleError(err, []);
   }
@@ -1271,11 +1276,13 @@ export async function deleteClient(id) {
 
 export async function fetchAppointments() {
   if (!isSupabaseConfigured()) return handleError('Supabase not configured', []);
-  const { data, error } = await supabase
+  const { data, error } = await fetchAllPages((from, to) => supabase
     .from('appointments')
     .select('*')
     .order('appointment_date', { ascending: true })
-    .order('appointment_time', { ascending: true });
+    .order('appointment_time', { ascending: true })
+    .order('id', { ascending: true })
+    .range(from, to));
   if (error) return handleError(error, []);
   return { data: data || [], error: null };
 }
@@ -1569,10 +1576,12 @@ export async function fetchCrmLeads() {
   if (syncError && !['42883', 'PGRST202'].includes(syncError.code)) {
     console.warn('[CRM] sincronização automática não executada:', syncError.message);
   }
-  const { data, error } = await supabase
+  const { data, error } = await fetchAllPages((from, to) => supabase
     .from('crm_leads')
     .select('*')
-    .order('created_at', { ascending: false });
+    .order('created_at', { ascending: false })
+    .order('id', { ascending: false })
+    .range(from, to));
   if (error) return handleError(error, []);
   return { data: data || [], error: null };
 }
