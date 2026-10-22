@@ -70,12 +70,12 @@ const STATUS_CONFIG = {
 
 // ─── Campaign Modal (Create / Edit) ────────────────────────────
 
-function CampanhaModal({ onClose, onSave, campanha }) {
+function CampanhaModal({ onClose, onSave, campanha, presetChannel = '' }) {
   const isEdit = !!campanha;
   const defaultLandingUrl = '';
   const [form, setForm] = useState({
     nome: campanha?.nome || '',
-    canal: campanha?.canal || 'WhatsApp',
+    canal: campanha?.canal || presetChannel || 'WhatsApp',
     mensagem: campanha?.mensagem || '',
     status: campanha?.status || 'rascunho',
     data_inicio: campanha?.data_inicio || '',
@@ -90,8 +90,8 @@ function CampanhaModal({ onClose, onSave, campanha }) {
     investimento_real: campanha?.investimento_real || 0,
     landing_url: campanha?.landing_url || defaultLandingUrl,
     objetivo: campanha?.objetivo || 'Agendamentos',
-    utm_source: campanha?.utm_source || '',
-    utm_medium: campanha?.utm_medium || '',
+    utm_source: campanha?.utm_source || (presetChannel === 'Meta Ads' ? 'meta' : presetChannel === 'Google Ads' ? 'google' : ''),
+    utm_medium: campanha?.utm_medium || (presetChannel === 'Meta Ads' ? 'paid_social' : presetChannel === 'Google Ads' ? 'cpc' : ''),
     utm_campaign: campanha?.utm_campaign || '',
     utm_content: campanha?.utm_content || '',
     utm_term: campanha?.utm_term || '',
@@ -550,7 +550,7 @@ export default function Marketing() {
 
   // ── Campaign CRUD ──
   const handleSaveCampaign = async (form) => {
-    const isEdit = modal && modal !== 'new';
+    const isEdit = modal && !(typeof modal === 'string' && modal.startsWith('new'));
     if (isEdit) {
       const { data, error } = await updateCampaign(modal.id, form);
       if (error) {
@@ -681,7 +681,8 @@ export default function Marketing() {
       {/* Campaign Modals */}
       {modal && (
         <CampanhaModal
-          campanha={modal === 'new' ? null : modal}
+          campanha={typeof modal === 'string' && modal.startsWith('new') ? null : modal}
+          presetChannel={modal === 'new-meta' ? 'Meta Ads' : modal === 'new-google' ? 'Google Ads' : ''}
           onClose={() => setModal(null)}
           onSave={handleSaveCampaign}
         />
@@ -810,6 +811,21 @@ export default function Marketing() {
       {/* ────────────────── SUB-ABA 1: CAMPANHAS ────────────────── */}
       {subTab === 'campanhas' && (
         <>
+          <div className="card section-gap" style={{ padding: 16, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap', borderLeft: '4px solid #2563EB' }}>
+            <div>
+              <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--text-dark)', marginBottom: 4 }}>Anúncios pagos e rastreamento</div>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Crie a campanha, gere o link UTM e acompanhe até o atendimento e a receita.</div>
+            </div>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <button className="btn btn-ghost" style={{ borderColor: '#93C5FD', color: '#1D4ED8' }} onClick={() => setModal('new-meta')}>
+                <Target style={{ width: 15 }} />Criar Meta Ads
+              </button>
+              <button className="btn btn-ghost" style={{ borderColor: '#93C5FD', color: '#1D4ED8' }} onClick={() => setModal('new-google')}>
+                <Globe2 style={{ width: 15 }} />Criar Google Ads
+              </button>
+              <span className="badge badge-success" style={{ alignSelf: 'center' }}>UTM nativa ativa</span>
+            </div>
+          </div>
           {!attributionReady && (
             <div role="alert" className="card" style={{ marginBottom: 16, borderColor: '#F59E0B', background: '#FFFBEB', color: '#92400E', fontSize: 13 }}>
               <strong>Rastreamento preparado, aguardando ativação no banco.</strong> Execute o arquivo <code>marketing_attribution_migration.sql</code> no Supabase para começar a registrar UTMs e resultados reais.
@@ -921,6 +937,12 @@ export default function Marketing() {
               <div className="empty-state">
                 <Megaphone />
                 <p>{campanhas.length === 0 ? 'Nenhuma campanha criada ainda. Clique em "Nova Campanha" para começar.' : 'Nenhuma campanha encontrada com os filtros atuais.'}</p>
+                {campanhas.length === 0 && (
+                  <div style={{ display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'wrap', marginTop: 8 }}>
+                    <button className="btn btn-primary btn-sm" onClick={() => setModal('new-meta')}><Target />Meta Ads</button>
+                    <button className="btn btn-ghost btn-sm" onClick={() => setModal('new-google')}><Globe2 />Google Ads</button>
+                  </div>
+                )}
               </div>
             ) : (
               <div className="table-wrapper">
