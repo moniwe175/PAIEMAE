@@ -937,12 +937,6 @@ export default function Marketing() {
               <div className="empty-state">
                 <Megaphone />
                 <p>{campanhas.length === 0 ? 'Nenhuma campanha criada ainda. Clique em "Nova Campanha" para começar.' : 'Nenhuma campanha encontrada com os filtros atuais.'}</p>
-                {campanhas.length === 0 && (
-                  <div style={{ display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'wrap', marginTop: 8 }}>
-                    <button className="btn btn-primary btn-sm" onClick={() => setModal('new-meta')}><Target />Meta Ads</button>
-                    <button className="btn btn-ghost btn-sm" onClick={() => setModal('new-google')}><Globe2 />Google Ads</button>
-                  </div>
-                )}
               </div>
             ) : (
               <div className="table-wrapper">
