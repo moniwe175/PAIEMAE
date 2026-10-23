@@ -1,8 +1,8 @@
 /* eslint-disable react/prop-types */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  AlertTriangle, BarChart3, CheckCircle2, CircleDollarSign,
-  Download, FileSpreadsheet, Landmark, Loader2, Plus, Save, Settings2, Trash2, Upload, X,
+  Activity, AlertTriangle, BarChart3, CheckCircle2, CircleDollarSign,
+  Download, FileSpreadsheet, Landmark, Loader2, Plus, Save, Settings2, Target, Trash2, Upload, X,
 } from 'lucide-react';
 import { buildFinancialHealth, deriveMonthlyCosts, FINANCIAL_TARGETS } from '../../lib/financialHealth';
 import { FINANCIAL_CSV_TEMPLATE, parseFinancialCsv } from '../../lib/financialCsv';
@@ -60,6 +60,54 @@ function Metric({ title, value, detail, status = 'real' }) {
   </div>;
 }
 
+function HealthGauge({ health }) {
+  const score = health.score ?? 0;
+  const angle = Math.PI - (score / 100) * Math.PI;
+  const pointerX = 110 + Math.cos(angle) * 69;
+  const pointerY = 106 - Math.sin(angle) * 69;
+  return <div className="fh-health-gauge">
+    <svg viewBox="0 0 220 126" role="img" aria-label={health.ready ? `Saude financeira: ${score} de 100` : 'Saude financeira aguardando dados'}>
+      <defs><linearGradient id="fh-health-gradient" x1="0" x2="1"><stop offset="0%" stopColor="#d45151"/><stop offset="48%" stopColor="#e7a23d"/><stop offset="72%" stopColor="#d5b934"/><stop offset="100%" stopColor="#4a9a68"/></linearGradient></defs>
+      <path className="fh-gauge-track" d="M 20 106 A 90 90 0 0 1 200 106"/>
+      <path className={`fh-gauge-color ${health.ready ? '' : 'muted'}`} d="M 20 106 A 90 90 0 0 1 200 106" stroke="url(#fh-health-gradient)"/>
+      {health.ready && <><line className="fh-gauge-pointer" x1="110" y1="106" x2={pointerX} y2={pointerY}/><circle className="fh-gauge-center" cx="110" cy="106" r="7"/></>}
+      <text className="fh-gauge-value" x="110" y="88" textAnchor="middle">{health.ready ? score : '—'}</text>
+      <text className="fh-gauge-unit" x="110" y="103" textAnchor="middle">{health.ready ? 'de 100' : 'sem nota'}</text>
+    </svg>
+    <div className="fh-gauge-labels"><span>Crítico</span><span>Atenção</span><span>Saudável</span></div>
+  </div>;
+}
+
+function BusinessHealthBoard({ health }) {
+  const { businessHealth, guidance, dre, quality } = health;
+  const reachedTarget = guidance.healthyRevenue !== null && dre.netRevenue >= guidance.healthyRevenue;
+  return <div className="fh-health-board">
+    <div className="fh-panel fh-health-score">
+      <div className="fh-panel-title"><Activity size={18}/> Nível de saúde do negócio</div>
+      <HealthGauge health={businessHealth}/>
+      <div className={`fh-health-status ${businessHealth.ready ? 'ready' : 'pending'}`}>
+        <strong>{businessHealth.label}</strong><span>{businessHealth.detail}</span>
+      </div>
+      {!businessHealth.ready && <p className="fh-health-explanation">A nota será liberada quando o fechamento chegar a 95%: custos, taxas, caixa e contas precisam estar conferidos. Hoje está em {quality.score}%.</p>}
+    </div>
+    <div className="fh-panel fh-revenue-guide">
+      <div className="fh-panel-title"><Target size={18}/> Quanto precisamos faturar</div>
+      {!guidance.ready ? <div className="fh-guidance-pending"><strong>Ainda não é possível calcular com segurança</strong><p>Preencha custos fixos e variáveis, impostos, taxas, pró-labore e dívidas. Usar somente a receita importada criaria uma meta falsa.</p></div>
+        : guidance.marginInsufficient ? <div className="fh-guidance-pending danger"><strong>A margem atual não sustenta a meta</strong><p>Antes de buscar mais volume, revise preços, comissões, insumos, impostos e taxas. Com esta margem, faturar mais pode não gerar caixa suficiente.</p></div>
+          : <div className="fh-guidance-grid">
+            <div><span>Mínimo para não ter prejuízo</span><strong>{money(guidance.breakEvenRevenue)}</strong><small>ponto de equilíbrio: cobre custos, pró-labore e dívidas</small></div>
+            <div className="highlight"><span>Meta mensal saudável</span><strong>{money(guidance.healthyRevenue)}</strong><small>inclui margem EBITDA, caixa e 20% de segurança</small></div>
+            <div><span>{reachedTarget ? 'Acima da meta no mês' : 'Falta para a meta do mês'}</span><strong className={reachedTarget ? 'positive' : ''}>{reachedTarget ? money(dre.netRevenue - guidance.healthyRevenue) : money(guidance.gapToHealthyRevenue)}</strong><small>receita líquida atual: {money(dre.netRevenue)}</small></div>
+          </div>}
+      <div className="fh-health-timeline">
+        <div><strong>{guidance.consecutiveHealthyMonths} / {guidance.healthyMonthsRequired} meses</strong><span>Para considerar saudável</span><small>meses fechados seguidos acima da meta e com caixa positivo</small></div>
+        <div><strong>{guidance.consecutiveHealthyMonths} / {guidance.sustainableMonthsRequired} meses</strong><span>Para considerar sustentável</span><small>6 meses consistentes e reserva mínima de {FINANCIAL_TARGETS.cashReserveMonths} meses</small></div>
+      </div>
+      <p className="fh-policy-note">Regra gerencial conservadora desta tela; não é garantia e deve ser revisada com o contador após formar histórico real.</p>
+    </div>
+  </div>;
+}
+
 function SetupNotice() {
   return <div className="fh-setup">
     <FileSpreadsheet size={25}/><div><strong>Falta instalar a base da Central Financeira</strong>
@@ -104,6 +152,7 @@ export default function FinancialHealthCenter({ transactions = [], periodEnd }) 
     marketingInvestments: bundle.marketingInvestments,
     model: bundle.model,
     monthlyInput: bundle.monthlyInput,
+    monthlyHistory: bundle.monthlyHistory,
     entries: bundle.entries,
     budgets: bundle.budgets,
     serviceCosts: bundle.serviceCosts,
@@ -157,6 +206,7 @@ export default function FinancialHealthCenter({ transactions = [], periodEnd }) 
         <Metric title="Ponto de equilíbrio" value={dreReady ? money(health.dre.breakEvenRevenue) : 'Pendente'} detail={dreReady ? `margem de segurança ${pct(health.dre.safetyMarginPct)}` : 'depende da estrutura real de custos'} status={dreReady ? 'real' : 'pending'}/>
         <Metric title="Caixa projetado em 13 semanas" value={cashReady ? money(health.forecast.at(-1)?.balance) : 'Pendente'} detail={cashReady ? 'saldo conciliado + contas com vencimento' : 'confirme saldo bancário e importe as contas'} status={cashReady ? 'real' : 'pending'}/>
       </div>
+      <BusinessHealthBoard health={health}/>
       <div className="fh-grid-2">
         <div className="fh-panel"><div className="fh-panel-title"><AlertTriangle size={18}/> O que precisa de ação agora</div>
           {health.alerts.length ? <div className="fh-alert-list">{health.alerts.slice(0, 6).map((alert, index) => <div className={`fh-alert fh-alert-${alert.level}`} key={`${alert.title}-${index}`}><AlertTriangle size={17}/><div><strong>{alert.title}</strong><p>{alert.detail}</p><small>{alert.action}</small></div></div>)}</div>

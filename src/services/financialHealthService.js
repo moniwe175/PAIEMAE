@@ -29,9 +29,10 @@ const fetchAll = async (table, configure, pageSize = 1000) => {
 export async function loadFinancialBundle({ unitId = MATRIX_UNIT_ID, periodMonth } = {}) {
   const month = String(periodMonth || new Date().toISOString().slice(0, 7)).slice(0, 7);
   const monthDate = `${month}-01`;
-  const [model, input, entries, budgets, serviceCosts, allTransactions, marketing] = await Promise.all([
+  const [model, input, monthlyHistory, entries, budgets, serviceCosts, allTransactions, marketing] = await Promise.all([
     supabase.from('franchise_economic_models').select('*').eq('unit_id', unitId).maybeSingle(),
     supabase.from('franchise_monthly_inputs').select('*').eq('unit_id', unitId).eq('period_month', monthDate).maybeSingle(),
+    supabase.from('franchise_monthly_inputs').select('*').eq('unit_id', unitId).order('period_month'),
     supabase.from('financial_entries').select('*').eq('unit_id', unitId).order('due_date'),
     supabase.from('financial_budgets').select('*').eq('unit_id', unitId).eq('period_month', monthDate).order('category'),
     supabase.from('financial_service_costs').select('*').eq('unit_id', unitId).order('service_name'),
@@ -43,6 +44,7 @@ export async function loadFinancialBundle({ unitId = MATRIX_UNIT_ID, periodMonth
     periodMonth: monthDate,
     model: assertResult(model) || { unit_id: unitId, configured: false },
     monthlyInput: assertResult(input) || { unit_id: unitId, period_month: monthDate, cash_reconciled: false },
+    monthlyHistory: assertResult(monthlyHistory) || [],
     entries: assertResult(entries) || [],
     budgets: assertResult(budgets) || [],
     serviceCosts: assertResult(serviceCosts) || [],

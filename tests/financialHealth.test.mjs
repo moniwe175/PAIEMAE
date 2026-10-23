@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   assessFinancialData, buildCashForecast, buildFinancialHealth,
-  calculateServiceProfitability, deriveMonthlyCosts, summarizeAccounts,
+  calculateBusinessHealth, calculateRevenueGuidance, calculateServiceProfitability,
+  deriveMonthlyCosts, summarizeAccounts,
 } from '../src/lib/financialHealth.js';
 import { parseFinancialCsv } from '../src/lib/financialCsv.js';
 
@@ -88,4 +89,74 @@ test('contas importadas preenchem os custos mensais sem contar recebíveis', () 
     { entry_type: 'receivable', category: 'aluguel', amount: 9000, competence_date: '2026-10-10', status: 'open' },
   ], '2026-10-01');
   assert.deepEqual(costs, { rent: 3000, marketing_expense: 800 });
+});
+
+test('meta saudavel cobre equilibrio, margem EBITDA, caixa e seguranca', () => {
+  const guidance = calculateRevenueGuidance({
+    ready: true,
+    dre: {
+      contributionMarginPct: 50,
+      fixedCosts: 6000,
+      proLabore: 1000,
+      debtService: 0,
+      breakEvenRevenue: 14000,
+      netRevenue: 12000,
+    },
+    model: { configured: true },
+    asOfDate: '2026-10-23',
+  });
+  assert.equal(guidance.breakEvenRevenue, 14000);
+  assert.equal(guidance.healthyRevenue, 17500);
+  assert.equal(guidance.gapToHealthyRevenue, 5500);
+});
+
+test('nao inventa meta quando a margem nao comporta a margem saudavel', () => {
+  const guidance = calculateRevenueGuidance({
+    ready: true,
+    dre: {
+      contributionMarginPct: 12,
+      fixedCosts: 6000,
+      proLabore: 1000,
+      breakEvenRevenue: 58333.33,
+      netRevenue: 60000,
+    },
+  });
+  assert.equal(guidance.healthyRevenue, null);
+  assert.equal(guidance.marginInsufficient, true);
+});
+
+test('historico saudavel exige meses fechados completos e consecutivos', () => {
+  const monthlyHistory = ['2026-07-01', '2026-08-01', '2026-09-01'].map((period_month) => ({
+    period_month,
+    rent: 6000,
+    pro_labore_override: 1000,
+    costs_confirmed: true,
+    rates_confirmed: true,
+  }));
+  const allTransactions = monthlyHistory.map((row) => ({
+    row_type: 'receita',
+    date_ref: `${row.period_month.slice(0, 7)}-10`,
+    gross: 20000,
+  }));
+  const guidance = calculateRevenueGuidance({
+    ready: true,
+    dre: { contributionMarginPct: 90, fixedCosts: 6000, proLabore: 1000, debtService: 0, breakEvenRevenue: 7777.78, netRevenue: 20000 },
+    monthlyHistory,
+    allTransactions,
+    model: { configured: true, tax_rate: 10, card_fee_rate: 0 },
+    asOfDate: '2026-10-23',
+  });
+  assert.equal(guidance.consecutiveHealthyMonths, 3);
+  assert.equal(guidance.isHealthyHistory, true);
+  assert.equal(guidance.isSustainableHistory, false);
+});
+
+test('nivel de saude fica sem nota enquanto o fechamento estiver incompleto', () => {
+  const result = calculateBusinessHealth({
+    quality: { score: 83 },
+    guidance: { ready: true, healthyRevenue: 10000 },
+  });
+  assert.equal(result.ready, false);
+  assert.equal(result.score, null);
+  assert.equal(result.label, 'Aguardando dados');
 });
