@@ -1477,6 +1477,57 @@ export async function fetchQueueHistory() {
   return { data: data || [], error: null };
 }
 
+// ─── Agenda: lista de espera ────────────────────────────────────────────────
+
+export async function fetchAppointmentWaitlist({ includeClosed = false } = {}) {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured', []);
+  let query = supabase
+    .from('appointment_waitlist')
+    .select('*, clients(id, name, phone)')
+    .order('created_at', { ascending: true });
+  if (!includeClosed) query = query.in('status', ['aguardando', 'contatada']);
+  const { data, error } = await query;
+  if (error) return handleError(error, []);
+  return { data: data || [], error: null };
+}
+
+export async function insertAppointmentWaitlist(entry) {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured');
+  const payload = {
+    client_id: Number(entry.client_id),
+    service: String(entry.service || '').trim(),
+    preferred_professional: entry.preferred_professional || null,
+    preferred_period: entry.preferred_period || 'qualquer',
+    available_from: entry.available_from || todayBRT(),
+    available_until: entry.available_until || null,
+    notes: entry.notes?.trim() || null,
+    status: 'aguardando',
+    created_by: entry.created_by || await getUserId(),
+  };
+  const { data, error } = await supabase
+    .from('appointment_waitlist')
+    .insert([payload])
+    .select('*, clients(id, name, phone)')
+    .single();
+  if (error) return handleError(error);
+  return { data, error: null };
+}
+
+export async function updateAppointmentWaitlist(id, updates) {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured');
+  const payload = { ...updates };
+  delete payload.id;
+  delete payload.clients;
+  const { data, error } = await supabase
+    .from('appointment_waitlist')
+    .update(payload)
+    .eq('id', id)
+    .select('*, clients(id, name, phone)')
+    .single();
+  if (error) return handleError(error);
+  return { data, error: null };
+}
+
 // Leitura enxuta para o CRM: a Agenda continua definindo a etapa e o Motor
 // apenas informa quais acompanhamentos foram preparados ou enviados.
 export async function fetchCrmAutomationEvents(days = 365) {

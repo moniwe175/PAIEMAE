@@ -18,9 +18,11 @@ import {
   insertAppointment,
   updateAppointment,
   deleteAppointment,
-  fetchAnamneses
+  fetchAnamneses,
+  updateAppointmentWaitlist
 } from '../services/supabaseService';
 import TabletAnamneseModal from '../components/agenda/TabletAnamneseModal';
+import WaitlistPanel from '../components/agenda/WaitlistPanel';
 
 // ─── Search helpers ──────────────────────────────────────────
 
@@ -713,11 +715,11 @@ function AtendimentoBlockedModal({ info, onClose, onPreencherFicha }) {
 // ═══════════════════════════════════════════════════════════════
 // ─── AgendamentoModal ─────────────────────────────────────────
 // ═══════════════════════════════════════════════════════════════
-function AgendamentoModal({ onClose, date, profissional: prefillProf, hora: prefillHora, profissionais, apt, onSave }) {
+function AgendamentoModal({ onClose, date, profissional: prefillProf, hora: prefillHora, profissionais, apt, prefill, onSave }) {
   const isEdit = !!apt;
   const [pacientes, setPacientes] = useState([]);
   const [showNewClient, setShowNewClient] = useState(false);
-  const [clienteBusca, setClienteBusca] = useState(isEdit ? apt.paciente : '');
+  const [clienteBusca, setClienteBusca] = useState(isEdit ? apt.paciente : prefill?.patientName || '');
   const [showClienteList, setShowClienteList] = useState(false);
   const clienteRef = useRef(null);
 
@@ -764,9 +766,12 @@ function AgendamentoModal({ onClose, date, profissional: prefillProf, hora: pref
   }, [pacientes, clienteBusca]);
 
   const [form, setForm] = useState(() => isEdit ? { ...apt } : {
-    data: fmtDate(date), hora: prefillHora || '09:00',
-    horaFim: calcEndTime(prefillHora || '09:00', 60), duracao: 60,
-    paciente: '', telefone: '', profissional: prefillProf || '', servico: '',
+    data: prefill?.date || fmtDate(date), hora: prefill?.time || prefillHora || '09:00',
+    horaFim: calcEndTime(prefill?.time || prefillHora || '09:00', 60), duracao: 60,
+    paciente: prefill?.patientName || '', telefone: prefill?.phone || '',
+    client_id: prefill?.clientId || null,
+    profissional: prefill?.professional || prefillProf || '', servico: prefill?.service || '',
+    waitlist_id: prefill?.waitlistId || null,
     status: 'aguardando_confirmacao', valor: '', observacoes: '', exames_pendentes: false,
     ficha_pendente: false,
   });
@@ -802,15 +807,22 @@ function AgendamentoModal({ onClose, date, profissional: prefillProf, hora: pref
 
   const set = useCallback((k, v) => setForm(f => {
     const next = { ...f, [k]: v };
-    if (k === 'profissional') next.servico = '';
+    if (k === 'profissional') {
+      const selectedProfessional = profissionais.find((professional) => professional.nome === v);
+      if (!selectedProfessional?.servicos?.includes(f.servico)) next.servico = '';
+    }
     if (k === 'hora' || k === 'duracao') next.horaFim = calcEndTime(k === 'hora' ? v : f.hora, k === 'duracao' ? Number(v) : Number(f.duracao));
-    if (k === 'paciente') { const p = pacientes.find(x => x.nome === v); if (p) next.telefone = p.telefone || ''; }
+    if (k === 'paciente') {
+      const p = pacientes.find(x => x.nome === v);
+      next.client_id = p?.id || null;
+      if (p) next.telefone = p.telefone || '';
+    }
     if (k === 'servico') {
       const precos = { 'Limpeza de Pele': 180, 'Peeling Químico': 220, 'Botox Facial': 800, 'Design de Sobrancelha': 80, 'Drenagem Linfática': 150, 'Harmonização Facial': 1200, 'Preenchimento Labial': 900, 'Fio de PDO': 1500, 'Bioestimulador': 1800, 'Depilação a Laser': 300, 'Depilação': 80, 'Massagem': 120, 'Microagulhamento': 350, 'Criolipólise': 800, 'Radiofrequência': 250, 'Ultrassom': 200, 'Carboxiterapia': 180 };
       if (precos[v] && !f.valor) next.valor = precos[v];
     }
     return next;
-  }), [pacientes]);
+  }), [pacientes, profissionais]);
 
   const profObj = profissionais.find(p => p.nome === form.profissional);
   const servicos = profObj ? profObj.servicos : [];
@@ -863,6 +875,7 @@ function AgendamentoModal({ onClose, date, profissional: prefillProf, hora: pref
             setPacientes(prev => [...prev, mapped]);
             set('paciente', mapped.nome);
             set('telefone', mapped.telefone || '');
+            set('client_id', mapped.id);
             setClienteBusca(mapped.nome);
           }
           setShowNewClient(false);
@@ -1281,11 +1294,14 @@ export default function Agenda() {
   const [viewMode, setViewMode] = useState('day');
 
   // Modals
-  const [formModal, setFormModal] = useState({ open: false, apt: null, prefillProf: '', prefillHora: '' });
+  const [formModal, setFormModal] = useState({ open: false, apt: null, prefillProf: '', prefillHora: '', prefill: null });
   const [detailModal, setDetailModal] = useState({ open: false, apt: null });
   const [bloqueioModal, setBloqueioModal] = useState({ open: false, bloqueio: null, prefillProf: '', prefillHora: '' });
   const [atendimentoBlockedInfo, setAtendimentoBlockedInfo] = useState(null);
   const [tabletModal, setTabletModal] = useState({ open: false, paciente: null, tipoFicha: '', apt: null });
+  const [waitlistOpen, setWaitlistOpen] = useState(true);
+  const [waitlistVacancy, setWaitlistVacancy] = useState(null);
+  const [waitlistRefreshKey, setWaitlistRefreshKey] = useState(0);
 
   // Load from Supabase on mount
   useEffect(() => {
@@ -1318,8 +1334,8 @@ export default function Agenda() {
     setSelectedDate(d);
   };
 
-  const openNew = (prof = '', hora = '') => setFormModal({ open: true, apt: null, prefillProf: prof, prefillHora: hora });
-  const openEdit = apt => { setDetailModal({ open: false, apt: null }); setFormModal({ open: true, apt, prefillProf: '', prefillHora: '' }); };
+  const openNew = (prof = '', hora = '', prefill = null) => setFormModal({ open: true, apt: null, prefillProf: prof, prefillHora: hora, prefill });
+  const openEdit = apt => { setDetailModal({ open: false, apt: null }); setFormModal({ open: true, apt, prefillProf: '', prefillHora: '', prefill: null }); };
   const openDetail = apt => setDetailModal({ open: true, apt });
   const openBloqueio = (prof = '', hora = '', blq = null) => setBloqueioModal({ open: true, bloqueio: blq, prefillProf: prof, prefillHora: hora });
 
@@ -1337,6 +1353,14 @@ export default function Agenda() {
       }
       if (res.data) {
         updatedApts.push(mapFromSupabase(res.data));
+        if (item.waitlist_id) {
+          await updateAppointmentWaitlist(item.waitlist_id, {
+            status: 'agendada',
+            scheduled_appointment_id: res.data.id,
+          });
+          setWaitlistRefreshKey((current) => current + 1);
+          setWaitlistVacancy(null);
+        }
       } else {
         falhas++;
       }
@@ -1433,7 +1457,44 @@ export default function Agenda() {
       const mapped = mapFromSupabase(data);
       setAgendamentos(prev => prev.map(a => a.id === id ? mapped : a));
       setDetailModal(prev => prev.apt?.id === id ? { ...prev, apt: mapped } : prev);
+      if (newStatus === 'cancelado' && apt.data >= fmtDate(new Date())) {
+        setWaitlistVacancy({
+          date: apt.data,
+          time: apt.hora,
+          professional: apt.profissional,
+          service: apt.servico,
+        });
+        setWaitlistOpen(true);
+        setDetailModal({ open: false, apt: null });
+      }
     }
+  };
+
+  const handleScheduleWaitlist = (entry, slot = null) => {
+    const client = entry.clients || {};
+    const defaultTime = {
+      manha: '09:00',
+      tarde: '14:00',
+      noite: '18:00',
+      qualquer: '09:00',
+    }[entry.preferred_period || 'qualquer'];
+    const date = slot?.date || fmtDate(selectedDate);
+    const time = slot?.time || defaultTime;
+    const professional = slot?.professional || entry.preferred_professional || '';
+
+    setSelectedDate(new Date(`${date}T12:00:00`));
+    setViewMode('day');
+    setDetailModal({ open: false, apt: null });
+    openNew(professional, time, {
+      patientName: client.name || '',
+      phone: client.phone || '',
+      clientId: client.id || entry.client_id,
+      service: entry.service,
+      professional,
+      date,
+      time,
+      waitlistId: entry.id,
+    });
   };
 
   const handleOpenTabletMode = (info) => {
@@ -1544,9 +1605,10 @@ export default function Agenda() {
 
       {/* Modals */}
       {formModal.open && (
-        <AgendamentoModal onClose={() => setFormModal({ open: false, apt: null, prefillProf: '', prefillHora: '' })}
+        <AgendamentoModal onClose={() => setFormModal({ open: false, apt: null, prefillProf: '', prefillHora: '', prefill: null })}
           date={selectedDate} profissional={formModal.prefillProf} hora={formModal.prefillHora}
-          profissionais={profissionais} apt={formModal.apt} onSave={handleSave} onOpenTablet={handleOpenTabletMode} />
+          profissionais={profissionais} apt={formModal.apt} prefill={formModal.prefill}
+          onSave={handleSave} onOpenTablet={handleOpenTabletMode} />
       )}
       {detailModal.open && detailModal.apt && (
         <AppointmentDetailModal apt={detailModal.apt} profissionais={profissionais}
@@ -1790,6 +1852,17 @@ export default function Agenda() {
             </div>
           </div>
         </div>
+
+        <WaitlistPanel
+          open={waitlistOpen}
+          onToggle={() => setWaitlistOpen((current) => !current)}
+          professionals={profissionais}
+          vacancy={waitlistVacancy}
+          onClearVacancy={() => setWaitlistVacancy(null)}
+          onSchedule={handleScheduleWaitlist}
+          canEdit={canEdit('agenda')}
+          refreshKey={waitlistRefreshKey}
+        />
       </div>
     </div>
   );
