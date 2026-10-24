@@ -4,7 +4,8 @@ import { useLocation } from 'react-router-dom';
 import {
   Users, Plus, Search, Phone, Calendar, FileText, XCircle,
   ChevronRight, Mail, Instagram, Upload, Trash2, AlertTriangle,
-  RefreshCw, UserCheck, UserPlus, Clock, Sparkles, Share2
+  RefreshCw, UserCheck, UserPlus, Clock, Sparkles, Share2,
+  DollarSign, CalendarCheck, CalendarX, UserX, CheckCircle2, Activity
 } from 'lucide-react';
 import {
   ResponsiveContainer, PieChart, Pie, Cell, Tooltip
@@ -13,7 +14,9 @@ import { fetchClients, insertClient, deleteClient, updateClient, fetchAppointmen
 import { getCurrentUser, supabase } from '../lib/supabase';
 import {
   appointmentPatientKey,
+  buildPatientCommercialHistory,
   derivePatientRelationship,
+  getAppointmentRecordedValue,
   isCompletedAppointment,
   resolvePatientSource,
   UNKNOWN_PATIENT_SOURCE,
@@ -68,6 +71,18 @@ function scoreClientMatch(clientName, clientPhone, rawQuery) {
 // ─── Format helpers ───────────────────────────────────────────
 const formatBRL = (val) =>
   `R$ ${(Number(val) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+const formatDateBR = (value) => {
+  const match = String(value || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return match ? `${match[3]}/${match[2]}/${match[1]}` : '—';
+};
+
+const COMMERCIAL_STATUS = {
+  completed: { label: 'Finalizado', color: '#047857', background: '#ECFDF5' },
+  scheduled: { label: 'Agendado', color: '#1D4ED8', background: '#EFF6FF' },
+  cancelled: { label: 'Cancelado', color: '#6B7280', background: '#F3F4F6' },
+  no_show: { label: 'Falta', color: '#B91C1C', background: '#FEF2F2' },
+};
 
 // ─── Channel options and colors ───────────────────────────────
 const CANAIS_AQUISICAO = [
@@ -218,6 +233,143 @@ function PacienteModal({ onClose, onSave, initialData }) {
   );
 }
 
+// Histórico operacional baseado somente na Agenda. Não presume pagamento.
+// eslint-disable-next-line react/prop-types
+function CommercialHistoryModal({ patient, onClose }) {
+  // eslint-disable-next-line react/prop-types
+  const history = patient?.commercialHistory || {};
+  const timeline = history.timeline || [];
+  const maxMonthlyValue = Math.max(0, ...(history.monthlyEvolution || []).map((item) => item.recordedValue));
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" onClick={(event) => event.stopPropagation()} style={{ width: 'min(1080px, 96vw)', maxWidth: 1080, maxHeight: '92vh', overflow: 'hidden', padding: 0 }}>
+        <div className="modal-header" style={{ padding: '18px 22px', margin: 0 }}>
+          <div>
+            <span className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Activity style={{ width: 19, height: 19 }} />
+              Histórico Comercial
+            </span>
+            {/* eslint-disable-next-line react/prop-types */}
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 3 }}>{patient?.nome}</div>
+          </div>
+          <button className="modal-close" onClick={onClose} aria-label="Fechar histórico comercial">
+            <XCircle />
+          </button>
+        </div>
+
+        <div style={{ padding: '16px 22px 24px', overflowY: 'auto' }}>
+          <div style={{ display: 'flex', gap: 9, alignItems: 'flex-start', padding: '11px 13px', borderRadius: 9, background: '#FFFBEB', border: '1px solid #FDE68A', color: '#92400E', marginBottom: 16 }}>
+            <AlertTriangle style={{ width: 17, height: 17, flexShrink: 0, marginTop: 1 }} />
+            <div style={{ fontSize: 11.5, lineHeight: 1.45 }}>
+              <strong>Valores informados na Agenda.</strong> Atendimento finalizado não comprova pagamento. Parcelas, formas de pagamento, estornos e valores em aberto não fazem parte desta versão.
+            </div>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(145px, 1fr))', gap: 10, marginBottom: 16 }}>
+            {[
+              { label: 'Atendimentos finalizados', value: history.completedCount || 0, detail: `${history.appointmentsWithValue || 0} com valor informado`, icon: CheckCircle2, color: '#047857', bg: '#ECFDF5' },
+              { label: 'Valor registrado', value: formatBRL(history.totalRecordedValue), detail: 'somente finalizados', icon: DollarSign, color: '#047857', bg: '#ECFDF5' },
+              { label: 'Ticket observado', value: formatBRL(history.averageTicket), detail: 'somente finalizados com valor', icon: Activity, color: '#7C3AED', bg: '#F5F3FF' },
+              { label: 'Próximos horários', value: history.futureCount || 0, detail: history.nextAppointment ? `${formatDateBR(history.nextAppointment.date)} ${history.nextAppointment.time}` : 'nenhum agendamento futuro', icon: CalendarCheck, color: '#1D4ED8', bg: '#EFF6FF' },
+              { label: 'Cancelamentos', value: history.cancelledCount || 0, detail: 'em todo o histórico', icon: CalendarX, color: '#6B7280', bg: '#F3F4F6' },
+              { label: 'Faltas', value: history.noShowCount || 0, detail: 'não comparecimentos', icon: UserX, color: '#B91C1C', bg: '#FEF2F2' },
+            ].map(({ label, value, detail, icon: Icon, color, bg }) => (
+              <div key={label} style={{ padding: 13, border: '1px solid var(--border-color)', borderRadius: 10, background: '#fff' }}>
+                <div style={{ width: 29, height: 29, borderRadius: 8, display: 'grid', placeItems: 'center', background: bg, color, marginBottom: 9 }}><Icon style={{ width: 15, height: 15 }} /></div>
+                <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--text-dark)' }}>{value}</div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-medium)', marginTop: 2 }}>{label}</div>
+                <div style={{ fontSize: 9.5, color: 'var(--text-muted)', marginTop: 3 }}>{detail}</div>
+              </div>
+            ))}
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(290px, 1fr))', gap: 12, marginBottom: 16 }}>
+            <div style={{ padding: 15, border: '1px solid var(--border-color)', borderRadius: 10 }}>
+              <div style={{ fontSize: 12, fontWeight: 800, color: 'var(--text-dark)', marginBottom: 11 }}>Relacionamento com a clínica</div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 9 }}>
+                {[
+                  ['Primeira visita', formatDateBR(history.firstVisit)],
+                  ['Última visita', formatDateBR(history.lastVisit)],
+                  ['Intervalo médio', history.averageIntervalDays != null ? `${history.averageIntervalDays} dias` : 'Sem recorrência'],
+                  ['Próximo serviço', history.nextAppointment?.service || 'Não agendado'],
+                ].map(([label, value]) => (
+                  <div key={label} style={{ background: 'var(--bg-main)', borderRadius: 8, padding: '9px 10px' }}>
+                    <div style={{ fontSize: 9.5, color: 'var(--text-muted)' }}>{label}</div>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-dark)', marginTop: 3 }}>{value}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div style={{ padding: 15, border: '1px solid var(--border-color)', borderRadius: 10 }}>
+              <div style={{ fontSize: 12, fontWeight: 800, color: 'var(--text-dark)', marginBottom: 11 }}>Serviços mais realizados</div>
+              {(history.topServices || []).slice(0, 4).map((item, index) => (
+                <div key={item.service} style={{ display: 'grid', gridTemplateColumns: '22px 1fr auto', gap: 8, alignItems: 'center', padding: '6px 0', borderBottom: index < Math.min(history.topServices.length, 4) - 1 ? '1px solid var(--border-color)' : 'none' }}>
+                  <div style={{ width: 20, height: 20, borderRadius: 6, display: 'grid', placeItems: 'center', background: 'var(--color-accent-soft)', color: 'var(--color-primary)', fontSize: 10, fontWeight: 800 }}>{index + 1}</div>
+                  <div><div style={{ fontSize: 11.5, fontWeight: 700 }}>{item.service}</div><div style={{ fontSize: 9.5, color: 'var(--text-muted)' }}>{item.sessions} atendimento(s)</div></div>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: '#047857' }}>{formatBRL(item.recordedValue)}</div>
+                </div>
+              ))}
+              {(history.topServices || []).length === 0 && <div style={{ color: 'var(--text-muted)', fontSize: 11 }}>Nenhum atendimento finalizado.</div>}
+            </div>
+          </div>
+
+          {(history.monthlyEvolution || []).length > 0 && (
+            <div style={{ padding: 15, border: '1px solid var(--border-color)', borderRadius: 10, marginBottom: 16 }}>
+              <div style={{ fontSize: 12, fontWeight: 800, color: 'var(--text-dark)', marginBottom: 11 }}>Evolução dos valores registrados</div>
+              <div style={{ display: 'grid', gap: 7 }}>
+                {history.monthlyEvolution.slice(-12).map((item) => {
+                  const [year, month] = item.month.split('-');
+                  const width = maxMonthlyValue > 0 ? Math.max(2, (item.recordedValue / maxMonthlyValue) * 100) : 0;
+                  return (
+                    <div key={item.month} style={{ display: 'grid', gridTemplateColumns: '55px 1fr 92px', gap: 9, alignItems: 'center' }}>
+                      <span style={{ fontSize: 10.5, color: 'var(--text-muted)' }}>{month}/{year}</span>
+                      <div style={{ height: 8, background: '#F3E8E5', borderRadius: 99, overflow: 'hidden' }}><div style={{ width: `${width}%`, height: '100%', background: 'linear-gradient(90deg, #B8796D, #C73B6D)', borderRadius: 99 }} /></div>
+                      <span style={{ textAlign: 'right', fontSize: 10.5, fontWeight: 700 }}>{formatBRL(item.recordedValue)}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          <div style={{ border: '1px solid var(--border-color)', borderRadius: 10, overflow: 'hidden' }}>
+            <div style={{ padding: '12px 14px', display: 'flex', justifyContent: 'space-between', gap: 10, borderBottom: '1px solid var(--border-color)', background: 'var(--bg-main)' }}>
+              <strong style={{ fontSize: 12 }}>Linha do tempo da Agenda</strong>
+              <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{timeline.length} registro(s)</span>
+            </div>
+            {timeline.length > 0 ? (
+              <div className="table-wrapper">
+                <table style={{ minWidth: 720 }}>
+                  <thead><tr><th>Data</th><th>Serviço</th><th>Profissional</th><th>Status</th><th style={{ textAlign: 'right' }}>Valor informado</th></tr></thead>
+                  <tbody>
+                    {timeline.map((item) => {
+                      const status = COMMERCIAL_STATUS[item.statusGroup] || COMMERCIAL_STATUS.scheduled;
+                      return (
+                        <tr key={item.id || `${item.date}-${item.time}-${item.service}`}>
+                          <td><strong style={{ fontSize: 12 }}>{formatDateBR(item.date)}</strong><div style={{ fontSize: 9.5, color: 'var(--text-muted)' }}>{item.time || 'sem horário'}</div></td>
+                          <td style={{ fontSize: 12, fontWeight: 600 }}>{item.service}</td>
+                          <td style={{ fontSize: 11.5, color: 'var(--text-medium)' }}>{item.professional}</td>
+                          <td><span style={{ display: 'inline-flex', padding: '3px 8px', borderRadius: 99, background: status.background, color: status.color, fontSize: 10, fontWeight: 700 }}>{status.label}</span></td>
+                          <td style={{ textAlign: 'right', fontWeight: 700, color: item.countedInTotal ? '#047857' : 'var(--text-muted)' }}>
+                            {item.value > 0 ? formatBRL(item.value) : '—'}
+                            {!item.countedInTotal && item.value > 0 && <div style={{ fontSize: 8.5, fontWeight: 500 }}>não somado</div>}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            ) : <div style={{ padding: 28, textAlign: 'center', fontSize: 12, color: 'var(--text-muted)' }}>Nenhum agendamento encontrado para esta paciente.</div>}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Componente Principal Pacientes ───────────────────────────
 export default function Pacientes() {
   const { canEdit } = useAuth();
@@ -230,6 +382,7 @@ export default function Pacientes() {
   const [busca, setBusca] = useState('');
   const [filtro, setFiltro] = useState('Todos'); // 'Todos' | 'Ativo' | 'Inativo' | 'Novo' | 'Risco'
   const [selected, setSelected] = useState(null);
+  const [commercialHistoryOpen, setCommercialHistoryOpen] = useState(false);
   const [servicos, setServicos] = useState([]);
 
   // Período de Análise de Retenção & Recorrência: '30d' | '60d' | '90d'
@@ -288,23 +441,19 @@ export default function Pacientes() {
 
         const mapped = data.map((item) => {
           const sourceInfo = resolvePatientSource(item);
-          const clientAppts = appts.filter(
-            (a) =>
-              (
-                (a.client_id != null && String(a.client_id) === String(item.id)) ||
-                (a.client_id == null && a.client_name && item.name && a.client_name.trim().toLowerCase() === item.name.trim().toLowerCase())
-              ) &&
-              isCompletedAppointment(a)
-          );
-          clientAppts.sort((a, b) => new Date(b.appointment_date) - new Date(a.appointment_date));
+          const commercialHistory = buildPatientCommercialHistory({
+            id: item.id,
+            name: item.name,
+            phone: item.phone,
+          }, appts, today);
 
           let ultimaVisita = item.last_visit ? item.last_visit.split('-').reverse().join('/') : 'Nunca';
           let ultimaVisitaIso = item.last_visit || null;
           let diasSemVisita = null;
 
-          if (clientAppts.length > 0) {
-            ultimaVisita = clientAppts[0].appointment_date.split('-').reverse().join('/');
-            ultimaVisitaIso = clientAppts[0].appointment_date;
+          if (commercialHistory.lastVisit) {
+            ultimaVisita = formatDateBR(commercialHistory.lastVisit);
+            ultimaVisitaIso = commercialHistory.lastVisit;
           }
 
           if (ultimaVisitaIso) {
@@ -315,52 +464,17 @@ export default function Pacientes() {
             }
           }
 
-          // 3. Intervalo Médio entre Visitas
-          const sortedAsc = [...clientAppts].sort((a, b) => new Date(a.appointment_date) - new Date(b.appointment_date));
-          let tempoMedioDias = null;
-          if (sortedAsc.length >= 2) {
-            let totalDiff = 0;
-            for (let i = 1; i < sortedAsc.length; i++) {
-              const d1 = new Date(sortedAsc[i - 1].appointment_date + 'T00:00:00');
-              const d2 = new Date(sortedAsc[i].appointment_date + 'T00:00:00');
-              totalDiff += Math.max(1, (d2 - d1) / 86400000);
-            }
-            tempoMedioDias = Math.round(totalDiff / (sortedAsc.length - 1));
-          }
-
-          const totalSessoes = clientAppts.length > 0
-            ? clientAppts.length
-            : (Number(item.total_consultas_concluidas) || Number(item.total_purchases) || 0);
-
-          let calculadoGasto = clientAppts.reduce((acc, a) => {
-            let v = 0;
-            try {
-              if (a.notes && a.notes.startsWith('{')) {
-                v = Number(JSON.parse(a.notes).valor) || 0;
-              }
-            } catch {
-              // Mantém valor zero quando notas antigas não contêm JSON válido.
-            }
-            return acc + v;
-          }, 0);
-          const totalGasto = clientAppts.length > 0 ? calculadoGasto : (Number(item.total_spent) || 0);
-
-          const historicoPaciente = clientAppts.map((a) => {
-            let v = 0;
-            try {
-              if (a.notes && a.notes.startsWith('{')) {
-                v = Number(JSON.parse(a.notes).valor) || 0;
-              }
-            } catch {
-              // Mantém valor zero quando notas antigas não contêm JSON válido.
-            }
-            return {
-              dataIso: a.appointment_date || '',
-              data: a.appointment_date ? a.appointment_date.split('-').reverse().join('/') : '',
-              servico: a.procedure || 'Sessão',
-              valor: v,
-            };
-          });
+          const tempoMedioDias = commercialHistory.averageIntervalDays;
+          const totalSessoes = commercialHistory.completedCount;
+          const totalGasto = commercialHistory.totalRecordedValue;
+          const historicoPaciente = commercialHistory.timeline
+            .filter((appointment) => appointment.statusGroup === 'completed')
+            .map((appointment) => ({
+              dataIso: appointment.date,
+              data: formatDateBR(appointment.date),
+              servico: appointment.service,
+              valor: appointment.value,
+            }));
 
           // 2. Churn Risk status: sem visita há mais de 60 dias ou inativo
           const isEmRisco = (diasSemVisita !== null && diasSemVisita >= 60) || item.status === 'inativo';
@@ -389,6 +503,7 @@ export default function Pacientes() {
             whatsapp_opt_out: !!item.whatsapp_opt_out,
             avatar: item.avatar || (item.name ? item.name.charAt(0).toUpperCase() : 'U'),
             historico: historicoPaciente,
+            commercialHistory,
             createdAt: item.created_at || new Date().toISOString(),
           };
         });
@@ -473,6 +588,7 @@ export default function Pacientes() {
         status: data.status,
         avatar: data.avatar,
         historico: [],
+        commercialHistory: buildPatientCommercialHistory({ id: data.id, name: data.name, phone: data.phone }, []),
         createdAt: data.created_at || new Date().toISOString(),
       };
       setPacientes((prev) => [...prev, novo]);
@@ -607,13 +723,7 @@ export default function Pacientes() {
     apptsPeriodo.forEach((a) => {
       const patientKey = appointmentPatientKey(a);
       if (!patientKey) return;
-
-      let v = 0;
-      try {
-        if (a.notes && a.notes.startsWith('{')) v = Number(JSON.parse(a.notes).valor) || 0;
-      } catch {
-        // Mantém valor zero quando notas antigas não contêm JSON válido.
-      }
+      const v = getAppointmentRecordedValue(a);
 
       // Verifica se o cliente tem agendamentos ANTERIORES ao cutoffStr
       const temHistoricoAnterior = allAppointments.some(
@@ -756,6 +866,9 @@ export default function Pacientes() {
             obs: '',
           }}
         />
+      )}
+      {commercialHistoryOpen && selected && (
+        <CommercialHistoryModal patient={selected} onClose={() => setCommercialHistoryOpen(false)} />
       )}
       {deleteModal && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,20,30,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 11000, backdropFilter: 'blur(6px)', padding: 16 }} onClick={() => setDeleteModal(null)}>
@@ -1071,7 +1184,7 @@ export default function Pacientes() {
                     <th>Última Visita</th>
                     <th style={{ textAlign: 'center' }}>Intervalo Médio</th>
                     <th style={{ textAlign: 'center' }}>Sessões</th>
-                    <th style={{ textAlign: 'right' }}>Total Gasto</th>
+                    <th style={{ textAlign: 'right' }}>Valor Agenda*</th>
                     <th>Status</th>
                     <th></th>
                   </tr>
@@ -1265,9 +1378,22 @@ export default function Pacientes() {
                   <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--success)' }}>
                     {formatBRL(selected.totalGasto)}
                   </div>
-                  <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>Gasto Total</div>
+                  <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>Valor em Finalizados*</div>
                 </div>
               </div>
+
+              <div style={{ padding: '9px 10px', borderRadius: 8, background: '#FFFBEB', border: '1px solid #FDE68A', color: '#92400E', fontSize: 9.5, lineHeight: 1.4, marginBottom: 12 }}>
+                * Valor informado na Agenda. Não confirma pagamento.
+              </div>
+
+              <button
+                className="btn btn-primary btn-sm"
+                style={{ width: '100%', justifyContent: 'center', marginBottom: 12 }}
+                onClick={() => setCommercialHistoryOpen(true)}
+              >
+                <Activity style={{ width: 14, height: 14 }} />
+                Ver Histórico Comercial
+              </button>
 
               {/* 3. Card Intervalo Médio */}
               <div style={{ background: '#EFF6FF', borderRadius: 8, padding: '10px 12px', border: '1px solid #BFDBFE', marginBottom: 14 }}>
