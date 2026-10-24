@@ -24,20 +24,19 @@ export function waitlistPeriodForTime(time) {
 
 export function isActiveWaitlistEntry(entry, referenceDate = '') {
   if (!ACTIVE_WAITLIST_STATUSES.has(entry?.status)) return false;
-  if (referenceDate && entry?.available_until && entry.available_until < referenceDate) return false;
+  if (referenceDate && entry?.waitlist_date && entry.waitlist_date !== referenceDate) return false;
   return true;
 }
 
 export function waitlistMatchesSlot(entry, slot) {
   const slotDate = String(slot?.date || '');
   if (!isActiveWaitlistEntry(entry, slotDate)) return false;
+  if (entry.waitlist_date && slotDate && entry.waitlist_date !== slotDate) return false;
   if (normalize(entry.service) !== normalize(slot?.service)) return false;
 
   const preferredProfessional = normalize(entry.preferred_professional);
   if (preferredProfessional && preferredProfessional !== 'qualquer'
       && preferredProfessional !== normalize(slot?.professional)) return false;
-
-  if (entry.available_from && slotDate && entry.available_from > slotDate) return false;
 
   const preferredPeriod = entry.preferred_period || 'qualquer';
   if (preferredPeriod !== 'qualquer' && preferredPeriod !== waitlistPeriodForTime(slot?.time)) return false;
@@ -57,4 +56,3 @@ export function sortWaitlistEntries(entries = []) {
 export function compatibleWaitlistEntries(entries = [], slot) {
   return sortWaitlistEntries(entries.filter((entry) => waitlistMatchesSlot(entry, slot)));
 }
-

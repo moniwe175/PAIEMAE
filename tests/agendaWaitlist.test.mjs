@@ -22,8 +22,7 @@ test('combina vaga por servico, profissional, periodo e validade', () => {
     service: 'Drenagem Linfatica',
     preferred_professional: 'Barbara',
     preferred_period: 'tarde',
-    available_from: '2026-10-20',
-    available_until: '2026-10-31',
+    waitlist_date: '2026-10-24',
   };
 
   assert.equal(waitlistMatchesSlot(entry, {
@@ -33,7 +32,7 @@ test('combina vaga por servico, profissional, periodo e validade', () => {
     date: '2026-10-24', service: 'Drenagem Linfática', professional: 'Evelyn', time: '15:00',
   }), false);
   assert.equal(waitlistMatchesSlot(entry, {
-    date: '2026-11-01', service: 'Drenagem Linfática', professional: 'Barbara', time: '15:00',
+    date: '2026-10-25', service: 'Drenagem Linfática', professional: 'Barbara', time: '15:00',
   }), false);
 });
 
@@ -44,15 +43,17 @@ test('mantem aguardando antes de contatada e respeita a ordem de chegada', () =>
     { id: '1', status: 'aguardando', created_at: '2026-10-21T09:00:00Z' },
   ];
   assert.deepEqual(sortWaitlistEntries(entries).map((entry) => entry.id), ['1', '2', '3']);
-  assert.equal(isActiveWaitlistEntry({ status: 'agendada' }, '2026-10-24'), false);
+  assert.equal(isActiveWaitlistEntry({ status: 'agendada', waitlist_date: '2026-10-24' }, '2026-10-24'), false);
+  assert.equal(isActiveWaitlistEntry({ status: 'aguardando', waitlist_date: '2026-10-25' }, '2026-10-24'), false);
 });
 
 test('retorna somente candidatos compativeis com a vaga liberada', () => {
   const slot = { date: '2026-10-24', service: 'Botox', professional: 'Evelyn', time: '10:00' };
   const candidates = compatibleWaitlistEntries([
-    { id: 'ok', status: 'aguardando', service: 'Botox', preferred_period: 'manha' },
-    { id: 'periodo', status: 'aguardando', service: 'Botox', preferred_period: 'tarde' },
-    { id: 'servico', status: 'aguardando', service: 'Massagem', preferred_period: 'manha' },
+    { id: 'ok', status: 'aguardando', service: 'Botox', preferred_period: 'manha', waitlist_date: '2026-10-24' },
+    { id: 'outro-dia', status: 'aguardando', service: 'Botox', preferred_period: 'manha', waitlist_date: '2026-10-25' },
+    { id: 'periodo', status: 'aguardando', service: 'Botox', preferred_period: 'tarde', waitlist_date: '2026-10-24' },
+    { id: 'servico', status: 'aguardando', service: 'Massagem', preferred_period: 'manha', waitlist_date: '2026-10-24' },
   ], slot);
   assert.deepEqual(candidates.map((entry) => entry.id), ['ok']);
 });
@@ -69,5 +70,7 @@ test('contrato da lista usa Pacientes e permanece separada dos agendamentos', as
   assert.match(agenda, /<WaitlistPanel/);
   assert.match(migration, /CREATE TABLE IF NOT EXISTS public\.appointment_waitlist/i);
   assert.match(migration, /client_id integer NOT NULL REFERENCES public\.clients\(id\)/i);
+  assert.match(migration, /waitlist_date date NOT NULL DEFAULT CURRENT_DATE/i);
+  assert.match(migration, /client_id, lower\(service\), waitlist_date/i);
   assert.match(migration, /scheduled_appointment_id uuid REFERENCES public\.appointments\(id\)/i);
 });

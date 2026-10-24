@@ -18,14 +18,17 @@ import {
   waitlistMatchesSlot,
 } from '../../lib/agendaWaitlist';
 
-const todayBRT = () => new Intl.DateTimeFormat('en-CA', {
-  timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit',
-}).format(new Date());
-
 const emptyForm = () => ({
   client_id: '', service: '', preferred_professional: '', preferred_period: 'qualquer',
-  available_until: '', notes: '',
+  notes: '',
 });
+
+function formatDateBR(date) {
+  if (!date) return '';
+  return new Date(`${date}T12:00:00`).toLocaleDateString('pt-BR', {
+    day: '2-digit', month: '2-digit', year: 'numeric',
+  });
+}
 
 function clientFromEntry(entry) {
   return entry?.clients || {};
@@ -52,6 +55,7 @@ export default function WaitlistPanel({
   open,
   onToggle,
   professionals,
+  selectedDate,
   vacancy,
   onClearVacancy,
   onSchedule,
@@ -73,35 +77,34 @@ export default function WaitlistPanel({
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [waitlistResult, clientsResult] = await Promise.all([
-      fetchAppointmentWaitlist(),
-      fetchClients(),
-    ]);
+    setEntries([]);
+    const waitlistResult = await fetchAppointmentWaitlist({ date: selectedDate });
 
     if (waitlistResult.error) {
       setError(waitlistResult.error.message || 'Nao foi possivel carregar a lista de espera.');
       setEntries([]);
     } else {
-      const today = todayBRT();
-      const expired = (waitlistResult.data || []).filter((entry) => (
-        entry.available_until && entry.available_until < today
-      ));
-      if (expired.length) {
-        await Promise.all(expired.map((entry) => updateAppointmentWaitlist(entry.id, { status: 'expirada' })));
-      }
-      setEntries((waitlistResult.data || []).filter((entry) => isActiveWaitlistEntry(entry, today)));
+      setEntries((waitlistResult.data || []).filter((entry) => isActiveWaitlistEntry(entry, selectedDate)));
       setError('');
     }
-    setClients(clientsResult.data || []);
     setLoading(false);
-  }, []);
+  }, [selectedDate]);
 
   useEffect(() => { load(); }, [load, refreshKey]);
+  useEffect(() => {
+    fetchClients().then((result) => setClients(result.data || []));
+  }, []);
+  useEffect(() => {
+    setFormOpen(false);
+    setForm(emptyForm());
+    setClientQuery('');
+  }, [selectedDate]);
 
+  const dayVacancy = vacancy?.date === selectedDate ? vacancy : null;
   const sortedEntries = useMemo(() => sortWaitlistEntries(entries), [entries]);
   const candidates = useMemo(() => (
-    vacancy ? compatibleWaitlistEntries(entries, vacancy) : []
-  ), [entries, vacancy]);
+    dayVacancy ? compatibleWaitlistEntries(entries, dayVacancy) : []
+  ), [entries, dayVacancy]);
   const candidateIds = useMemo(() => new Set(candidates.map((entry) => entry.id)), [candidates]);
 
   const filteredClients = useMemo(() => {
@@ -121,7 +124,7 @@ export default function WaitlistPanel({
     setSaving(true);
     const result = await insertAppointmentWaitlist({
       ...form,
-      available_from: todayBRT(),
+      waitlist_date: selectedDate,
     });
     setSaving(false);
     if (result.error) {
@@ -179,18 +182,18 @@ export default function WaitlistPanel({
         <div style={{ width: 32, height: 32, borderRadius: 9, background: '#FCE7F3', color: '#9B2C50', display: 'grid', placeItems: 'center' }}><ClipboardList size={16} /></div>
         <div style={{ flex: 1 }}>
           <strong style={{ display: 'block', fontSize: 13 }}>Lista de espera</strong>
-          <small style={{ color: '#927A74', fontSize: 10 }}>{entries.length} cliente(s) aguardando</small>
+          <small style={{ color: '#927A74', fontSize: 10 }}>{formatDateBR(selectedDate)} · {entries.length} aguardando</small>
         </div>
         <button type="button" onClick={onToggle} aria-label="Fechar lista de espera" style={{ width: 30, height: 30, borderRadius: 8, border: '1px solid #E9DAD5', background: '#fff', cursor: 'pointer', display: 'grid', placeItems: 'center' }}><ChevronRight size={15} /></button>
       </header>
 
       <div style={{ padding: 12, overflowY: 'auto', flex: 1 }}>
-        {vacancy && (
+        {dayVacancy && (
           <section style={{ padding: 11, borderRadius: 11, border: '1px solid #F5C98C', background: '#FFF8EC', marginBottom: 11 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
               <div>
                 <strong style={{ display: 'block', fontSize: 11.5, color: '#8A531D' }}>Horario liberado</strong>
-                <span style={{ display: 'block', marginTop: 3, fontSize: 10, color: '#9A672F' }}>{vacancy.service} · {vacancy.time} · {vacancy.professional}</span>
+                <span style={{ display: 'block', marginTop: 3, fontSize: 10, color: '#9A672F' }}>{dayVacancy.service} · {dayVacancy.time} · {dayVacancy.professional}</span>
                 <span style={{ display: 'block', marginTop: 4, fontSize: 10, fontWeight: 700, color: '#8A531D' }}>{candidates.length} pessoa(s) compativel(is)</span>
               </div>
               <button type="button" onClick={onClearVacancy} aria-label="Dispensar sugestao" style={{ border: 0, background: 'transparent', color: '#9A672F', cursor: 'pointer', alignSelf: 'flex-start' }}><X size={14} /></button>
@@ -206,6 +209,9 @@ export default function WaitlistPanel({
 
         {formOpen && (
           <section style={{ padding: 11, border: '1px solid #E9DAD5', borderRadius: 11, background: '#FCFAF9', marginBottom: 11 }}>
+            <div style={{ padding: '7px 9px', marginBottom: 9, borderRadius: 8, background: '#FCE7F3', color: '#8E3458', fontSize: 10, fontWeight: 800 }}>
+              Espera para {formatDateBR(selectedDate)}
+            </div>
             <label style={labelStyle}>Paciente cadastrado *</label>
             {selectedClient ? (
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: 9, border: '1px solid #D8C3BC', borderRadius: 8, background: '#fff', marginBottom: 9 }}>
@@ -238,10 +244,8 @@ export default function WaitlistPanel({
               {(professionals || []).map((professional) => <option value={professional.nome} key={professional.id || professional.nome}>{professional.nome}</option>)}
             </select>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 7 }}>
-              <div><label style={labelStyle}>Periodo</label><select value={form.preferred_period} onChange={(event) => setForm((old) => ({ ...old, preferred_period: event.target.value }))} style={inputStyle}>{WAITLIST_PERIODS.map((period) => <option value={period.value} key={period.value}>{period.label}</option>)}</select></div>
-              <div><label style={labelStyle}>Ate quando</label><input type="date" min={todayBRT()} value={form.available_until} onChange={(event) => setForm((old) => ({ ...old, available_until: event.target.value }))} style={inputStyle} /></div>
-            </div>
+            <label style={labelStyle}>Periodo</label>
+            <select value={form.preferred_period} onChange={(event) => setForm((old) => ({ ...old, preferred_period: event.target.value }))} style={inputStyle}>{WAITLIST_PERIODS.map((period) => <option value={period.value} key={period.value}>{period.label}</option>)}</select>
 
             <label style={labelStyle}>Observacao</label>
             <textarea value={form.notes} maxLength={240} onChange={(event) => setForm((old) => ({ ...old, notes: event.target.value }))} placeholder="Preferencias importantes..." style={{ ...inputStyle, resize: 'vertical', minHeight: 54 }} />
@@ -262,8 +266,8 @@ export default function WaitlistPanel({
           <div style={{ display: 'grid', gap: 8 }}>
             {sortedEntries.map((entry) => {
               const client = clientFromEntry(entry);
-              const highlighted = vacancy && candidateIds.has(entry.id);
-              const exactVacancy = vacancy && waitlistMatchesSlot(entry, vacancy);
+              const highlighted = dayVacancy && candidateIds.has(entry.id);
+              const exactVacancy = dayVacancy && waitlistMatchesSlot(entry, dayVacancy);
               return (
                 <article key={entry.id} style={{ padding: 10, borderRadius: 11, border: `1px solid ${highlighted ? '#E8A74B' : '#E9DAD5'}`, background: highlighted ? '#FFFBF1' : '#fff', boxShadow: highlighted ? '0 0 0 2px rgba(232,167,75,.12)' : 'none' }}>
                   <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
@@ -274,12 +278,11 @@ export default function WaitlistPanel({
                   <div style={{ display: 'grid', gap: 4, marginTop: 8, padding: 7, borderRadius: 8, background: '#FAF7F6', color: '#806B65', fontSize: 9.5 }}>
                     <span style={{ display: 'flex', gap: 5, alignItems: 'center' }}><UserRound size={11} />{entry.preferred_professional || 'Qualquer profissional'}</span>
                     <span style={{ display: 'flex', gap: 5, alignItems: 'center' }}><Clock3 size={11} />{WAITLIST_PERIODS.find((period) => period.value === entry.preferred_period)?.label || 'Qualquer horario'} · esperando {waitingSince(entry.created_at)}</span>
-                    {entry.available_until && <span>Valida ate {entry.available_until.split('-').reverse().join('/')}</span>}
                     {entry.notes && <span style={{ color: '#6F5A54' }}>{entry.notes}</span>}
                   </div>
                   {canEdit && <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: 5, marginTop: 8 }}>
                     <button type="button" onClick={() => handleContact(entry)} style={smallButton('#EFF6FF', '#315E91')}><MessageCircle size={12} />Chamar</button>
-                    <button type="button" onClick={() => onSchedule(entry, exactVacancy ? vacancy : null)} style={smallButton('#ECFDF3', '#28704A')}><CalendarPlus size={12} />Agendar</button>
+                    <button type="button" onClick={() => onSchedule(entry, exactVacancy ? dayVacancy : null)} style={smallButton('#ECFDF3', '#28704A')}><CalendarPlus size={12} />Agendar</button>
                     <button type="button" onClick={() => handleGiveUp(entry)} title="Marcar como desistiu" aria-label={`Remover ${client.name || 'paciente'} da lista`} style={{ ...smallButton('#FFF1F1', '#A53B3B'), padding: 0, width: 31 }}><X size={13} /></button>
                   </div>}
                 </article>

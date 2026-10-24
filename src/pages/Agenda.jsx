@@ -1458,6 +1458,8 @@ export default function Agenda() {
       setAgendamentos(prev => prev.map(a => a.id === id ? mapped : a));
       setDetailModal(prev => prev.apt?.id === id ? { ...prev, apt: mapped } : prev);
       if (newStatus === 'cancelado' && apt.data >= fmtDate(new Date())) {
+        setSelectedDate(new Date(`${apt.data}T12:00:00`));
+        setViewMode('day');
         setWaitlistVacancy({
           date: apt.data,
           time: apt.hora,
@@ -1857,6 +1859,7 @@ export default function Agenda() {
           open={waitlistOpen}
           onToggle={() => setWaitlistOpen((current) => !current)}
           professionals={profissionais}
+          selectedDate={fmtDate(selectedDate)}
           vacancy={waitlistVacancy}
           onClearVacancy={() => setWaitlistVacancy(null)}
           onSchedule={handleScheduleWaitlist}

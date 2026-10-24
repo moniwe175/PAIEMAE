@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS public.appointment_waitlist (
   preferred_professional text,
   preferred_period text NOT NULL DEFAULT 'qualquer'
     CHECK (preferred_period IN ('qualquer', 'manha', 'tarde', 'noite')),
+  waitlist_date date NOT NULL DEFAULT CURRENT_DATE,
   available_from date NOT NULL DEFAULT CURRENT_DATE,
   available_until date,
   notes text,
@@ -26,8 +27,23 @@ CREATE TABLE IF NOT EXISTS public.appointment_waitlist (
     CHECK (available_until IS NULL OR available_until >= available_from)
 );
 
+-- Compatibilidade para quem ja executou a primeira versao desta migracao.
+ALTER TABLE public.appointment_waitlist
+  ADD COLUMN IF NOT EXISTS waitlist_date date;
+
+UPDATE public.appointment_waitlist
+   SET waitlist_date = coalesce(waitlist_date, available_from, CURRENT_DATE)
+ WHERE waitlist_date IS NULL;
+
+ALTER TABLE public.appointment_waitlist
+  ALTER COLUMN waitlist_date SET DEFAULT CURRENT_DATE,
+  ALTER COLUMN waitlist_date SET NOT NULL;
+
 CREATE INDEX IF NOT EXISTS appointment_waitlist_status_created_idx
   ON public.appointment_waitlist (status, created_at);
+
+CREATE INDEX IF NOT EXISTS appointment_waitlist_date_status_idx
+  ON public.appointment_waitlist (waitlist_date, status, created_at);
 
 CREATE INDEX IF NOT EXISTS appointment_waitlist_client_idx
   ON public.appointment_waitlist (client_id);
@@ -35,8 +51,10 @@ CREATE INDEX IF NOT EXISTS appointment_waitlist_client_idx
 CREATE INDEX IF NOT EXISTS appointment_waitlist_service_idx
   ON public.appointment_waitlist (lower(service));
 
-CREATE UNIQUE INDEX IF NOT EXISTS appointment_waitlist_active_client_service_uidx
-  ON public.appointment_waitlist (client_id, lower(service))
+DROP INDEX IF EXISTS public.appointment_waitlist_active_client_service_uidx;
+
+CREATE UNIQUE INDEX IF NOT EXISTS appointment_waitlist_active_client_service_date_uidx
+  ON public.appointment_waitlist (client_id, lower(service), waitlist_date)
   WHERE status IN ('aguardando', 'contatada');
 
 CREATE OR REPLACE FUNCTION public.fn_touch_appointment_waitlist_updated_at()
@@ -74,6 +92,7 @@ BEGIN
            scheduled_appointment_id = NEW.id
      WHERE client_id = NEW.client_id
        AND lower(trim(service)) = lower(trim(NEW.procedure))
+       AND waitlist_date::text = NEW.appointment_date
        AND status IN ('aguardando', 'contatada');
   END IF;
 
@@ -119,5 +138,4 @@ GRANT SELECT, INSERT, UPDATE, DELETE
   ON public.appointment_waitlist TO authenticated;
 
 COMMENT ON TABLE public.appointment_waitlist IS
-  'Pedidos de encaixe de clientes cadastrados; nao representam horarios reservados.';
-
+  'Pedidos de encaixe de clientes cadastrados por dia; nao representam horarios reservados.';

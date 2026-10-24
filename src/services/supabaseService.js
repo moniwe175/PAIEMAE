@@ -1479,13 +1479,14 @@ export async function fetchQueueHistory() {
 
 // ─── Agenda: lista de espera ────────────────────────────────────────────────
 
-export async function fetchAppointmentWaitlist({ includeClosed = false } = {}) {
+export async function fetchAppointmentWaitlist({ date = null, includeClosed = false } = {}) {
   if (!isSupabaseConfigured()) return handleError('Supabase not configured', []);
   let query = supabase
     .from('appointment_waitlist')
     .select('*, clients(id, name, phone)')
     .order('created_at', { ascending: true });
   if (!includeClosed) query = query.in('status', ['aguardando', 'contatada']);
+  if (date) query = query.eq('waitlist_date', date);
   const { data, error } = await query;
   if (error) return handleError(error, []);
   return { data: data || [], error: null };
@@ -1498,8 +1499,9 @@ export async function insertAppointmentWaitlist(entry) {
     service: String(entry.service || '').trim(),
     preferred_professional: entry.preferred_professional || null,
     preferred_period: entry.preferred_period || 'qualquer',
-    available_from: entry.available_from || todayBRT(),
-    available_until: entry.available_until || null,
+    waitlist_date: entry.waitlist_date || todayBRT(),
+    available_from: entry.waitlist_date || entry.available_from || todayBRT(),
+    available_until: entry.waitlist_date || null,
     notes: entry.notes?.trim() || null,
     status: 'aguardando',
     created_by: entry.created_by || await getUserId(),
