@@ -1481,7 +1481,7 @@ export default function Agenda() {
       qualquer: '09:00',
     }[entry.preferred_period || 'qualquer'];
     const date = slot?.date || fmtDate(selectedDate);
-    const time = slot?.time || defaultTime;
+    const time = slot?.time || String(entry.preferred_time || '').slice(0, 5) || defaultTime;
     const professional = slot?.professional || entry.preferred_professional || '';
 
     setSelectedDate(new Date(`${date}T12:00:00`));

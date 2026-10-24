@@ -38,8 +38,13 @@ export function waitlistMatchesSlot(entry, slot) {
   if (preferredProfessional && preferredProfessional !== 'qualquer'
       && preferredProfessional !== normalize(slot?.professional)) return false;
 
+  const preferredTime = String(entry.preferred_time || '').slice(0, 5);
+  const slotTime = String(slot?.time || '').slice(0, 5);
+  if (preferredTime && preferredTime !== slotTime) return false;
+
   const preferredPeriod = entry.preferred_period || 'qualquer';
-  if (preferredPeriod !== 'qualquer' && preferredPeriod !== waitlistPeriodForTime(slot?.time)) return false;
+  if (!preferredTime && preferredPeriod !== 'qualquer'
+      && preferredPeriod !== waitlistPeriodForTime(slot?.time)) return false;
 
   return true;
 }

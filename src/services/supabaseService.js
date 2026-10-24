@@ -1499,6 +1499,7 @@ export async function insertAppointmentWaitlist(entry) {
     service: String(entry.service || '').trim(),
     preferred_professional: entry.preferred_professional || null,
     preferred_period: entry.preferred_period || 'qualquer',
+    preferred_time: entry.preferred_time || null,
     waitlist_date: entry.waitlist_date || todayBRT(),
     available_from: entry.waitlist_date || entry.available_from || todayBRT(),
     available_until: entry.waitlist_date || null,

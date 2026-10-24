@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS public.appointment_waitlist (
   preferred_period text NOT NULL DEFAULT 'qualquer'
     CHECK (preferred_period IN ('qualquer', 'manha', 'tarde', 'noite')),
   waitlist_date date NOT NULL DEFAULT CURRENT_DATE,
+  preferred_time time without time zone,
   available_from date NOT NULL DEFAULT CURRENT_DATE,
   available_until date,
   notes text,
@@ -30,6 +31,9 @@ CREATE TABLE IF NOT EXISTS public.appointment_waitlist (
 -- Compatibilidade para quem ja executou a primeira versao desta migracao.
 ALTER TABLE public.appointment_waitlist
   ADD COLUMN IF NOT EXISTS waitlist_date date;
+
+ALTER TABLE public.appointment_waitlist
+  ADD COLUMN IF NOT EXISTS preferred_time time without time zone;
 
 UPDATE public.appointment_waitlist
    SET waitlist_date = coalesce(waitlist_date, available_from, CURRENT_DATE)

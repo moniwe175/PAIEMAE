@@ -14,12 +14,12 @@ import {
   compatibleWaitlistEntries,
   isActiveWaitlistEntry,
   sortWaitlistEntries,
-  WAITLIST_PERIODS,
   waitlistMatchesSlot,
+  waitlistPeriodForTime,
 } from '../../lib/agendaWaitlist';
 
 const emptyForm = () => ({
-  client_id: '', service: '', preferred_professional: '', preferred_period: 'qualquer',
+  client_id: '', service: '', preferred_professional: '', preferred_time: '',
   notes: '',
 });
 
@@ -120,11 +120,12 @@ export default function WaitlistPanel({
   const selectedClient = clients.find((client) => String(client.id) === String(form.client_id));
 
   const handleAdd = async () => {
-    if (!form.client_id || !form.service) return;
+    if (!form.client_id || !form.service || !form.preferred_time) return;
     setSaving(true);
     const result = await insertAppointmentWaitlist({
       ...form,
       waitlist_date: selectedDate,
+      preferred_period: waitlistPeriodForTime(form.preferred_time),
     });
     setSaving(false);
     if (result.error) {
@@ -192,7 +193,7 @@ export default function WaitlistPanel({
           <section style={{ padding: 11, borderRadius: 11, border: '1px solid #F5C98C', background: '#FFF8EC', marginBottom: 11 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
               <div>
-                <strong style={{ display: 'block', fontSize: 11.5, color: '#8A531D' }}>Horario liberado</strong>
+                <strong style={{ display: 'block', fontSize: 11.5, color: '#8A531D' }}>Horário liberado</strong>
                 <span style={{ display: 'block', marginTop: 3, fontSize: 10, color: '#9A672F' }}>{dayVacancy.service} · {dayVacancy.time} · {dayVacancy.professional}</span>
                 <span style={{ display: 'block', marginTop: 4, fontSize: 10, fontWeight: 700, color: '#8A531D' }}>{candidates.length} pessoa(s) compativel(is)</span>
               </div>
@@ -244,13 +245,13 @@ export default function WaitlistPanel({
               {(professionals || []).map((professional) => <option value={professional.nome} key={professional.id || professional.nome}>{professional.nome}</option>)}
             </select>
 
-            <label style={labelStyle}>Periodo</label>
-            <select value={form.preferred_period} onChange={(event) => setForm((old) => ({ ...old, preferred_period: event.target.value }))} style={inputStyle}>{WAITLIST_PERIODS.map((period) => <option value={period.value} key={period.value}>{period.label}</option>)}</select>
+            <label style={labelStyle}>Horário desejado *</label>
+            <input type="time" step="900" value={form.preferred_time} onChange={(event) => setForm((old) => ({ ...old, preferred_time: event.target.value }))} style={inputStyle} />
 
             <label style={labelStyle}>Observacao</label>
             <textarea value={form.notes} maxLength={240} onChange={(event) => setForm((old) => ({ ...old, notes: event.target.value }))} placeholder="Preferencias importantes..." style={{ ...inputStyle, resize: 'vertical', minHeight: 54 }} />
 
-            <button type="button" disabled={!form.client_id || !form.service || saving} onClick={handleAdd} style={{ width: '100%', minHeight: 34, marginTop: 9, borderRadius: 8, border: 0, background: form.client_id && form.service ? '#9B2C50' : '#E5DCD9', color: form.client_id && form.service ? '#fff' : '#9B8A84', fontSize: 10.5, fontWeight: 800, cursor: form.client_id && form.service ? 'pointer' : 'not-allowed', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+            <button type="button" disabled={!form.client_id || !form.service || !form.preferred_time || saving} onClick={handleAdd} style={{ width: '100%', minHeight: 34, marginTop: 9, borderRadius: 8, border: 0, background: form.client_id && form.service && form.preferred_time ? '#9B2C50' : '#E5DCD9', color: form.client_id && form.service && form.preferred_time ? '#fff' : '#9B8A84', fontSize: 10.5, fontWeight: 800, cursor: form.client_id && form.service && form.preferred_time ? 'pointer' : 'not-allowed', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
               {saving ? <Loader2 size={13} className="spin" /> : <Check size={13} />}Salvar na lista
             </button>
           </section>
@@ -277,7 +278,7 @@ export default function WaitlistPanel({
                   </div>
                   <div style={{ display: 'grid', gap: 4, marginTop: 8, padding: 7, borderRadius: 8, background: '#FAF7F6', color: '#806B65', fontSize: 9.5 }}>
                     <span style={{ display: 'flex', gap: 5, alignItems: 'center' }}><UserRound size={11} />{entry.preferred_professional || 'Qualquer profissional'}</span>
-                    <span style={{ display: 'flex', gap: 5, alignItems: 'center' }}><Clock3 size={11} />{WAITLIST_PERIODS.find((period) => period.value === entry.preferred_period)?.label || 'Qualquer horario'} · esperando {waitingSince(entry.created_at)}</span>
+                    <span style={{ display: 'flex', gap: 5, alignItems: 'center' }}><Clock3 size={11} />{String(entry.preferred_time || '').slice(0, 5) || 'Horário não informado'} · esperando {waitingSince(entry.created_at)}</span>
                     {entry.notes && <span style={{ color: '#6F5A54' }}>{entry.notes}</span>}
                   </div>
                   {canEdit && <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: 5, marginTop: 8 }}>
