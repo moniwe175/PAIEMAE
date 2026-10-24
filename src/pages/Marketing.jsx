@@ -451,6 +451,13 @@ function CampanhaDetail({ campanha, onClose, onEdit }) {
 export default function Marketing() {
   const [subTab, setSubTab] = useState('instagram'); // 'instagram' | 'insights' | 'campanhas' | 'ideias' | 'inteligencia'
 
+  useEffect(() => {
+    const requestedTab = new URLSearchParams(window.location.search).get('tab');
+    if (['instagram', 'insights', 'campanhas', 'ideias', 'inteligencia'].includes(requestedTab)) {
+      setSubTab(requestedTab);
+    }
+  }, []);
+
   // ── Campanhas State ──
   const [campanhas, setCampanhas] = useState([]);
   const [loading, setLoading] = useState(true);

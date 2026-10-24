@@ -74,7 +74,15 @@ export function buildPatientDocumentContent({
 }
 
 export function patientDocumentStatus(document) {
-  if (document?.status === 'revoked') return { label: 'Revogado', color: '#DC2626', background: '#FEE2E2' };
+  if (document?.status === 'revoked') {
+    const isImageAuthorization = document?.document_type === 'image_authorization';
+    return {
+      label: isImageAuthorization ? 'Autorização retirada' : 'Cancelado',
+      detail: 'Mantido no histórico',
+      color: '#DC2626',
+      background: '#FEE2E2',
+    };
+  }
   if (document?.status === 'signed') return { label: 'Assinado', color: '#047857', background: '#D1FAE5' };
   return { label: 'Pendente', color: '#B45309', background: '#FEF3C7' };
 }

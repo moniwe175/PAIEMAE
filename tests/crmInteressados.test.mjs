@@ -305,6 +305,9 @@ test('CRM exibe somente as quatro abas automáticas e remove qualificação/stat
   assert.ok(code.includes('Regra provisória ativa:'));
   assert.ok(code.includes('Receita atribuída ao CRM'));
   assert.ok(code.includes('Máquina de relacionamento'));
+  assert.ok(code.includes('Histórico automático da Agenda'));
+  assert.ok(code.includes('Por que os resultados ficam no Marketing?'));
+  assert.ok(code.includes('/marketing?tab=inteligencia'));
   assert.ok(code.includes("l._journey?.key === 'agendada'"), 'Cliente antigo com novo horário deve voltar para Agendados');
   assert.ok(!code.includes("activeTab === 'qualificacao'"), 'Bloco manual qual_* não deve ser renderizado');
   assert.ok(!code.includes('handleStatusChange'), 'Status não pode mais ser alterado manualmente');

@@ -199,7 +199,7 @@ function DocumentPaper({ document, patient }) {
       )}
       {document.status === 'revoked' && (
         <div style={{ marginTop: 22, padding: 12, borderRadius: 8, color: '#991B1B', background: '#FEF2F2', fontSize: 11 }}>
-          Revogado em {formatDate(document.revoked_at, true)}. Motivo: {document.revocation_reason || 'não informado'}
+          {document.document_type === 'image_authorization' ? 'Autorização retirada' : 'Documento cancelado'} em {formatDate(document.revoked_at, true)}. Mantido no histórico. Motivo: {document.revocation_reason || 'não informado'}
         </div>
       )}
     </div>
@@ -217,7 +217,7 @@ function ViewDialog({ document, patient, canEdit, onClose, onSign, onRevoke, onD
           <button onClick={printPatientDocument} style={secondaryButtonStyle}><Printer size={14} /> Imprimir</button>
           <div style={{ display: 'flex', gap: 8 }}>
             {canEdit && document.status === 'pending' && <button onClick={onDelete} style={dangerButtonStyle}><Trash2 size={14} /> Excluir pendente</button>}
-            {canEdit && document.status === 'signed' && <button onClick={onRevoke} style={dangerButtonStyle}>Revogar</button>}
+            {canEdit && document.status === 'signed' && <button onClick={onRevoke} style={dangerButtonStyle}>Cancelar documento assinado</button>}
             {canEdit && document.status === 'pending' && <button onClick={onSign} style={primaryButtonStyle}><PenLine size={14} /> Assinar agora</button>}
             <button onClick={onClose} style={secondaryButtonStyle}>Fechar</button>
           </div>
@@ -414,7 +414,7 @@ export default function PatientDocuments({ pacientes, loadingPatients, canEdit }
   };
 
   const revoke = async (document) => {
-    const reason = window.prompt('Informe o motivo da revogação. O documento continuará no histórico:');
+    const reason = window.prompt('Informe o motivo do cancelamento. O documento continuará no histórico:');
     if (reason === null) return;
     const { data, error } = await updatePatientDocument(document.id, {
       status: 'revoked', revoked_at: new Date().toISOString(), revocation_reason: reason.trim() || 'Solicitação do titular',

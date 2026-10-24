@@ -59,11 +59,13 @@ test('agendamento futuro válido transforma a pessoa em agendada', () => {
   assert.equal(journey.nextAppointmentDate, '2026-10-25');
 });
 
-test('agendamento cancelado não qualifica como agendada', () => {
+test('agendamento cancelado sem novo horário entra na fila de remarcação', () => {
   const journey = deriveCrmJourney(lead(), clients, [
     appointment('a1', '2026-10-25', 'cancelado'),
   ], TODAY);
-  assert.equal(journey.key, 'interessada');
+  assert.equal(journey.key, 'faltou');
+  assert.equal(journey.failureType, 'cancelamento');
+  assert.equal(journey.recommendation.label, 'Chamar para remarcar hoje');
   assert.equal(journey.nextAppointment, null);
 });
 

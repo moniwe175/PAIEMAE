@@ -17,6 +17,7 @@ import {
 import {
   CRM_JOURNEY_STATUS,
   enrichCrmLeads,
+  getCrmAppointmentValue,
   matchesCrmJourneyFilter,
   summarizeCrmRevenueFromAgenda,
 } from '../lib/crmJourney';
@@ -53,7 +54,7 @@ const ABAS = [
 
 const JOURNEY_FILTER_LABELS = {
   sem_agendamento: 'Interessadas sem agendamento',
-  faltaram: 'Faltaram e precisam reagendar',
+  faltaram: 'Faltas ou cancelamentos sem novo horário',
   em_risco: 'Clientes em risco ou inativas',
   agendadas: 'Com agendamento futuro',
   clientes: 'Clientes atendidas e recorrentes',
@@ -88,6 +89,26 @@ function fmtDatetime(ts) {
 
 function fmtMoney(value) {
   return Number(value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+}
+
+function agendaStatusPresentation(value) {
+  const status = String(value || '').trim().toLowerCase();
+  if (['finalizado', 'concluido', 'concluído', 'atendido'].includes(status)) {
+    return { label: 'Atendido', color: '#047857', background: '#ECFDF5', completed: true };
+  }
+  if (['falta', 'cliente_faltou', 'nao_compareceu', 'não_compareceu', 'no_show'].includes(status)) {
+    return { label: 'Faltou', color: '#DC2626', background: '#FEF2F2', completed: false };
+  }
+  if (['cancelado', 'cancelada', 'desmarcado', 'desmarcada'].includes(status)) {
+    return { label: 'Cancelado', color: '#C2410C', background: '#FFF7ED', completed: false };
+  }
+  if (status === 'em_atendimento') {
+    return { label: 'Em atendimento', color: '#7C3AED', background: '#F5F3FF', completed: false };
+  }
+  if (status === 'confirmado') {
+    return { label: 'Confirmado', color: '#2563EB', background: '#EFF6FF', completed: false };
+  }
+  return { label: 'Agendado', color: '#D97706', background: '#FFFBEB', completed: false };
 }
 
 function JourneyBadge({ journey, compact = false }) {
@@ -415,6 +436,14 @@ function LeadDrawer({ lead, onClose, onUpdate, clientes = [], agendamentos = [],
     () => clientes.find(c => String(c.id) === String(lead.client_id)) || journey?.client || null,
     [clientes, lead.client_id, journey?.client]
   );
+  const agendaHistory = useMemo(
+    () => [...(journey?.appointments || [])].sort((a, b) => {
+      const left = `${a?.appointment_date || ''}T${a?.appointment_time || '00:00'}`;
+      const right = `${b?.appointment_date || ''}T${b?.appointment_time || '00:00'}`;
+      return right.localeCompare(left);
+    }),
+    [journey?.appointments],
+  );
 
   // Registrar nota / contato
   const handleSend = async () => {
@@ -682,6 +711,47 @@ function LeadDrawer({ lead, onClose, onUpdate, clientes = [], agendamentos = [],
             {/* ── Histórico ── */}
             {activeTab === 'historico' && (
               <>
+                {agendaHistory.length > 0 && (
+                  <div style={{ marginBottom: 16 }}>
+                    <div style={{ fontSize: 11, fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 }}>
+                      Histórico automático da Agenda · {agendaHistory.length} registro(s)
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+                      {agendaHistory.map(appointment => {
+                        const status = agendaStatusPresentation(appointment.status);
+                        const value = getCrmAppointmentValue(appointment);
+                        return (
+                          <div key={appointment.id || `${appointment.appointment_date}-${appointment.appointment_time}`} style={{
+                            padding: '9px 10px', borderRadius: 8, background: 'var(--bg-main)',
+                            border: '1px solid var(--border-light)', display: 'flex', gap: 10,
+                            alignItems: 'center', justifyContent: 'space-between',
+                          }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                              <Calendar style={{ width: 14, height: 14, color: status.color, flexShrink: 0 }} />
+                              <div style={{ minWidth: 0 }}>
+                                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-dark)' }}>
+                                  {fmtDate(appointment.appointment_date)} · {String(appointment.appointment_time || '').slice(0, 5) || 'horário não informado'}
+                                </div>
+                                <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>
+                                  {appointment.procedure || 'Procedimento não informado'}
+                                  {(appointment.professional_name || appointment.professional) && ` · ${appointment.professional_name || appointment.professional}`}
+                                  {status.completed && ` · ${value > 0 ? fmtMoney(value) : 'valor não informado'}`}
+                                </div>
+                              </div>
+                            </div>
+                            <span style={{
+                              padding: '3px 8px', borderRadius: 99, fontSize: 10, fontWeight: 800,
+                              color: status.color, background: status.background, whiteSpace: 'nowrap',
+                            }}>
+                              {status.label}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
                 {automation?.events?.length > 0 && (
                   <div style={{ marginBottom: 16 }}>
                     <div style={{ fontSize: 11, fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 }}>
@@ -1377,6 +1447,30 @@ export default function CrmInteressados() {
         </div>
       </div>
 
+      <div style={{
+        marginBottom: 16, padding: '11px 14px', borderRadius: 10,
+        background: '#F5F3FF', border: '1px solid #DDD6FE',
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16,
+      }}>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+          <BadgeDollarSign style={{ width: 17, height: 17, color: '#6D28D9', marginTop: 1, flexShrink: 0 }} />
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 800, color: '#4C1D95' }}>Por que os resultados ficam no Marketing?</div>
+            <div style={{ fontSize: 11, color: '#6D28D9', marginTop: 2, lineHeight: 1.45 }}>
+              Aqui o CRM mostra quem precisa de atendimento. Em Marketing, Resultados do CRM compara origens e campanhas para mostrar quais canais geraram agendamentos e atendimentos.
+            </div>
+          </div>
+        </div>
+        <button
+          type="button"
+          className="btn btn-ghost btn-sm"
+          onClick={() => { window.location.href = '/marketing?tab=inteligencia'; }}
+          style={{ color: '#6D28D9', borderColor: '#C4B5FD', whiteSpace: 'nowrap', fontSize: 11 }}
+        >
+          Ver resultados por canal <ArrowRight style={{ width: 12, height: 12 }} />
+        </button>
+      </div>
+
       {/* Banner de filtro vindo da Inteligência Comercial */}
       {filtroOrigemParam && (
         <div style={{
@@ -1498,7 +1592,7 @@ export default function CrmInteressados() {
       <div className="grid-4 section-gap" style={{ gridTemplateColumns: 'repeat(4, minmax(0, 1fr))' }}>
         {[
           { key: 'sem_agendamento', label: 'Sem agendamento', val: stats.semAgendamento, cor: '#D97706', icon: Inbox },
-          { key: 'faltaram', label: 'Faltaram', val: stats.faltaram, cor: '#DC2626', icon: AlertTriangle },
+          { key: 'faltaram', label: 'Reagendar', val: stats.faltaram, cor: '#DC2626', icon: AlertTriangle },
           { key: 'pos_venda', label: 'Pós-atendimento', val: stats.posVenda, cor: '#059669', icon: Repeat2 },
           { key: 'em_risco', label: 'Reativar clientes', val: stats.emRisco, cor: '#C2410C', icon: Clock },
         ].map(({ key, label, val, cor, icon: Icon }) => (

@@ -31,7 +31,7 @@ export const CRM_JOURNEY_STATUS = Object.freeze({
     background: '#D1FAE5',
   },
   faltou: {
-    label: 'Faltou',
+    label: 'Precisa reagendar',
     shortLabel: 'Reagendar',
     color: '#DC2626',
     background: '#FEF2F2',
@@ -225,11 +225,13 @@ function recommendationFor(key, nextAppointment, lastCompleted, context = {}) {
       reason: 'Há pelo menos dois atendimentos finalizados nos últimos 90 dias.',
     },
     faltou: {
-      label: 'Chamar para reagendar hoje',
+      label: context.failureType === 'cancelamento' ? 'Chamar para remarcar hoje' : 'Chamar para reagendar hoje',
       priority: 4,
       requiresAction: true,
       dueDate: context.today,
-      reason: 'A última movimentação foi uma falta sem novo horário.',
+      reason: context.failureType === 'cancelamento'
+        ? 'O agendamento foi cancelado ou desmarcado e ainda não existe um novo horário.'
+        : 'A última movimentação foi uma falta sem novo horário.',
     },
     em_risco: {
       label: lastDate ? `Convidar para retornar · última visita ${formatDate(lastDate)}` : 'Convidar para retornar',
@@ -328,7 +330,17 @@ export function deriveCrmJourney(
     return date && date <= today && !CANCELLED_STATUSES.has(status) && !BLOCKED_STATUSES.has(status);
   });
   const lastOperational = pastOperational.at(-1) || null;
-  const latestWasNoShow = Boolean(lastOperational && NO_SHOW_STATUSES.has(appointmentStatus(lastOperational)));
+  const latestFailure = relatedAppointments.filter(appointment => {
+    const status = appointmentStatus(appointment);
+    return NO_SHOW_STATUSES.has(status) || CANCELLED_STATUSES.has(status);
+  }).at(-1) || null;
+  const failureAfterLastCompleted = Boolean(
+    latestFailure
+    && (!lastCompleted || appointmentTimestamp(latestFailure) >= appointmentTimestamp(lastCompleted)),
+  );
+  const failureType = latestFailure && CANCELLED_STATUSES.has(appointmentStatus(latestFailure))
+    ? 'cancelamento'
+    : latestFailure ? 'falta' : null;
 
   const completedInRecurringWindow = completed.filter(appointment => {
     const distance = daysBetween(isoDate(appointment.appointment_date), today);
@@ -340,7 +352,7 @@ export function deriveCrmJourney(
 
   let key = 'interessada';
   if (nextAppointment) key = 'agendada';
-  else if (latestWasNoShow) key = 'faltou';
+  else if (failureAfterLastCompleted) key = 'faltou';
   else if (lastCompleted && daysSinceLastVisit >= rules.inactiveClientAfterDays) key = 'inativa';
   else if (lastCompleted && daysSinceLastVisit >= rules.riskAfterDays) key = 'em_risco';
   else if (completedInRecurringWindow.length >= 2) key = 'recorrente';
@@ -360,6 +372,8 @@ export function deriveCrmJourney(
     completedCount: completed.length,
     completedInRecurringWindow: completedInRecurringWindow.length,
     lastAppointment: lastOperational,
+    latestFailure,
+    failureType,
     lastCompleted,
     nextAppointment,
     lastVisitDate: lastCompletedDate,
@@ -373,6 +387,7 @@ export function deriveCrmJourney(
       today,
       daysSinceLastVisit,
       daysSinceLeadCreation,
+      failureType,
     }),
     pipelineStatus: pipeline.status,
     pipelineAppointment: pipeline.appointment,

@@ -50,7 +50,8 @@ test('exige procedimento e finalidade quando necessarios', () => {
 test('traduz os estados operacionais do documento', () => {
   assert.equal(patientDocumentStatus({ status: 'pending' }).label, 'Pendente');
   assert.equal(patientDocumentStatus({ status: 'signed' }).label, 'Assinado');
-  assert.equal(patientDocumentStatus({ status: 'revoked' }).label, 'Revogado');
+  assert.equal(patientDocumentStatus({ status: 'revoked', document_type: 'procedure_consent' }).label, 'Cancelado');
+  assert.equal(patientDocumentStatus({ status: 'revoked', document_type: 'image_authorization' }).label, 'Autorização retirada');
 });
 
 test('migracao mantem assinatura, versao, RLS e imutabilidade', async () => {
@@ -74,6 +75,6 @@ test('interface separa documentos das fichas clinicas', async () => {
   assert.match(page, /Documentos e consentimentos/);
   assert.match(documents, /Novo documento/);
   assert.match(documents, /Confirmar assinatura/);
-  assert.match(documents, /Revogar/);
+  assert.match(documents, /Cancelar documento assinado/);
   assert.match(documents, /Excluir documento pendente/);
 });
