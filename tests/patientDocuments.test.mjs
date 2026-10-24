@@ -75,4 +75,5 @@ test('interface separa documentos das fichas clinicas', async () => {
   assert.match(documents, /Novo documento/);
   assert.match(documents, /Confirmar assinatura/);
   assert.match(documents, /Revogar/);
+  assert.match(documents, /Excluir documento pendente/);
 });

@@ -488,12 +488,25 @@ export default function PatientDocuments({ pacientes, loadingPatients, canEdit }
                   const type = patientDocumentType(document.document_type);
                   const status = patientDocumentStatus(document);
                   return (
-                    <button key={document.id} onClick={() => setViewing(document)} style={{ width: '100%', padding: '11px 12px', border: '1px solid #EAE2DD', borderRadius: 10, background: '#fff', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 11, textAlign: 'left', cursor: 'pointer' }}>
-                      <div style={{ width: 36, height: 36, borderRadius: 9, display: 'grid', placeItems: 'center', background: '#F8F1ED', color: '#A55D45' }}><FileCheck2 size={17} /></div>
-                      <div style={{ flex: 1, minWidth: 0 }}><strong style={{ display: 'block', fontSize: 12, color: '#3D322E' }}>{type.label}</strong><span style={{ fontSize: 10.5, color: '#98827A' }}>{document.procedure_name || 'Documento geral'} · {formatDate(document.signed_at || document.created_at, true)}</span></div>
-                      <span style={{ padding: '4px 8px', borderRadius: 20, background: status.background, color: status.color, fontSize: 9.5, fontWeight: 800 }}>{status.label}</span>
-                      <Eye size={14} color="#A8958D" />
-                    </button>
+                    <div key={document.id} style={{ width: '100%', padding: '7px 8px 7px 12px', border: '1px solid #EAE2DD', borderRadius: 10, background: '#fff', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 7 }}>
+                      <button onClick={() => setViewing(document)} style={{ minWidth: 0, flex: 1, padding: '4px 0', border: 0, background: 'transparent', display: 'flex', alignItems: 'center', gap: 11, textAlign: 'left', cursor: 'pointer' }}>
+                        <div style={{ width: 36, height: 36, borderRadius: 9, display: 'grid', placeItems: 'center', background: '#F8F1ED', color: '#A55D45', flexShrink: 0 }}><FileCheck2 size={17} /></div>
+                        <div style={{ flex: 1, minWidth: 0 }}><strong style={{ display: 'block', fontSize: 12, color: '#3D322E' }}>{type.label}</strong><span style={{ fontSize: 10.5, color: '#98827A' }}>{document.procedure_name || 'Documento geral'} · {formatDate(document.signed_at || document.created_at, true)}</span></div>
+                        <span style={{ padding: '4px 8px', borderRadius: 20, background: status.background, color: status.color, fontSize: 9.5, fontWeight: 800, flexShrink: 0 }}>{status.label}</span>
+                        <Eye size={14} color="#A8958D" style={{ flexShrink: 0 }} />
+                      </button>
+                      {canEdit && document.status === 'pending' && (
+                        <button
+                          type="button"
+                          onClick={() => removePending(document)}
+                          title="Excluir documento pendente"
+                          aria-label={`Excluir ${type.label}`}
+                          style={{ width: 32, height: 32, border: '1px solid #F1B8B2', borderRadius: 8, background: '#FFF7F6', color: '#C33A31', display: 'grid', placeItems: 'center', cursor: 'pointer', flexShrink: 0 }}
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      )}
+                    </div>
                   );
                 })}
               </div>
