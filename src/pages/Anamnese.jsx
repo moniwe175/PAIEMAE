@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { fetchClients, fetchAnamneses, upsertAnamnese, deleteAnamnese } from '../services/supabaseService';
 import { getCurrentUser } from '../lib/supabase';
+import PatientDocuments from '../components/anamnese/PatientDocuments';
 
 // ─── Empty form ───────────────────────────────────────────────────────────────
 function emptyForm() {
@@ -1184,8 +1185,48 @@ function ViewFicha({ paciente, ficha, onEdit, onClose, onConfirmSave, isSaving }
 }
 
 // ─── MAIN PAGE ─────────────────────────────────────────────────────────────────
+function AnamneseSectionHeader({ active, onChange }) {
+  const tabs = [
+    { id: 'clinical', label: 'Fichas clínicas', icon: ClipboardList },
+    { id: 'documents', label: 'Documentos e consentimentos', icon: FileText },
+  ];
+  return (
+    <>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div style={{ width: 38, height: 38, borderRadius: 12, background: 'linear-gradient(135deg,#C73B6D,#9B2C50)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <ClipboardList style={{ width: 18, height: 18, color: '#fff' }} />
+          </div>
+          <div>
+            <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1, color: '#C73B6D', textTransform: 'uppercase' }}>Pacientes e segurança</div>
+            <div style={{ fontSize: 16, fontWeight: 700, color: '#1F2937' }}>Anamnese e documentos</div>
+          </div>
+        </div>
+      </div>
+      <div style={{ display: 'flex', gap: 4, padding: 4, borderRadius: 11, background: '#F3EBE8', width: 'fit-content', marginBottom: 14 }}>
+        {tabs.map(({ id, label, icon: Icon }) => (
+          <button
+            key={id}
+            onClick={() => onChange(id)}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 6, border: 0, borderRadius: 8,
+              padding: '8px 12px', cursor: 'pointer', fontSize: 11.5, fontWeight: 700,
+              background: active === id ? '#fff' : 'transparent',
+              color: active === id ? '#9B2C50' : '#816C65',
+              boxShadow: active === id ? '0 1px 4px rgba(70,40,30,0.1)' : 'none',
+            }}
+          >
+            <Icon style={{ width: 14, height: 14 }} />{label}
+          </button>
+        ))}
+      </div>
+    </>
+  );
+}
+
 export default function Anamnese() {
   const { canEdit } = useAuth();
+  const [section, setSection] = useState('clinical');
   const [pacientes, setPacientes] = useState([]);
   const [anamneses, setAnamneses] = useState({}); // { clientId: { tipoFicha: fichaData } }
   const [loading, setLoading] = useState(true);
@@ -1346,20 +1387,19 @@ export default function Anamnese() {
     );
   }
 
+  if (section === 'documents') {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 40px)' }}>
+        <AnamneseSectionHeader active={section} onChange={setSection} />
+        <PatientDocuments pacientes={pacientes} loadingPatients={loading} canEdit={canEdit('anamnese')} />
+      </div>
+    );
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 40px)' }}>
       {/* Page Header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <div style={{ width: 38, height: 38, borderRadius: 12, background: 'linear-gradient(135deg,#C73B6D,#9B2C50)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <ClipboardList style={{ width: 18, height: 18, color: '#fff' }} />
-          </div>
-          <div>
-            <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1, color: '#C73B6D', textTransform: 'uppercase' }}>Fichas</div>
-            <div style={{ fontSize: 16, fontWeight: 700, color: '#1F2937' }}>Anamnese</div>
-          </div>
-        </div>
-      </div>
+      <AnamneseSectionHeader active={section} onChange={setSection} />
 
       {/* Stats */}
       <div style={{ display: 'flex', gap: 10, marginBottom: 16 }}>

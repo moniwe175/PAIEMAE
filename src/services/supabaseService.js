@@ -1347,6 +1347,52 @@ export async function deleteAnamnese(id) {
 
 // ─── Inventory (Estoque) ────────────────────────────────────
 
+// Patient documents and consents
+export async function fetchPatientDocuments() {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured', []);
+  const { data, error } = await supabase
+    .from('patient_documents')
+    .select('*')
+    .order('created_at', { ascending: false });
+  if (error) return handleError(error, []);
+  return { data: data || [], error: null };
+}
+
+export async function insertPatientDocument(document) {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured');
+  const userId = document.user_id || await getUserId();
+  const { data, error } = await supabase
+    .from('patient_documents')
+    .insert([{ ...document, user_id: userId }])
+    .select()
+    .single();
+  if (error) return handleError(error);
+  return { data, error: null };
+}
+
+export async function updatePatientDocument(id, updates) {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured');
+  const { data, error } = await supabase
+    .from('patient_documents')
+    .update(updates)
+    .eq('id', id)
+    .select()
+    .single();
+  if (error) return handleError(error);
+  return { data, error: null };
+}
+
+export async function deletePendingPatientDocument(id) {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured');
+  const { error } = await supabase
+    .from('patient_documents')
+    .delete()
+    .eq('id', id)
+    .eq('status', 'pending');
+  if (error) return handleError(error);
+  return { data: true, error: null };
+}
+
 export async function fetchInventory() {
   if (!isSupabaseConfigured()) return handleError('Supabase not configured', []);
   const { data, error } = await supabase
