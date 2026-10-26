@@ -9,6 +9,7 @@ import {
   packageAcceptsService,
   packageProgress,
   patientsWithPackages,
+  resolvePackageChoice,
 } from '../src/lib/patientPackages.js';
 
 const pkg = {
@@ -47,6 +48,21 @@ test('oferece somente pacote do paciente, ativo, com saldo e serviço compatíve
   assert.deepEqual(list.map((item) => item.id), ['pkg-1']);
 });
 
+test('prioriza o identificador estável do serviço e preserva pacotes antigos por nome', () => {
+  const renamedService = { id: 'svc-botox', nome: 'Toxina Botulínica Facial' };
+  assert.equal(packageAcceptsService({ services: [{ id: 'svc-botox', nome: 'Botox' }] }, renamedService), true);
+  assert.equal(packageAcceptsService({ services: [{ id: 'svc-drenagem', nome: 'Botox' }] }, renamedService), false);
+  assert.equal(packageAcceptsService({ services: [{ nome: 'Botox Facial' }] }, 'Botox'), true);
+  assert.equal(packageAcceptsService({ services: [{ id: 'svc-drenagem', nome: 'Drenagem' }, { nome: 'Toxina Botulínica Facial' }] }, renamedService), true);
+});
+
+test('seleciona pacote único automaticamente e só pede escolha quando há conflito', () => {
+  assert.deepEqual(resolvePackageChoice([], null), { mode: 'none', packageId: null });
+  assert.deepEqual(resolvePackageChoice([{ id: 'unico' }], null), { mode: 'automatic', packageId: 'unico' });
+  assert.deepEqual(resolvePackageChoice([{ id: 'a' }, { id: 'b' }], null), { mode: 'choose', packageId: null });
+  assert.deepEqual(resolvePackageChoice([{ id: 'a' }, { id: 'b' }], 'b'), { mode: 'selected', packageId: 'b' });
+});
+
 test('calcula validade do catálogo a partir da data de compra', () => {
   assert.equal(addMonthsToDate('2026-10-26', '6 meses'), '2027-04-26');
   assert.equal(addMonthsToDate('2026-10-26', '1 ano'), '2027-10-26');
@@ -66,7 +82,7 @@ test('a área de assinaturas lista somente pacientes que possuem pacote', () => 
 });
 
 test('migração e interfaces preservam vínculo, assinatura e estorno', async () => {
-  const [migration, patients, agenda, signatures, signaturesPage, app, sidebar] = await Promise.all([
+  const [migration, patients, agenda, signatures, signaturesPage, app, sidebar, packageCatalog] = await Promise.all([
     readFile(new URL('../patient_packages_migration.sql', import.meta.url), 'utf8'),
     readFile(new URL('../src/pages/Pacientes.jsx', import.meta.url), 'utf8'),
     readFile(new URL('../src/pages/Agenda.jsx', import.meta.url), 'utf8'),
@@ -74,6 +90,7 @@ test('migração e interfaces preservam vínculo, assinatura e estorno', async (
     readFile(new URL('../src/pages/Assinaturas.jsx', import.meta.url), 'utf8'),
     readFile(new URL('../src/App.jsx', import.meta.url), 'utf8'),
     readFile(new URL('../src/components/ui/sidebar.jsx', import.meta.url), 'utf8'),
+    readFile(new URL('../src/components/services/PacotesSection.jsx', import.meta.url), 'utf8'),
   ]);
   assert.match(migration, /CREATE TABLE IF NOT EXISTS public\.patient_packages/i);
   assert.match(migration, /CREATE TABLE IF NOT EXISTS public\.patient_package_sessions/i);
@@ -83,8 +100,12 @@ test('migração e interfaces preservam vínculo, assinatura e estorno', async (
   assert.match(migration, /ENABLE ROW LEVEL SECURITY/i);
   assert.match(patients, /<PatientPackagesPanel/);
   assert.doesNotMatch(patients, /PackageSignaturesPanel/);
-  assert.match(agenda, /Utilizar pacote da paciente/);
-  assert.match(agenda, /não duplicar a receita/);
+  assert.match(agenda, /Pacote identificado automaticamente/);
+  assert.match(agenda, /Selecione o serviço primeiro/);
+  assert.match(agenda, /eligiblePackages\.length > 1/);
+  assert.match(agenda, /saldo será descontado somente ao finalizar/i);
+  assert.match(agenda, /service_id: item\.service_id/);
+  assert.match(packageCatalog, /id: service\.id/);
   assert.match(signatures, /Aguardando assinatura/);
   assert.match(signatures, /Somente quem possui pacote aparece aqui/);
   assert.match(signatures, /<PackageSignatureDialog/);

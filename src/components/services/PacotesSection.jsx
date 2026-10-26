@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import {
   ShoppingBag, Plus, Search, XCircle, Clock, DollarSign,
-  Edit3, Trash2, CheckCircle, X, Tag, Layers,
+  Edit3, Trash2, CheckCircle, Tag, Layers,
 } from 'lucide-react';
 import { fetchPackages, insertPackage, updatePackage, deletePackage } from '../../services/supabaseService';
 import { useServicos } from '../../lib/servicos';
@@ -10,11 +10,27 @@ import { useServicos } from '../../lib/servicos';
 const genId = () => 'pkg_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 
 // Aceita tanto o formato legado (["Depilação"]) quanto o atual ([{ nome, qtd }])
-function normalizaServicos(arr) {
+function normalizaServicos(arr, catalogo = []) {
   if (!Array.isArray(arr)) return [];
   return arr
-    .map(s => (typeof s === 'string' ? { nome: s, qtd: 1 } : { nome: s?.nome, qtd: Number(s?.qtd) || 1 }))
+    .map((s) => {
+      const nome = typeof s === 'string' ? s : s?.nome || s?.name;
+      const existingId = typeof s === 'object' ? s?.id || s?.service_id : null;
+      const catalogService = existingId
+        ? catalogo.find((item) => String(item.id) === String(existingId))
+        : catalogo.find((item) => item.nome === nome);
+      return {
+        id: existingId || catalogService?.id || null,
+        nome: catalogService?.nome || nome,
+        qtd: typeof s === 'object' ? Number(s?.qtd) || 1 : 1,
+      };
+    })
     .filter(s => s.nome);
+}
+
+function sameService(left, right) {
+  if (left?.id && right?.id) return String(left.id) === String(right.id);
+  return left?.nome === right?.nome;
 }
 
 // ─── Modal de criação/edição ────────────────────────────────
@@ -27,19 +43,19 @@ function PacoteFormModal({ pacote, catalogo, onClose, onSave }) {
     sessoes: String(pacote.sessoes ?? ''),
     validade: pacote.validade || '',
     ativo: pacote.ativo !== false,
-    servicos: normalizaServicos(pacote.servicos),
+    servicos: normalizaServicos(pacote.servicos, catalogo),
   } : { nome: '', preco: '', desconto: '', sessoes: '', validade: '', ativo: true, servicos: [] });
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
-  const toggleServico = (nome) => setForm(f => ({
+  const toggleServico = (service) => setForm(f => ({
     ...f,
-    servicos: f.servicos.some(x => x.nome === nome)
-      ? f.servicos.filter(x => x.nome !== nome)
-      : [...f.servicos, { nome, qtd: 1 }],
+    servicos: f.servicos.some((item) => sameService(item, service))
+      ? f.servicos.filter((item) => !sameService(item, service))
+      : [...f.servicos, { id: service.id, nome: service.nome, qtd: 1 }],
   }));
-  const setQtd = (nome, qtd) => setForm(f => ({
+  const setQtd = (service, qtd) => setForm(f => ({
     ...f,
-    servicos: f.servicos.map(x => x.nome === nome ? { ...x, qtd: Math.max(1, Number(qtd) || 1) } : x),
+    servicos: f.servicos.map((item) => sameService(item, service) ? { ...item, qtd: Math.max(1, Number(qtd) || 1) } : item),
   }));
 
   const podeSalvar = form.nome.trim() && form.preco !== '';
@@ -94,11 +110,11 @@ function PacoteFormModal({ pacote, catalogo, onClose, onSave }) {
                 </span>
               )}
               {catalogo.map(s => {
-                const sel = form.servicos.find(x => x.nome === s.nome);
+                const sel = form.servicos.find((item) => sameService(item, s));
                 return (
                   <div
                     key={s.id}
-                    onClick={() => toggleServico(s.nome)}
+                    onClick={() => toggleServico(s)}
                     style={{
                       display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                       padding: '7px 10px', borderRadius: 8, cursor: 'pointer', marginBottom: 2,
@@ -116,7 +132,7 @@ function PacoteFormModal({ pacote, catalogo, onClose, onSave }) {
                           type="number"
                           min="1"
                           value={sel.qtd}
-                          onChange={e => setQtd(s.nome, e.target.value)}
+                          onChange={e => setQtd(s, e.target.value)}
                           style={{ width: 56, padding: '3px 6px', borderRadius: 6, border: '1px solid #FECDD3', fontSize: 12, textAlign: 'center' }}
                         />
                         <CheckCircle style={{ width: 14, height: 14, color: '#C73B6D' }} />
@@ -342,7 +358,7 @@ export default function PacotesSection() {
               </div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
                 {p.servicos.map(s => (
-                  <span key={s.nome} style={{
+                  <span key={s.id || s.nome} style={{
                     display: 'inline-flex', alignItems: 'center', gap: 4,
                     background: '#FFF1F2', color: '#E11D48', border: '1px solid #FECDD3',
                     padding: '3px 8px', borderRadius: 99, fontSize: 11, fontWeight: 600,

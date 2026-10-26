@@ -25,7 +25,7 @@ import {
 } from '../services/supabaseService';
 import TabletAnamneseModal from '../components/agenda/TabletAnamneseModal';
 import WaitlistPanel from '../components/agenda/WaitlistPanel';
-import { eligiblePatientPackages, packageProgress } from '../lib/patientPackages';
+import { eligiblePatientPackages, packageProgress, resolvePackageChoice } from '../lib/patientPackages';
 
 // ─── Search helpers ──────────────────────────────────────────
 
@@ -162,6 +162,7 @@ function mapToSupabase(item, isBlock = false) {
       notes: JSON.stringify({
         valor: item.valor,
         duracao: item.duracao,
+        service_id: item.service_id || null,
         observacoes: item.observacoes,
         fixo: item.fixo,
         ficha_pendente: !!item.ficha_pendente
@@ -188,7 +189,7 @@ function mapFromSupabase(item) {
       observacoes: item.notes || ''
     };
   } else {
-    let extra = { valor: 0, duracao: 60, observacoes: '', fixo: false, ficha_pendente: false };
+    let extra = { valor: 0, duracao: 60, service_id: null, observacoes: '', fixo: false, ficha_pendente: false };
     try {
       if (item.notes && item.notes.startsWith('{')) {
         extra = JSON.parse(item.notes);
@@ -207,6 +208,7 @@ function mapFromSupabase(item) {
       telefone: item.client_phone || '',
       profissional: item.professional,
       servico: item.procedure,
+      service_id: extra.service_id || null,
       status: item.status || 'aguardando_confirmacao',
       client_id: item.client_id || null,
       exames_pendentes: !!item.exames_pendentes,
@@ -726,12 +728,13 @@ function AtendimentoBlockedModal({ info, onClose, onPreencherFicha }) {
 // ═══════════════════════════════════════════════════════════════
 // ─── AgendamentoModal ─────────────────────────────────────────
 // ═══════════════════════════════════════════════════════════════
-function AgendamentoModal({ onClose, date, profissional: prefillProf, hora: prefillHora, profissionais, apt, prefill, onSave }) {
+function AgendamentoModal({ onClose, date, profissional: prefillProf, hora: prefillHora, profissionais, servicosCatalogo = [], apt, prefill, onSave }) {
   const isEdit = !!apt;
   const [pacientes, setPacientes] = useState([]);
   const [patientPackages, setPatientPackages] = useState([]);
   const [packageSessions, setPackageSessions] = useState([]);
   const [packageLoadError, setPackageLoadError] = useState('');
+  const [packagesLoading, setPackagesLoading] = useState(false);
   const [showNewClient, setShowNewClient] = useState(false);
   const [clienteBusca, setClienteBusca] = useState(isEdit ? apt.paciente : prefill?.patientName || '');
   const [showClienteList, setShowClienteList] = useState(false);
@@ -785,6 +788,7 @@ function AgendamentoModal({ onClose, date, profissional: prefillProf, hora: pref
     paciente: prefill?.patientName || '', telefone: prefill?.phone || '',
     client_id: prefill?.clientId || null,
     profissional: prefill?.professional || prefillProf || '', servico: prefill?.service || '',
+    service_id: servicosCatalogo.find((service) => service.nome === (prefill?.service || ''))?.id || null,
     waitlist_id: prefill?.waitlistId || null,
     status: 'aguardando_confirmacao', valor: '', observacoes: '', exames_pendentes: false,
     ficha_pendente: false,
@@ -795,9 +799,11 @@ function AgendamentoModal({ onClose, date, profissional: prefillProf, hora: pref
       setPatientPackages([]);
       setPackageSessions([]);
       setPackageLoadError('');
+      setPackagesLoading(false);
       return;
     }
     let cancelled = false;
+    setPackagesLoading(true);
     Promise.all([
       fetchPatientPackages(form.client_id),
       fetchPatientPackageSessions(form.client_id),
@@ -807,6 +813,7 @@ function AgendamentoModal({ onClose, date, profissional: prefillProf, hora: pref
       setPackageSessions(sessionsRes.data || []);
       const error = packagesRes.error || sessionsRes.error;
       setPackageLoadError(error ? (error.message || String(error)) : '');
+      setPackagesLoading(false);
     });
     return () => { cancelled = true; };
   }, [form.client_id]);
@@ -840,37 +847,90 @@ function AgendamentoModal({ onClose, date, profissional: prefillProf, hora: pref
     return dates;
   }, [repetir, recAte, recFreq, form.data]);
 
+  const serviceOptions = useMemo(() => {
+    const activeCatalog = (servicosCatalogo || []).filter((service) => service.ativo !== false);
+    if (activeCatalog.length > 0) return activeCatalog;
+    return [...new Set(profissionais.flatMap((professional) => professional.servicos || []))]
+      .sort((a, b) => a.localeCompare(b, 'pt-BR'))
+      .map((nome) => ({ id: null, nome, duracao: 60, preco: 0 }));
+  }, [servicosCatalogo, profissionais]);
+
+  useEffect(() => {
+    if (!form.service_id) return;
+    const currentService = serviceOptions.find((service) => service.id && String(service.id) === String(form.service_id));
+    if (currentService && currentService.nome !== form.servico) {
+      setForm((current) => ({ ...current, servico: currentService.nome }));
+    }
+  }, [serviceOptions, form.service_id, form.servico]);
+
   const set = useCallback((k, v) => setForm(f => {
     const next = { ...f, [k]: v };
     if (k === 'profissional') {
       const selectedProfessional = profissionais.find((professional) => professional.nome === v);
-      if (!selectedProfessional?.servicos?.includes(f.servico)) next.servico = '';
+      if (f.servico && !selectedProfessional?.servicos?.includes(f.servico)) {
+        next.servico = '';
+        next.service_id = null;
+        next.patient_package_id = null;
+      }
     }
     if (k === 'hora' || k === 'duracao') next.horaFim = calcEndTime(k === 'hora' ? v : f.hora, k === 'duracao' ? Number(v) : Number(f.duracao));
     if (k === 'paciente') {
       const p = pacientes.find(x => x.nome === v);
       next.client_id = p?.id || null;
+      next.patient_package_id = null;
       if (p) next.telefone = p.telefone || '';
     }
     if (k === 'servico') {
-      const precos = { 'Limpeza de Pele': 180, 'Peeling Químico': 220, 'Botox Facial': 800, 'Design de Sobrancelha': 80, 'Drenagem Linfática': 150, 'Harmonização Facial': 1200, 'Preenchimento Labial': 900, 'Fio de PDO': 1500, 'Bioestimulador': 1800, 'Depilação a Laser': 300, 'Depilação': 80, 'Massagem': 120, 'Microagulhamento': 350, 'Criolipólise': 800, 'Radiofrequência': 250, 'Ultrassom': 200, 'Carboxiterapia': 180 };
-      if (precos[v] && !f.valor) next.valor = precos[v];
+      const service = serviceOptions.find((item) => item.nome === v);
+      const selectedProfessional = profissionais.find((professional) => professional.nome === f.profissional);
+      next.service_id = service?.id || null;
+      next.patient_package_id = null;
+      next.valor = service ? Number(service.preco) || 0 : '';
+      if (service?.duracao) {
+        next.duracao = Number(service.duracao);
+        next.horaFim = calcEndTime(f.hora, Number(service.duracao));
+      }
+      if (selectedProfessional && !selectedProfessional.servicos?.includes(v)) next.profissional = '';
     }
     return next;
-  }), [pacientes, profissionais]);
+  }), [pacientes, profissionais, serviceOptions]);
 
-  const profObj = profissionais.find(p => p.nome === form.profissional);
-  const servicos = profObj ? profObj.servicos : [];
+  const selectedService = serviceOptions.find((service) => (
+    (form.service_id && service.id && String(service.id) === String(form.service_id))
+    || service.nome === form.servico
+  ));
+  const compatibleProfessionals = useMemo(() => form.servico
+    ? profissionais.filter((professional) => professional.servicos?.includes(form.servico))
+    : [], [profissionais, form.servico]);
   const eligiblePackages = useMemo(
-    () => eligiblePatientPackages(patientPackages, packageSessions, form.client_id, form.servico),
-    [patientPackages, packageSessions, form.client_id, form.servico]
+    () => form.client_id && form.servico
+      ? eligiblePatientPackages(patientPackages, packageSessions, form.client_id, selectedService || form.servico)
+      : [],
+    [patientPackages, packageSessions, form.client_id, form.servico, selectedService]
   );
-  const selectablePackages = useMemo(() => {
-    if (!form.patient_package_id) return eligiblePackages;
-    const current = patientPackages.find((item) => String(item.id) === String(form.patient_package_id));
-    return current && !eligiblePackages.some((item) => item.id === current.id) ? [current, ...eligiblePackages] : eligiblePackages;
-  }, [eligiblePackages, patientPackages, form.patient_package_id]);
-  const canSave = form.paciente && form.profissional && form.servico && form.hora && form.data;
+  const packageChoice = useMemo(
+    () => resolvePackageChoice(eligiblePackages, form.patient_package_id),
+    [eligiblePackages, form.patient_package_id],
+  );
+
+  useEffect(() => {
+    setForm((current) => {
+      if (!current.client_id || !current.servico || packagesLoading) return current;
+      if (packageChoice.mode === 'automatic' && String(current.patient_package_id || '') !== String(packageChoice.packageId)) {
+        return { ...current, patient_package_id: packageChoice.packageId, valor: 0 };
+      }
+      if ((packageChoice.mode === 'none' || packageChoice.mode === 'choose') && current.patient_package_id) {
+        return { ...current, patient_package_id: null, valor: Number(selectedService?.preco) || 0 };
+      }
+      if (packageChoice.mode === 'selected' && Number(current.valor) !== 0) {
+        return { ...current, valor: 0 };
+      }
+      return current;
+    });
+  }, [packageChoice.mode, packageChoice.packageId, packagesLoading, selectedService?.preco]);
+
+  const canSave = form.paciente && form.profissional && form.servico && form.hora && form.data
+    && !packagesLoading && packageChoice.mode !== 'choose';
 
   const handleSave = () => {
     if (!canSave) return;
@@ -1023,56 +1083,73 @@ function AgendamentoModal({ onClose, date, profissional: prefillProf, hora: pref
             </div>
           )}
 
-          {/* Profissional */}
-          <div style={{ marginBottom: 14 }}>
-            <label style={labelSt}><span style={{ display: 'flex', alignItems: 'center', gap: 5 }}><Scissors style={{ width: 12, height: 12, color: '#C73B6D' }} />Profissional *</span></label>
-            <select value={form.profissional} onChange={e => set('profissional', e.target.value)} style={inputSt}>
-              <option value="">Selecione...</option>
-              {profissionais.map(p => <option key={p.nome} value={p.nome}>{p.nome} — {p.cargo}</option>)}
-            </select>
-          </div>
-
           {/* Serviço */}
           <div style={{ marginBottom: 14 }}>
             <label style={labelSt}><span style={{ display: 'flex', alignItems: 'center', gap: 5 }}><Star style={{ width: 12, height: 12, color: '#C73B6D' }} />Serviço *</span></label>
-            {!form.profissional ? (
-              <div style={{ padding: '10px 12px', borderRadius: 10, border: '1.5px dashed #E5E7EB', color: '#9CA3AF', fontSize: 13, display: 'flex', alignItems: 'center', gap: 7 }}>
-                <AlertCircle style={{ width: 14, height: 14 }} />Selecione uma profissional primeiro
-              </div>
-            ) : servicos.length === 0 ? (
+            {serviceOptions.length === 0 ? (
               <div style={{ padding: '10px 12px', borderRadius: 10, border: '1.5px dashed #FCA5A5', color: '#EF4444', fontSize: 13, background: '#FFF5F5' }}>Nenhum serviço cadastrado</div>
             ) : (
               <select value={form.servico} onChange={e => set('servico', e.target.value)} style={inputSt}>
                 <option value="">Selecione o serviço...</option>
-                {servicos.map(s => <option key={s} value={s}>{s}</option>)}
+                {serviceOptions.map((service) => <option key={service.id || service.nome} value={service.nome}>{service.nome}</option>)}
+              </select>
+            )}
+            <div style={{ marginTop: 5, fontSize: 10.5, color: '#9CA3AF' }}>Escolha o procedimento uma única vez. O pacote será identificado automaticamente.</div>
+          </div>
+
+          {/* Profissional compatível com o serviço */}
+          <div style={{ marginBottom: 14 }}>
+            <label style={labelSt}><span style={{ display: 'flex', alignItems: 'center', gap: 5 }}><Scissors style={{ width: 12, height: 12, color: '#C73B6D' }} />Profissional *</span></label>
+            {!form.servico ? (
+              <div style={{ padding: '10px 12px', borderRadius: 10, border: '1.5px dashed #E5E7EB', color: '#9CA3AF', fontSize: 13, display: 'flex', alignItems: 'center', gap: 7 }}>
+                <AlertCircle style={{ width: 14, height: 14 }} />Selecione o serviço primeiro
+              </div>
+            ) : compatibleProfessionals.length === 0 ? (
+              <div style={{ padding: '10px 12px', borderRadius: 10, border: '1.5px dashed #FCA5A5', color: '#EF4444', fontSize: 13, background: '#FFF5F5' }}>Nenhum profissional está vinculado a este serviço.</div>
+            ) : (
+              <select value={form.profissional} onChange={e => set('profissional', e.target.value)} style={inputSt}>
+                <option value="">Selecione...</option>
+                {compatibleProfessionals.map((professional) => <option key={professional.id || professional.nome} value={professional.nome}>{professional.nome} — {professional.cargo}</option>)}
               </select>
             )}
           </div>
 
-          {form.client_id && !packageLoadError && (
+          {form.client_id && form.servico && (
             <div style={{ marginBottom: 14 }}>
-              <label style={labelSt}><span style={{ display: 'flex', alignItems: 'center', gap: 5 }}><CheckSquare style={{ width: 12, height: 12, color: '#C73B6D' }} />Utilizar pacote da paciente</span></label>
-              <select
-                value={form.patient_package_id || ''}
-                onChange={(event) => {
-                  const packageId = event.target.value || null;
-                  setForm((current) => ({ ...current, patient_package_id: packageId, valor: packageId ? 0 : current.valor }));
-                }}
-                style={inputSt}
-              >
-                <option value="">Não utilizar pacote (atendimento avulso)</option>
-                {selectablePackages.map((item) => {
-                  const progress = packageProgress(item, packageSessions);
-                  return <option key={item.id} value={item.id}>{item.package_name} · {progress.remaining} de {progress.total} restantes</option>;
-                })}
-              </select>
-              {form.patient_package_id ? (
-                <div style={{ marginTop: 6, padding: '7px 10px', borderRadius: 8, background: '#ECFDF5', border: '1px solid #A7F3D0', color: '#047857', fontSize: 10.5 }}>
-                  A sessão será consumida somente ao finalizar o atendimento. O valor fica zerado para não duplicar a receita da venda do pacote.
+              <label style={labelSt}><span style={{ display: 'flex', alignItems: 'center', gap: 5 }}><CheckSquare style={{ width: 12, height: 12, color: '#C73B6D' }} />Forma do atendimento</span></label>
+              {packagesLoading ? (
+                <div style={{ padding: '9px 11px', borderRadius: 8, background: '#F9FAFB', color: '#6B7280', fontSize: 11 }}>Verificando os pacotes da paciente...</div>
+              ) : packageLoadError ? (
+                <div style={{ padding: '9px 11px', borderRadius: 8, background: '#FFF7ED', border: '1px solid #FED7AA', color: '#9A3412', fontSize: 11 }}>Pacotes indisponíveis no momento. O agendamento será salvo como avulso; verifique se patient_packages_migration.sql foi executado.</div>
+              ) : eligiblePackages.length > 1 ? (
+                <div style={{ padding: 10, borderRadius: 9, background: '#FFFBEB', border: '1px solid #FDE68A' }}>
+                  <div style={{ marginBottom: 7, color: '#92400E', fontSize: 10.5, fontWeight: 700 }}>Esta paciente possui mais de um pacote compatível. Escolha qual saldo utilizar:</div>
+                  <select
+                    value={form.patient_package_id || ''}
+                    onChange={(event) => {
+                      const packageId = event.target.value || null;
+                      setForm((current) => ({ ...current, patient_package_id: packageId, valor: packageId ? 0 : Number(selectedService?.preco) || 0 }));
+                    }}
+                    style={inputSt}
+                  >
+                    <option value="">Selecione o pacote...</option>
+                    {eligiblePackages.map((item) => {
+                      const progress = packageProgress(item, packageSessions);
+                      return <option key={item.id} value={item.id}>{item.package_name} · {progress.remaining} de {progress.total} restantes</option>;
+                    })}
+                  </select>
                 </div>
-              ) : selectablePackages.length === 0 && form.servico ? (
-                <div style={{ marginTop: 5, fontSize: 10.5, color: '#9CA3AF' }}>Nenhum pacote ativo compatível com este serviço.</div>
-              ) : null}
+              ) : form.patient_package_id ? (() => {
+                const selectedPackage = eligiblePackages.find((item) => String(item.id) === String(form.patient_package_id));
+                const progress = packageProgress(selectedPackage, packageSessions);
+                return <div style={{ padding: '9px 11px', borderRadius: 8, background: '#ECFDF5', border: '1px solid #A7F3D0', color: '#047857', fontSize: 10.5 }}>
+                  <strong>Pacote identificado automaticamente:</strong> {selectedPackage?.package_name} · próxima sessão {progress.used + 1} de {progress.total}. O saldo será descontado somente ao finalizar.
+                </div>;
+              })() : (
+                <div style={{ padding: '9px 11px', borderRadius: 8, background: '#F9FAFB', border: '1px solid #E5E7EB', color: '#6B7280', fontSize: 10.5 }}>
+                  Atendimento avulso — nenhum pacote ativo compatível foi encontrado.
+                </div>
+              )}
             </div>
           )}
 
@@ -1680,7 +1757,7 @@ export default function Agenda() {
       {formModal.open && (
         <AgendamentoModal onClose={() => setFormModal({ open: false, apt: null, prefillProf: '', prefillHora: '', prefill: null })}
           date={selectedDate} profissional={formModal.prefillProf} hora={formModal.prefillHora}
-          profissionais={profissionais} apt={formModal.apt} prefill={formModal.prefill}
+          profissionais={profissionais} servicosCatalogo={todosServicos} apt={formModal.apt} prefill={formModal.prefill}
           onSave={handleSave} onOpenTablet={handleOpenTabletMode} />
       )}
       {detailModal.open && detailModal.apt && (

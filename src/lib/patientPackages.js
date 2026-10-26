@@ -49,6 +49,14 @@ export function packageServiceNames(patientPackage) {
     .filter(Boolean);
 }
 
+function packageServiceEntries(patientPackage) {
+  const services = Array.isArray(patientPackage?.services) ? patientPackage.services : [];
+  return services.map((service) => ({
+    id: typeof service === 'object' ? service?.id || service?.service_id || null : null,
+    name: typeof service === 'string' ? service : service?.nome || service?.name || '',
+  })).filter((service) => service.id || service.name);
+}
+
 export function normalizePackageText(value) {
   return String(value || '')
     .normalize('NFD')
@@ -57,20 +65,42 @@ export function normalizePackageText(value) {
     .toLocaleLowerCase('pt-BR');
 }
 
-export function packageAcceptsService(patientPackage, serviceName) {
-  const target = normalizePackageText(serviceName);
-  if (!target) return true;
-  const services = packageServiceNames(patientPackage).map(normalizePackageText);
-  if (!services.length) return true;
-  return services.some((service) => service === target || service.includes(target) || target.includes(service));
+export function packageAcceptsService(patientPackage, service) {
+  const targetId = typeof service === 'object' ? service?.id || service?.service_id : null;
+  const targetName = typeof service === 'object' ? service?.nome || service?.name : service;
+  const entries = packageServiceEntries(patientPackage);
+  if (!entries.length) return true;
+  let entriesForName = entries;
+
+  if (targetId) {
+    const entriesWithId = entries.filter((entry) => entry.id);
+    if (entriesWithId.some((entry) => String(entry.id) === String(targetId))) return true;
+    entriesForName = entries.filter((entry) => !entry.id);
+    if (entriesWithId.length > 0 && entriesForName.length === 0) return false;
+  }
+
+  const target = normalizePackageText(targetName);
+  if (!target) return false;
+  return entriesForName
+    .map((entry) => normalizePackageText(entry.name))
+    .some((entry) => entry === target || entry.includes(target) || target.includes(entry));
 }
 
-export function eligiblePatientPackages(packages = [], sessions = [], clientId, serviceName, today = new Date()) {
+export function eligiblePatientPackages(packages = [], sessions = [], clientId, service, today = new Date()) {
   return packages.filter((patientPackage) => {
     if (String(patientPackage.client_id) !== String(clientId || '')) return false;
     const progress = packageProgress(patientPackage, sessions, today);
-    return progress.status === 'active' && progress.remaining > 0 && packageAcceptsService(patientPackage, serviceName);
+    return progress.status === 'active' && progress.remaining > 0 && packageAcceptsService(patientPackage, service);
   });
+}
+
+export function resolvePackageChoice(eligiblePackages = [], selectedPackageId = null) {
+  if (eligiblePackages.length === 0) return { mode: 'none', packageId: null };
+  if (eligiblePackages.length === 1) return { mode: 'automatic', packageId: eligiblePackages[0].id };
+  const selected = eligiblePackages.find((item) => String(item.id) === String(selectedPackageId || ''));
+  return selected
+    ? { mode: 'selected', packageId: selected.id }
+    : { mode: 'choose', packageId: null };
 }
 
 export function addMonthsToDate(dateValue, validityText) {
