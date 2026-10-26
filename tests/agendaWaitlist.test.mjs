@@ -78,4 +78,17 @@ test('contrato da lista usa Pacientes e permanece separada dos agendamentos', as
   assert.match(migration, /preferred_time time without time zone/i);
   assert.match(migration, /client_id, lower\(service\), waitlist_date/i);
   assert.match(migration, /scheduled_appointment_id uuid REFERENCES public\.appointments\(id\)/i);
+  assert.match(migration, /waitlist_date\s*=\s*NEW\.appointment_date::date/i);
+  assert.doesNotMatch(migration, /waitlist_date::text\s*=\s*NEW\.appointment_date/i);
+});
+
+test('patch de producao compara as datas da espera e da agenda com tipos compativeis', async () => {
+  const patch = await readFile(
+    new URL('../fix_waitlist_appointment_date_type.sql', import.meta.url),
+    'utf8',
+  );
+
+  assert.match(patch, /CREATE OR REPLACE FUNCTION public\.fn_close_waitlist_from_appointment/i);
+  assert.match(patch, /waitlist_date\s*=\s*NEW\.appointment_date::date/i);
+  assert.doesNotMatch(patch, /waitlist_date::text\s*=\s*NEW\.appointment_date/i);
 });

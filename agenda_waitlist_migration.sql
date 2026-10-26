@@ -96,7 +96,7 @@ BEGIN
            scheduled_appointment_id = NEW.id
      WHERE client_id = NEW.client_id
        AND lower(trim(service)) = lower(trim(NEW.procedure))
-       AND waitlist_date::text = NEW.appointment_date
+       AND waitlist_date = NEW.appointment_date::date
        AND status IN ('aguardando', 'contatada');
   END IF;
 
