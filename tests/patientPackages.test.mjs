@@ -5,6 +5,7 @@ import test from 'node:test';
 import {
   activePackageSessions,
   addMonthsToDate,
+  buildPackageSessionGrid,
   eligiblePatientPackages,
   packageAcceptsService,
   packageProgress,
@@ -81,6 +82,37 @@ test('a área de assinaturas lista somente pacientes que possuem pacote', () => 
   assert.deepEqual(patientsWithPackages(patients, patientPackages).map((patient) => patient.nome), ['Ana', 'Carla']);
 });
 
+test('monta uma grade de um serviço até o total de sessões do pacote', () => {
+  const grid = buildPackageSessionGrid(pkg, [
+    { id: 's1', patient_package_id: 'pkg-1', service_name: 'Drenagem Linfática', session_number: 1, status: 'signed' },
+    { id: 's2', patient_package_id: 'pkg-1', service_name: 'Drenagem Linfática', session_number: 2, status: 'pending_signature' },
+  ]);
+  assert.equal(grid.columns.length, 1);
+  assert.equal(grid.columns[0].name, 'Drenagem Linfática');
+  assert.equal(grid.rowCount, 10);
+  assert.equal(grid.rows[0].cells[0].session.id, 's1');
+  assert.equal(grid.rows[1].cells[0].session.id, 's2');
+  assert.equal(grid.rows[2].cells[0].available, true);
+});
+
+test('usa cada serviço como coluna e respeita o limite individual de sessões', () => {
+  const grid = buildPackageSessionGrid({
+    id: 'multi',
+    package_name: 'Pacote combinado',
+    total_sessions: 8,
+    services: [{ nome: 'Botox', qtd: 3 }, { nome: 'Drenagem', qtd: 5 }],
+  }, [
+    { id: 'botox-1', patient_package_id: 'multi', service_name: 'Botox', session_number: 1, status: 'signed' },
+    { id: 'drenagem-1', patient_package_id: 'multi', service_name: 'Drenagem', session_number: 2, status: 'pending_signature' },
+  ]);
+  assert.equal(grid.rowCount, 5);
+  assert.deepEqual(grid.columns.map((column) => column.name), ['Botox', 'Drenagem']);
+  assert.equal(grid.rows[0].cells[0].session.id, 'botox-1');
+  assert.equal(grid.rows[0].cells[1].session.id, 'drenagem-1');
+  assert.equal(grid.rows[3].cells[0].disabled, true);
+  assert.equal(grid.rows[3].cells[1].available, true);
+});
+
 test('migração e interfaces preservam vínculo, assinatura e estorno', async () => {
   const [migration, patients, agenda, signatures, signaturesPage, app, sidebar, packageCatalog] = await Promise.all([
     readFile(new URL('../patient_packages_migration.sql', import.meta.url), 'utf8'),
@@ -106,7 +138,9 @@ test('migração e interfaces preservam vínculo, assinatura e estorno', async (
   assert.match(agenda, /saldo será descontado somente ao finalizar/i);
   assert.match(agenda, /service_id: item\.service_id/);
   assert.match(packageCatalog, /id: service\.id/);
-  assert.match(signatures, /Aguardando assinatura/);
+  assert.match(signatures, /Abrir assinaturas/);
+  assert.match(signatures, /Voltar para pacientes/);
+  assert.match(signatures, /buildPackageSessionGrid/);
   assert.match(signatures, /Somente quem possui pacote aparece aqui/);
   assert.match(signatures, /<PackageSignatureDialog/);
   assert.match(signaturesPage, /<PackageSignaturesPanel/);

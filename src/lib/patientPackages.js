@@ -49,6 +49,93 @@ export function packageServiceNames(patientPackage) {
     .filter(Boolean);
 }
 
+function positiveInteger(value, fallback = 0) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? Math.floor(number) : fallback;
+}
+
+function sessionSort(a, b) {
+  const byNumber = positiveInteger(a?.session_number) - positiveInteger(b?.session_number);
+  if (byNumber) return byNumber;
+  return new Date(a?.performed_at || 0) - new Date(b?.performed_at || 0);
+}
+
+function isLegacySession(session) {
+  return String(session?.status || '') === 'legacy'
+    || normalizePackageText(session?.service_name).includes('anterior ao controle digital');
+}
+
+export function buildPackageSessionGrid(patientPackage, sessions = []) {
+  const total = positiveInteger(patientPackage?.total_sessions, 1);
+  const definitions = (Array.isArray(patientPackage?.services) ? patientPackage.services : [])
+    .map((service, index) => {
+      const name = typeof service === 'string' ? service : service?.nome || service?.name;
+      if (!name) return null;
+      return {
+        key: String(typeof service === 'object' && (service?.id || service?.service_id) || `service-${index}`),
+        name,
+        quota: positiveInteger(typeof service === 'object' ? service?.qtd || service?.quantity : null, 1),
+        sessions: [],
+      };
+    })
+    .filter(Boolean);
+
+  const columns = definitions.length > 0
+    ? definitions
+    : [{ key: 'package-service', name: patientPackage?.package_name || 'Serviço do pacote', quota: total, sessions: [] }];
+
+  if (columns.length === 1) columns[0].quota = Math.max(columns[0].quota, total);
+
+  const packageSessions = activePackageSessions(sessions, patientPackage?.id).sort(sessionSort);
+  const unmatched = [];
+
+  packageSessions.forEach((session) => {
+    const normalizedService = normalizePackageText(session?.service_name);
+    let column = columns.find((item) => normalizePackageText(item.name) === normalizedService);
+    if (!column && normalizedService) {
+      column = columns.find((item) => {
+        const normalizedColumn = normalizePackageText(item.name);
+        return normalizedColumn.includes(normalizedService) || normalizedService.includes(normalizedColumn);
+      });
+    }
+    if (!column && (columns.length === 1 || isLegacySession(session))) {
+      if (columns.length === 1) column = columns[0];
+    }
+    if (column) column.sessions.push(session);
+    else unmatched.push(session);
+  });
+
+  const unmatchedGroups = new Map();
+  unmatched.forEach((session) => {
+    const legacy = isLegacySession(session);
+    const name = legacy ? 'Sessões anteriores' : session?.service_name || 'Serviço não identificado';
+    const key = normalizePackageText(name) || 'unmatched';
+    if (!unmatchedGroups.has(key)) unmatchedGroups.set(key, { key: `extra-${key}`, name, quota: 0, sessions: [] });
+    unmatchedGroups.get(key).sessions.push(session);
+  });
+  unmatchedGroups.forEach((column) => {
+    column.quota = column.sessions.length;
+    columns.push(column);
+  });
+
+  columns.forEach((column) => {
+    column.sessions.sort(sessionSort);
+    column.quota = Math.max(column.quota, column.sessions.length);
+  });
+
+  const rowCount = Math.max(1, ...columns.map((column) => column.quota));
+  const rows = Array.from({ length: rowCount }, (_, rowIndex) => ({
+    number: rowIndex + 1,
+    cells: columns.map((column) => ({
+      session: column.sessions[rowIndex] || null,
+      available: rowIndex < column.quota && !column.sessions[rowIndex],
+      disabled: rowIndex >= column.quota,
+    })),
+  }));
+
+  return { columns, rows, rowCount };
+}
+
 function packageServiceEntries(patientPackage) {
   const services = Array.isArray(patientPackage?.services) ? patientPackage.services : [];
   return services.map((service) => ({
