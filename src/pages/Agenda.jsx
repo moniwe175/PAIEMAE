@@ -735,6 +735,7 @@ function AgendamentoModal({ onClose, date, profissional: prefillProf, hora: pref
   const [packageSessions, setPackageSessions] = useState([]);
   const [packageLoadError, setPackageLoadError] = useState('');
   const [packagesLoading, setPackagesLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [showNewClient, setShowNewClient] = useState(false);
   const [clienteBusca, setClienteBusca] = useState(isEdit ? apt.paciente : prefill?.patientName || '');
   const [showClienteList, setShowClienteList] = useState(false);
@@ -932,8 +933,8 @@ function AgendamentoModal({ onClose, date, profissional: prefillProf, hora: pref
   const canSave = form.paciente && form.profissional && form.servico && form.hora && form.data
     && !packagesLoading && packageChoice.mode !== 'choose';
 
-  const handleSave = () => {
-    if (!canSave) return;
+  const handleSave = async () => {
+    if (!canSave || saving) return;
 
     const isFixo = repetir && previewRecDates.length > 0;
     // Vincula o agendamento ao cadastro do cliente (client_id) — exigido pelo motor de marketing
@@ -948,14 +949,20 @@ function AgendamentoModal({ onClose, date, profissional: prefillProf, hora: pref
       client_id: form.client_id || clientMatch?.id || null,
       ficha_pendente: false,
     };
-    if (isFixo && !isEdit) {
-      const all = [{ ...base, id: genId() }];
-      previewRecDates.forEach(d => all.push({ ...base, id: genId(), data: d }));
-      onSave(all);
-    } else {
-      onSave({ ...base, id: apt?.id || genId() });
+    setSaving(true);
+    try {
+      let result;
+      if (isFixo && !isEdit) {
+        const all = [{ ...base, id: genId() }];
+        previewRecDates.forEach(d => all.push({ ...base, id: genId(), data: d }));
+        result = await onSave(all);
+      } else {
+        result = await onSave({ ...base, id: apt?.id || genId() });
+      }
+      if (result?.success !== false) onClose();
+    } finally {
+      setSaving(false);
     }
-    onClose();
   };
 
   const inputSt = { width: '100%', padding: '9px 12px', border: '1.5px solid #E5E7EB', borderRadius: 10, fontSize: 13, outline: 'none', boxSizing: 'border-box', background: '#FAFAFA', fontFamily: 'inherit' };
@@ -1243,14 +1250,14 @@ function AgendamentoModal({ onClose, date, profissional: prefillProf, hora: pref
 
           <div style={{ display: 'flex', gap: 8, paddingTop: 14, borderTop: '1px solid #F0EBE6' }}>
             <button onClick={onClose} style={{ padding: '9px 18px', borderRadius: 10, border: '1.5px solid #E5E7EB', background: '#fff', fontSize: 13, fontWeight: 600, cursor: 'pointer', color: '#6B7280' }}>Cancelar</button>
-            <button onClick={handleSave} disabled={!canSave} style={{
+            <button onClick={handleSave} disabled={!canSave || saving} style={{
               flex: 1, padding: '9px 18px', borderRadius: 10, border: 'none',
-              background: canSave ? 'linear-gradient(135deg,#C73B6D,#A83158)' : '#E5E7EB',
-              fontSize: 13, fontWeight: 700, cursor: canSave ? 'pointer' : 'not-allowed',
-              color: canSave ? '#fff' : '#9CA3AF',
+              background: canSave && !saving ? 'linear-gradient(135deg,#C73B6D,#A83158)' : '#E5E7EB',
+              fontSize: 13, fontWeight: 700, cursor: canSave && !saving ? 'pointer' : 'not-allowed',
+              color: canSave && !saving ? '#fff' : '#9CA3AF',
               display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
             }}>
-              <CheckCircle style={{ width: 14, height: 14 }} />{isEdit ? 'Salvar Alterações' : 'Confirmar Agendamento'}
+              <CheckCircle style={{ width: 14, height: 14 }} />{saving ? 'Salvando...' : isEdit ? 'Salvar Alterações' : 'Confirmar Agendamento'}
             </button>
           </div>
         </div>
@@ -1491,6 +1498,7 @@ export default function Agenda() {
     const list = Array.isArray(payload) ? payload : [payload];
     const updatedApts = [];
     let falhas = 0;
+    let firstError = null;
     for (const item of list) {
       const sbItem = mapToSupabase(item, false);
       let res;
@@ -1511,15 +1519,26 @@ export default function Agenda() {
         }
       } else {
         falhas++;
+        firstError ||= res.error;
       }
     }
     if (falhas > 0) {
-      alert(`Não foi possível salvar ${falhas > 1 ? falhas + ' agendamentos' : 'o agendamento'} no banco de dados. Tente novamente — se o erro persistir, avise o suporte.`);
+      const technicalMessage = [firstError?.message, firstError?.details, firstError?.hint]
+        .filter(Boolean)
+        .filter((value, index, values) => values.indexOf(value) === index)
+        .join(' · ');
+      const errorCode = firstError?.code ? ` (código ${firstError.code})` : '';
+      alert(
+        `Não foi possível salvar ${falhas > 1 ? falhas + ' agendamentos' : 'o agendamento'} no banco de dados.`
+        + (technicalMessage ? `\n\nMotivo: ${technicalMessage}${errorCode}` : '')
+        + '\n\nOs dados preenchidos não foram adicionados à agenda.',
+      );
     }
     setAgendamentos(prev => {
       const ids = new Set(updatedApts.map(a => a.id));
       return [...prev.filter(a => !ids.has(a.id)), ...updatedApts];
     });
+    return { success: falhas === 0, error: firstError };
   };
 
   const handleDelete = async (id) => {

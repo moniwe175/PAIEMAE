@@ -147,6 +147,7 @@ test('migração e interfaces preservam vínculo, assinatura e estorno', async (
   assert.match(repasseMigration, /COALESCE\(NEW\.repasse, 0\) <= 0/i);
   assert.match(repasseMigration, /CREATE TRIGGER trg_sync_package_session_from_repasse_upsert/i);
   assert.match(repasseMigration, /CREATE TRIGGER trg_sync_package_session_from_repasse_delete/i);
+  assert.doesNotMatch(repasseMigration, /a\.user_id\s*=\s*NEW\.user_id/i);
   assert.match(sheetSync, /repasse: repasse \|\| 0/i);
   assert.match(sheetSync, /var gross = credito \+ debito \+ dinheiro \+ pix/i);
   assert.match(sheetSync, /rowTypeAtendimento = gross <= 0 && repasse <= 0 \? 'rascunho'/i);
@@ -156,6 +157,9 @@ test('migração e interfaces preservam vínculo, assinatura e estorno', async (
   assert.match(agenda, /Selecione o serviço primeiro/);
   assert.match(agenda, /eligiblePackages\.length > 1/);
   assert.match(agenda, /só será descontada quando o repasse aparecer na planilha/i);
+  assert.match(agenda, /firstError\?\.message/);
+  assert.match(agenda, /firstError\?\.details/);
+  assert.match(agenda, /código \$\{firstError\.code\}/);
   assert.match(agenda, /service_id: item\.service_id/);
   assert.match(packageCatalog, /id: service\.id/);
   assert.match(signatures, /Abrir assinaturas/);

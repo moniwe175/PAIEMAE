@@ -134,8 +134,7 @@ BEGIN
   SELECT a.id, a.patient_package_id
     INTO v_appointment_id, v_appointment_package_id
     FROM public.appointments a
-   WHERE a.user_id = NEW.user_id
-     AND a.client_id = v_client_id
+   WHERE a.client_id = v_client_id
      AND a.appointment_date = NEW.date_ref::text
      AND public.fn_package_normalize_text(a.procedure) = public.fn_package_normalize_text(NEW.procedure)
      AND COALESCE(a.status, '') NOT IN ('cancelado', 'cancelled', 'desmarcado', 'falta')
