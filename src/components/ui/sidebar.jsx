@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard,
@@ -21,16 +21,17 @@ import {
   BookOpen,
   UserPlus,
   Video,
-  Building2
+  Building2,
+  FileSignature
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import { fetchQueuePendingCount } from '../../services/supabaseService';
-import { supabase } from '../../lib/supabase';
 
 const menuItems = [
   { key: 'dashboard', name: 'Painel de Controle', path: '/', icon: LayoutDashboard },
   { key: 'agenda', name: 'Agenda', path: '/agenda', icon: Calendar },
   { key: 'pacientes', name: 'Pacientes', path: '/pacientes', icon: Users },
+  { key: 'pacientes', name: 'Assinaturas', path: '/assinaturas', icon: FileSignature },
   { key: 'anamnese', name: 'Anamnese', path: '/anamnese', icon: ClipboardCheck },
   { key: 'equipe', name: 'Equipe', path: '/equipe', icon: UserCheck },
   { key: 'servicos', name: 'Serviços', path: '/services', icon: Scissors },

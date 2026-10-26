@@ -5,8 +5,7 @@ import {
   Users, Plus, Search, Phone, Calendar, FileText, XCircle,
   ChevronRight, Mail, Instagram, Upload, Trash2, AlertTriangle,
   RefreshCw, UserCheck, UserPlus, Clock, Sparkles, Share2,
-  DollarSign, CalendarCheck, CalendarX, UserX, CheckCircle2, Activity,
-  Package, FileSignature
+  DollarSign, CalendarCheck, CalendarX, UserX, CheckCircle2, Activity
 } from 'lucide-react';
 import {
   ResponsiveContainer, PieChart, Pie, Cell, Tooltip
@@ -17,7 +16,6 @@ import {
 } from '../services/supabaseService';
 import { getCurrentUser, supabase } from '../lib/supabase';
 import PatientPackagesPanel from '../components/patients/PatientPackagesPanel';
-import PackageSignaturesPanel from '../components/patients/PackageSignaturesPanel';
 import { packageProgress, packageServiceNames } from '../lib/patientPackages';
 import {
   appointmentPatientKey,
@@ -110,21 +108,6 @@ const CANAL_COLORS = {
   'Outro': '#8B5CF6',
   [UNKNOWN_PATIENT_SOURCE]: '#6B7280',
 };
-
-// eslint-disable-next-line react/prop-types
-function PatientsSectionTabs({ active, onChange, pendingSignatures }) {
-  return (
-    <div className="tabs" style={{ marginBottom: 16, width: 'fit-content' }}>
-      <button className={`tab-item${active === 'patients' ? ' active' : ''}`} onClick={() => onChange('patients')}>
-        <Users style={{ width: 13, height: 13 }} /> Pacientes
-      </button>
-      <button className={`tab-item${active === 'signatures' ? ' active' : ''}`} onClick={() => onChange('signatures')}>
-        <FileSignature style={{ width: 13, height: 13 }} /> Assinaturas de sessões
-        {pendingSignatures > 0 && <span style={{ marginLeft: 4, minWidth: 17, height: 17, padding: '0 4px', borderRadius: 20, background: '#F59E0B', color: '#fff', display: 'inline-grid', placeItems: 'center', fontSize: 9, fontWeight: 900 }}>{pendingSignatures}</span>}
-      </button>
-    </div>
-  );
-}
 
 // ─── Modal Novo / Editar Paciente ─────────────────────────────
 // eslint-disable-next-line react/prop-types
@@ -426,15 +409,12 @@ export default function Pacientes() {
   const [selected, setSelected] = useState(null);
   const [commercialHistoryOpen, setCommercialHistoryOpen] = useState(false);
   const [servicos, setServicos] = useState([]);
-  const [pageSection, setPageSection] = useState('patients');
   const [packageCatalog, setPackageCatalog] = useState([]);
   const [patientPackages, setPatientPackages] = useState([]);
   const [packageSessions, setPackageSessions] = useState([]);
-  const [packagesLoading, setPackagesLoading] = useState(true);
   const [packagesLoadError, setPackagesLoadError] = useState('');
 
   const refreshPackageData = async () => {
-    setPackagesLoading(true);
     const [catalogRes, packagesRes, sessionsRes] = await Promise.all([
       fetchPackages(),
       fetchPatientPackages(),
@@ -445,7 +425,6 @@ export default function Pacientes() {
     setPackageSessions(sessionsRes.data || []);
     const error = packagesRes.error || sessionsRes.error;
     setPackagesLoadError(error ? (error.message || String(error)) : '');
-    setPackagesLoading(false);
   };
 
   useEffect(() => { refreshPackageData(); }, []);
@@ -886,31 +865,6 @@ export default function Pacientes() {
     });
   }, [pacientes, busca, filtro]);
 
-  const pendingPackageSignatures = packageSessions.filter((session) => session.status === 'pending_signature').length;
-
-  if (pageSection === 'signatures') {
-    return (
-      <div>
-        <div className="page-header" style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
-          <div>
-            <div className="page-header-label"><Package /> PACIENTES E FIDELIZAÇÃO</div>
-            <h1 className="page-title">Assinaturas de sessões</h1>
-            <p className="page-subtitle">Comprovantes digitais das sessões utilizadas em pacotes</p>
-          </div>
-        </div>
-        <PatientsSectionTabs active={pageSection} onChange={setPageSection} pendingSignatures={pendingPackageSignatures} />
-        <PackageSignaturesPanel
-          patients={pacientes}
-          packages={patientPackages}
-          sessions={packageSessions}
-          loading={packagesLoading}
-          loadError={packagesLoadError}
-          onSessionUpdated={(updated) => setPackageSessions((current) => current.map((item) => item.id === updated.id ? updated : item))}
-        />
-      </div>
-    );
-  }
-
   return (
     <div>
       {/* Header */}
@@ -937,8 +891,6 @@ export default function Pacientes() {
           )}
         </div>
       </div>
-
-      <PatientsSectionTabs active={pageSection} onChange={setPageSection} pendingSignatures={pendingPackageSignatures} />
 
       {/* Modais */}
       {modal && <PacienteModal onClose={() => setModal(false)} onSave={handleSaveNovoPaciente} />}

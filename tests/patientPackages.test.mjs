@@ -66,11 +66,14 @@ test('a área de assinaturas lista somente pacientes que possuem pacote', () => 
 });
 
 test('migração e interfaces preservam vínculo, assinatura e estorno', async () => {
-  const [migration, patients, agenda, signatures] = await Promise.all([
+  const [migration, patients, agenda, signatures, signaturesPage, app, sidebar] = await Promise.all([
     readFile(new URL('../patient_packages_migration.sql', import.meta.url), 'utf8'),
     readFile(new URL('../src/pages/Pacientes.jsx', import.meta.url), 'utf8'),
     readFile(new URL('../src/pages/Agenda.jsx', import.meta.url), 'utf8'),
     readFile(new URL('../src/components/patients/PackageSignaturesPanel.jsx', import.meta.url), 'utf8'),
+    readFile(new URL('../src/pages/Assinaturas.jsx', import.meta.url), 'utf8'),
+    readFile(new URL('../src/App.jsx', import.meta.url), 'utf8'),
+    readFile(new URL('../src/components/ui/sidebar.jsx', import.meta.url), 'utf8'),
   ]);
   assert.match(migration, /CREATE TABLE IF NOT EXISTS public\.patient_packages/i);
   assert.match(migration, /CREATE TABLE IF NOT EXISTS public\.patient_package_sessions/i);
@@ -78,11 +81,15 @@ test('migração e interfaces preservam vínculo, assinatura e estorno', async (
   assert.match(migration, /ADD COLUMN IF NOT EXISTS patient_package_id/i);
   assert.match(migration, /status = 'reversed'/i);
   assert.match(migration, /ENABLE ROW LEVEL SECURITY/i);
-  assert.match(patients, /Assinaturas de sessões/);
   assert.match(patients, /<PatientPackagesPanel/);
+  assert.doesNotMatch(patients, /PackageSignaturesPanel/);
   assert.match(agenda, /Utilizar pacote da paciente/);
   assert.match(agenda, /não duplicar a receita/);
   assert.match(signatures, /Aguardando assinatura/);
   assert.match(signatures, /Somente quem possui pacote aparece aqui/);
   assert.match(signatures, /<PackageSignatureDialog/);
+  assert.match(signaturesPage, /<PackageSignaturesPanel/);
+  assert.match(signaturesPage, /somente clientes que possuem pacote/i);
+  assert.match(app, /path="\/assinaturas"/);
+  assert.match(sidebar, /name: 'Assinaturas', path: '\/assinaturas'/);
 });

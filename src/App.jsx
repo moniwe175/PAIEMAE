@@ -16,6 +16,7 @@ import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Agenda from './pages/Agenda';
 import Pacientes from './pages/Pacientes';
+import Assinaturas from './pages/Assinaturas';
 import Clients from './pages/Clients';
 import Financial from './pages/Financial';
 import Comissoes from './pages/Comissoes';
@@ -71,6 +72,7 @@ function MainLayout() {
           <Route path="/" element={<ModuleGate module="dashboard"><Dashboard /></ModuleGate>} />
           <Route path="/agenda" element={<ModuleGate module="agenda"><Agenda /></ModuleGate>} />
           <Route path="/pacientes" element={<ModuleGate module="pacientes"><Pacientes /></ModuleGate>} />
+          <Route path="/assinaturas" element={<ModuleGate module="pacientes"><Assinaturas /></ModuleGate>} />
           <Route path="/clients" element={<Clients />} />
           <Route path="/financial" element={<ModuleGate module="financeiro"><Financial /></ModuleGate>} />
           <Route path="/comissoes" element={<ModuleGate module="comissoes"><Comissoes /></ModuleGate>} />
