@@ -20,7 +20,6 @@ import {
   Shield,
   BookOpen,
   UserPlus,
-  Video,
   Building2,
   FileSignature
 } from 'lucide-react';
@@ -46,7 +45,6 @@ const menuItems = [
   { key: 'financeiro', name: 'Financeiro', path: '/financial', icon: Wallet },
   { key: 'franquia', name: 'Franquia & Viabilidade', path: '/franquia', icon: Building2 },
   { key: 'integracoes', name: 'Integrações', path: '/integration', icon: Zap },
-  { key: 'marketing', name: 'Editor de Vídeo', path: '/editor-video', icon: Video },
 ];
 
 const Sidebar = () => {
