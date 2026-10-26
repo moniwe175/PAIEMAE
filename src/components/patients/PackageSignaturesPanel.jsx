@@ -180,10 +180,10 @@ function PatientSignatureRecord({ patient, packages, sessions, appointments, onB
       <div style={recordHeader}>
         <button onClick={onBack} style={backButton}><ArrowLeft size={15}/> Voltar para pacientes</button>
         <div style={recordIdentity}>
-          <span style={{ ...avatar, width: 42, height: 42 }}>{patientName(patient).charAt(0).toUpperCase()}</span>
+          <span style={{ ...avatar, width: 48, height: 48 }}>{patientName(patient).charAt(0).toUpperCase()}</span>
           <span>
-            <strong style={{ display: 'block', fontSize: 15, color: '#432F2B' }}>{patientName(patient)}</strong>
-            <small style={{ display: 'block', marginTop: 3, color: '#927C75' }}>{patientPhone(patient) || 'Telefone não informado'}</small>
+            <strong style={{ display: 'block', fontSize: 17, color: '#432F2B' }}>{patientName(patient)}</strong>
+            <small style={{ display: 'block', marginTop: 4, color: '#927C75', fontSize: 12 }}>{patientPhone(patient) || 'Telefone não informado'}</small>
           </span>
         </div>
         <div style={recordTotals}>
@@ -235,7 +235,7 @@ function PackageSessionGrid({ patientPackage, sessions, appointments, onOpenSess
       <div style={progressTrack}><span style={{ ...progressFill, width: `${progress.percent}%` }}/></div>
 
       <div style={gridScroll}>
-        <table style={{ width: '100%', minWidth: Math.max(520, 155 + grid.columns.length * 205), borderCollapse: 'separate', borderSpacing: 0 }}>
+        <table style={{ width: '100%', minWidth: Math.max(600, 180 + grid.columns.length * 235), borderCollapse: 'separate', borderSpacing: 0 }}>
           <thead>
             <tr>
               <th style={{ ...gridTh, width: 92, left: 0, zIndex: 3 }}>Sessão</th>
@@ -335,13 +335,13 @@ function SignatureView({ session, patient, item, onClose }) {
     <div style={overlay} onClick={onClose}>
       <div style={viewDialog} onClick={(event) => event.stopPropagation()}>
         <div style={{ padding: '16px 18px', borderBottom: '1px solid #EEE7E2' }}>
-          <strong>Assinatura da sessão {session.session_number}/{item?.total_sessions || '—'}</strong>
-          <div style={{ fontSize: 10.5, color: '#927C75', marginTop: 3 }}>{patientName(patient)} • {item?.package_name}</div>
+          <strong style={{ fontSize: 16 }}>Assinatura da sessão {session.session_number}/{item?.total_sessions || '—'}</strong>
+          <div style={{ fontSize: 12, color: '#927C75', marginTop: 4 }}>{patientName(patient)} • {item?.package_name}</div>
         </div>
         <div style={{ padding: 18 }}>
-          <div style={{ fontSize: 11.5, color: '#5E4D47', lineHeight: 1.5 }}>{session.acknowledgment_text}</div>
+          <div style={{ fontSize: 13, color: '#5E4D47', lineHeight: 1.55 }}>{session.acknowledgment_text}</div>
           <div style={signatureImageBox}><img src={session.signature_data_url} alt="Assinatura da paciente" style={{ maxWidth: '100%', maxHeight: 130 }}/></div>
-          <div style={{ marginTop: 10, fontSize: 10.5, color: '#927C75' }}>Assinado por {session.signed_name || patientName(patient)} em {formatDateTime(session.signed_at)}</div>
+          <div style={{ marginTop: 12, fontSize: 12, color: '#927C75' }}>Assinado por {session.signed_name || patientName(patient)} em {formatDateTime(session.signed_at)}</div>
         </div>
         <div style={{ padding: '11px 18px', borderTop: '1px solid #EEE7E2', textAlign: 'right' }}><button onClick={onClose} style={viewButton}>Fechar</button></div>
       </div>
@@ -350,58 +350,58 @@ function SignatureView({ session, patient, item, onClose }) {
 }
 
 function Metric({ icon: Icon, value, label, color, background }) {
-  return <div style={metric}><div style={{ ...metricIcon, background, color }}><Icon size={17}/></div><div><strong style={{ display: 'block', fontSize: 18, color }}>{value}</strong><span style={{ fontSize: 10.5, color: '#715F58', fontWeight: 700 }}>{label}</span></div></div>;
+  return <div style={metric}><div style={{ ...metricIcon, background, color }}><Icon size={19}/></div><div><strong style={{ display: 'block', fontSize: 21, color }}>{value}</strong><span style={{ fontSize: 12, color: '#715F58', fontWeight: 700 }}>{label}</span></div></div>;
 }
 
 const errorBox = { padding: 20, border: '1px solid #F3C7A6', borderRadius: 12, background: '#FFF8ED', color: '#9A4D16', fontSize: 12 };
-const metricsGrid = { display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 10, marginBottom: 14 };
-const metric = { padding: '12px 14px', background: '#fff', border: '1px solid #E9DFDA', borderRadius: 11, display: 'flex', alignItems: 'center', gap: 10 };
-const metricIcon = { width: 38, height: 38, borderRadius: 9, display: 'grid', placeItems: 'center' };
+const metricsGrid = { display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 12, marginBottom: 16 };
+const metric = { padding: '15px 17px', background: '#fff', border: '1px solid #E9DFDA', borderRadius: 12, display: 'flex', alignItems: 'center', gap: 12 };
+const metricIcon = { width: 44, height: 44, borderRadius: 10, display: 'grid', placeItems: 'center' };
 const panel = { background: '#fff', border: '1px solid #E9DFDA', borderRadius: 12, overflow: 'hidden' };
-const listHeader = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, padding: '16px 18px', borderBottom: '1px solid #EEE7E2', flexWrap: 'wrap' };
-const sectionTitle = { display: 'block', fontSize: 14, color: '#432F2B' };
-const sectionSubtitle = { display: 'block', marginTop: 4, fontSize: 10.5, color: '#927C75' };
-const searchBox = { width: 'min(310px, 100%)', display: 'flex', alignItems: 'center', gap: 7, border: '1px solid #E2D8D3', background: '#fff', borderRadius: 8, padding: '8px 10px' };
-const searchInput = { border: 0, outline: 0, minWidth: 0, flex: 1, fontSize: 10.5, background: 'transparent' };
+const listHeader = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 18, padding: '19px 20px', borderBottom: '1px solid #EEE7E2', flexWrap: 'wrap' };
+const sectionTitle = { display: 'block', fontSize: 16, color: '#432F2B' };
+const sectionSubtitle = { display: 'block', marginTop: 5, fontSize: 12, color: '#927C75' };
+const searchBox = { width: 'min(340px, 100%)', display: 'flex', alignItems: 'center', gap: 8, border: '1px solid #E2D8D3', background: '#fff', borderRadius: 9, padding: '10px 12px' };
+const searchInput = { border: 0, outline: 0, minWidth: 0, flex: 1, fontSize: 12, background: 'transparent' };
 const patientList = { display: 'flex', flexDirection: 'column' };
-const patientRow = { width: '100%', display: 'grid', gridTemplateColumns: '42px minmax(150px, 1fr) minmax(210px, 1.3fr) minmax(130px, .7fr) auto', alignItems: 'center', gap: 12, padding: '13px 18px', border: 0, borderBottom: '1px solid #F0E9E5', background: '#fff', color: '#4A3C37', textAlign: 'left', cursor: 'pointer' };
-const avatar = { flex: '0 0 auto', width: 35, height: 35, borderRadius: '50%', display: 'grid', placeItems: 'center', background: '#F2DFD9', color: '#9B5548', fontWeight: 900 };
+const patientRow = { width: '100%', display: 'grid', gridTemplateColumns: '48px minmax(170px, 1fr) minmax(230px, 1.3fr) minmax(150px, .7fr) auto', alignItems: 'center', gap: 14, padding: '16px 20px', border: 0, borderBottom: '1px solid #F0E9E5', background: '#fff', color: '#4A3C37', textAlign: 'left', cursor: 'pointer' };
+const avatar = { flex: '0 0 auto', width: 40, height: 40, borderRadius: '50%', display: 'grid', placeItems: 'center', background: '#F2DFD9', color: '#9B5548', fontSize: 14, fontWeight: 900 };
 const patientIdentity = { minWidth: 0 };
-const patientNameStyle = { display: 'block', fontSize: 11.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' };
-const patientContact = { display: 'block', marginTop: 3, color: '#927C75', fontSize: 9.5 };
-const packageSummary = { minWidth: 0, display: 'flex', flexDirection: 'column', gap: 3, fontSize: 10.5 };
-const signatureSummary = { display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 4, fontSize: 9.5, color: '#927C75' };
-const pendingBadge = { padding: '4px 7px', borderRadius: 20, background: '#FEF3C7', color: '#B45309', fontSize: 9, fontWeight: 900 };
+const patientNameStyle = { display: 'block', fontSize: 13.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' };
+const patientContact = { display: 'block', marginTop: 4, color: '#927C75', fontSize: 11 };
+const packageSummary = { minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12 };
+const signatureSummary = { display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 5, fontSize: 11, color: '#927C75' };
+const pendingBadge = { padding: '5px 9px', borderRadius: 20, background: '#FEF3C7', color: '#B45309', fontSize: 10.5, fontWeight: 900 };
 const upToDateBadge = { ...pendingBadge, background: '#ECFDF5', color: '#047857' };
-const openLabel = { display: 'flex', alignItems: 'center', gap: 4, color: '#9B5548', fontSize: 10.5, fontWeight: 800, whiteSpace: 'nowrap' };
-const recordHeader = { minHeight: 76, display: 'flex', alignItems: 'center', gap: 18, padding: '14px 18px', borderBottom: '1px solid #EEE7E2', flexWrap: 'wrap' };
-const backButton = { display: 'inline-flex', alignItems: 'center', gap: 6, border: '1px solid #DED1CB', background: '#fff', color: '#765F57', borderRadius: 8, padding: '8px 10px', fontSize: 10.5, fontWeight: 800, cursor: 'pointer' };
+const openLabel = { display: 'flex', alignItems: 'center', gap: 5, color: '#9B5548', fontSize: 12, fontWeight: 800, whiteSpace: 'nowrap' };
+const recordHeader = { minHeight: 90, display: 'flex', alignItems: 'center', gap: 20, padding: '17px 20px', borderBottom: '1px solid #EEE7E2', flexWrap: 'wrap' };
+const backButton = { display: 'inline-flex', alignItems: 'center', gap: 7, border: '1px solid #DED1CB', background: '#fff', color: '#765F57', borderRadius: 9, padding: '10px 12px', fontSize: 12, fontWeight: 800, cursor: 'pointer' };
 const recordIdentity = { display: 'flex', alignItems: 'center', gap: 10 };
-const recordTotals = { marginLeft: 'auto', display: 'flex', gap: 7, flexWrap: 'wrap' };
-const legend = { display: 'flex', alignItems: 'center', gap: 16, padding: '10px 18px', borderBottom: '1px solid #EEE7E2', background: '#FCFAF8', color: '#735F58', fontSize: 9.5, flexWrap: 'wrap' };
-const legendDot = { display: 'inline-block', width: 9, height: 9, borderRadius: 3, border: '1px solid', marginRight: 5, verticalAlign: '-1px' };
-const packagesStack = { display: 'flex', flexDirection: 'column', gap: 14, padding: 14, background: '#FAF7F5' };
+const recordTotals = { marginLeft: 'auto', display: 'flex', gap: 9, flexWrap: 'wrap', fontSize: 12.5 };
+const legend = { display: 'flex', alignItems: 'center', gap: 19, padding: '12px 20px', borderBottom: '1px solid #EEE7E2', background: '#FCFAF8', color: '#735F58', fontSize: 11, flexWrap: 'wrap' };
+const legendDot = { display: 'inline-block', width: 10, height: 10, borderRadius: 3, border: '1px solid', marginRight: 6, verticalAlign: '-1px' };
+const packagesStack = { display: 'flex', flexDirection: 'column', gap: 16, padding: 16, background: '#FAF7F5' };
 const packageCard = { border: '1px solid #E5D9D3', borderRadius: 11, background: '#fff', overflow: 'hidden' };
-const packageHeader = { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, padding: '14px 16px' };
-const eyebrow = { display: 'block', color: '#B7796B', fontSize: 8.5, fontWeight: 900, letterSpacing: .8 };
-const packageTitle = { display: 'block', marginTop: 3, color: '#432F2B', fontSize: 13.5 };
-const packageMeta = { display: 'block', marginTop: 4, color: '#927C75', fontSize: 10 };
-const statusBadge = { padding: '5px 8px', borderRadius: 20, fontSize: 9, fontWeight: 900, textTransform: 'uppercase' };
-const progressTrack = { height: 4, margin: '0 16px 13px', borderRadius: 10, background: '#EEE7E2', overflow: 'hidden' };
+const packageHeader = { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 14, padding: '18px 19px' };
+const eyebrow = { display: 'block', color: '#B7796B', fontSize: 10, fontWeight: 900, letterSpacing: .9 };
+const packageTitle = { display: 'block', marginTop: 4, color: '#432F2B', fontSize: 16 };
+const packageMeta = { display: 'block', marginTop: 5, color: '#927C75', fontSize: 12 };
+const statusBadge = { padding: '6px 10px', borderRadius: 20, fontSize: 10.5, fontWeight: 900, textTransform: 'uppercase' };
+const progressTrack = { height: 5, margin: '0 19px 16px', borderRadius: 10, background: '#EEE7E2', overflow: 'hidden' };
 const progressFill = { display: 'block', height: '100%', borderRadius: 10, background: '#B7796B' };
 const gridScroll = { overflowX: 'auto', borderTop: '1px solid #EEE7E2' };
-const gridTh = { position: 'sticky', top: 0, zIndex: 2, minWidth: 190, padding: '10px 12px', textAlign: 'center', color: '#604D46', background: '#F8F4F2', borderRight: '1px solid #E8DEDA', borderBottom: '1px solid #E1D5CF', fontSize: 10.5 };
-const rowNumber = { position: 'sticky', zIndex: 1, width: 92, padding: 10, textAlign: 'center', background: '#FCFAF8', borderRight: '1px solid #E8DEDA', borderBottom: '1px solid #EEE7E2', color: '#8A7169', fontSize: 10 };
-const gridTd = { minWidth: 190, padding: 7, borderRight: '1px solid #EEE7E2', borderBottom: '1px solid #EEE7E2', verticalAlign: 'middle' };
-const baseCell = { minHeight: 55, width: '100%', borderRadius: 8, padding: '8px 9px', fontSize: 9.5, textAlign: 'left' };
+const gridTh = { position: 'sticky', top: 0, zIndex: 2, minWidth: 220, padding: '13px 14px', textAlign: 'center', color: '#604D46', background: '#F8F4F2', borderRight: '1px solid #E8DEDA', borderBottom: '1px solid #E1D5CF', fontSize: 12.5 };
+const rowNumber = { position: 'sticky', zIndex: 1, width: 105, padding: 13, textAlign: 'center', background: '#FCFAF8', borderRight: '1px solid #E8DEDA', borderBottom: '1px solid #EEE7E2', color: '#8A7169', fontSize: 13, fontWeight: 800 };
+const gridTd = { minWidth: 220, padding: 9, borderRight: '1px solid #EEE7E2', borderBottom: '1px solid #EEE7E2', verticalAlign: 'middle' };
+const baseCell = { minHeight: 72, width: '100%', borderRadius: 9, padding: '11px 12px', fontSize: 11.5, textAlign: 'left' };
 const disabledCell = { ...baseCell, display: 'grid', placeItems: 'center', background: '#F6F3F1', color: '#C1B6B1' };
 const availableCell = { ...baseCell, display: 'grid', placeItems: 'center', border: '1px dashed #D9CBC4', background: '#FFFEFD', color: '#9A8780', textAlign: 'center' };
 const availableSignatureCell = { ...baseCell, display: 'flex', flexDirection: 'column', gap: 4, border: '1px dashed #C68F80', background: '#FFF9F7', color: '#8F4E42', cursor: 'pointer' };
 const pendingCell = { ...baseCell, display: 'flex', flexDirection: 'column', gap: 4, border: '1px solid #E9B949', background: '#FFF9E9', color: '#9A5A08', cursor: 'pointer' };
 const signedCell = { ...baseCell, display: 'flex', flexDirection: 'column', gap: 4, border: '1px solid #8BD3AE', background: '#EDFBF4', color: '#047857', cursor: 'pointer' };
 const legacyCell = { ...baseCell, display: 'flex', flexDirection: 'column', gap: 5, border: '1px solid #D7CCC7', background: '#F5F1EF', color: '#75635C' };
-const empty = { minHeight: 260, padding: 30, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 7, textAlign: 'center', color: '#9C8880', fontSize: 11.5 };
+const empty = { minHeight: 280, padding: 34, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, textAlign: 'center', color: '#9C8880', fontSize: 12.5 };
 const overlay = { position: 'fixed', inset: 0, zIndex: 13000, background: 'rgba(35,27,24,.62)', backdropFilter: 'blur(4px)', display: 'grid', placeItems: 'center', padding: 16 };
-const viewDialog = { width: 'min(560px, 96vw)', background: '#FFFEFD', borderRadius: 16, boxShadow: '0 28px 80px rgba(35,20,15,.28)', overflow: 'hidden' };
-const signatureImageBox = { border: '1px solid #E9DFDA', borderRadius: 10, minHeight: 120, display: 'grid', placeItems: 'center', marginTop: 12, background: '#fff' };
-const viewButton = { border: '1px solid #DCCFC9', background: '#fff', color: '#705D56', borderRadius: 8, padding: '7px 10px', fontSize: 10.5, fontWeight: 700, cursor: 'pointer' };
+const viewDialog = { width: 'min(620px, 96vw)', background: '#FFFEFD', borderRadius: 16, boxShadow: '0 28px 80px rgba(35,20,15,.28)', overflow: 'hidden' };
+const signatureImageBox = { border: '1px solid #E9DFDA', borderRadius: 10, minHeight: 150, display: 'grid', placeItems: 'center', marginTop: 14, background: '#fff' };
+const viewButton = { border: '1px solid #DCCFC9', background: '#fff', color: '#705D56', borderRadius: 9, padding: '9px 13px', fontSize: 12, fontWeight: 700, cursor: 'pointer' };

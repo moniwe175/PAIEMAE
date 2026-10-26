@@ -95,14 +95,14 @@ export default function PackageSignatureDialog({ session, patientPackage, patien
         <header style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '16px 18px', borderBottom: '1px solid #EEE7E2' }}>
           <div style={{ width: 36, height: 36, borderRadius: 10, display: 'grid', placeItems: 'center', background: '#FDF4F7', color: '#A4315A' }}><PenLine size={18}/></div>
           <div style={{ flex: 1 }}>
-            <strong style={{ display: 'block', fontSize: 15 }}>Assinatura da sessão {session.session_number}/{patientPackage?.total_sessions || '—'}</strong>
-            <span style={{ fontSize: 11, color: '#927C75' }}>{patient?.nome || patient?.name} · {patientPackage?.package_name}</span>
+            <strong style={{ display: 'block', fontSize: 17 }}>Assinatura da sessão {session.session_number}/{patientPackage?.total_sessions || '—'}</strong>
+            <span style={{ fontSize: 12.5, color: '#927C75' }}>{patient?.nome || patient?.name} · {patientPackage?.package_name}</span>
           </div>
           <button onClick={onClose} style={iconButton}><X size={16}/></button>
         </header>
 
         <div style={{ padding: 18 }}>
-          <div style={{ padding: 12, borderRadius: 10, background: '#F8F5F3', color: '#554640', fontSize: 12, lineHeight: 1.55, marginBottom: 14 }}>
+          <div style={{ padding: 14, borderRadius: 10, background: '#F8F5F3', color: '#554640', fontSize: 13.5, lineHeight: 1.55, marginBottom: 16 }}>
             {session.acknowledgment_text || `Confirmo a realização desta sessão do pacote ${patientPackage?.package_name || ''}.`}
             <div style={{ marginTop: 5, color: '#8A756D', fontSize: 10.5 }}>
               Procedimento: {session.service_name || 'não informado'} · Profissional: {session.professional_name || 'não informado'}
@@ -117,13 +117,13 @@ export default function PackageSignatureDialog({ session, patientPackage, patien
               onPointerUp={stop}
               onPointerCancel={stop}
               onPointerLeave={stop}
-              style={{ display: 'block', width: '100%', height: 190, touchAction: 'none', cursor: 'crosshair' }}
+              style={{ display: 'block', width: '100%', height: 220, touchAction: 'none', cursor: 'crosshair' }}
             />
             <span style={{ position: 'absolute', left: 14, bottom: 9, fontSize: 10, color: '#B09E97', pointerEvents: 'none' }}>Assine com o dedo, caneta ou mouse</span>
           </div>
           <button onClick={clear} style={{ ...secondaryButton, marginTop: 8 }}><Eraser size={13}/> Limpar assinatura</button>
 
-          <label style={{ display: 'flex', gap: 9, alignItems: 'flex-start', marginTop: 15, fontSize: 11.5, color: '#5E4D47', cursor: 'pointer', lineHeight: 1.45 }}>
+          <label style={{ display: 'flex', gap: 10, alignItems: 'flex-start', marginTop: 17, fontSize: 13, color: '#5E4D47', cursor: 'pointer', lineHeight: 1.45 }}>
             <input type="checkbox" checked={accepted} onChange={(event) => setAccepted(event.target.checked)} style={{ marginTop: 2 }}/>
             Confirmo que os dados acima estão corretos e que a assinatura pertence à paciente identificada.
           </label>
@@ -141,7 +141,7 @@ export default function PackageSignatureDialog({ session, patientPackage, patien
 }
 
 const overlay = { position: 'fixed', inset: 0, zIndex: 13000, background: 'rgba(35,27,24,.62)', backdropFilter: 'blur(4px)', display: 'grid', placeItems: 'center', padding: 16 };
-const dialog = { width: 'min(620px, 96vw)', maxHeight: '94vh', overflowY: 'auto', background: '#FFFEFD', borderRadius: 16, boxShadow: '0 28px 80px rgba(35,20,15,.28)' };
-const primaryButton = { border: 0, borderRadius: 8, background: '#B7796B', color: '#fff', padding: '9px 12px', fontSize: 11.5, fontWeight: 800, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 };
-const secondaryButton = { border: '1px solid #DCCFC9', borderRadius: 8, background: '#fff', color: '#705D56', padding: '8px 11px', fontSize: 11, fontWeight: 700, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 };
+const dialog = { width: 'min(680px, 96vw)', maxHeight: '94vh', overflowY: 'auto', background: '#FFFEFD', borderRadius: 16, boxShadow: '0 28px 80px rgba(35,20,15,.28)' };
+const primaryButton = { border: 0, borderRadius: 9, background: '#B7796B', color: '#fff', padding: '11px 15px', fontSize: 13, fontWeight: 800, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 7 };
+const secondaryButton = { border: '1px solid #DCCFC9', borderRadius: 9, background: '#fff', color: '#705D56', padding: '10px 13px', fontSize: 12.5, fontWeight: 700, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 7 };
 const iconButton = { width: 32, height: 32, borderRadius: 8, border: 0, background: '#F4EFEC', color: '#826E67', display: 'grid', placeItems: 'center', cursor: 'pointer' };

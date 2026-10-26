@@ -51,7 +51,7 @@ export default function Assinaturas() {
         </button>
       </div>
 
-      <div style={{ marginBottom: 14, padding: '10px 13px', border: '1px solid #E8DCD6', borderRadius: 10, background: '#FCF6F3', color: '#765F57', fontSize: 11, lineHeight: 1.5 }}>
+      <div style={{ marginBottom: 16, padding: '12px 15px', border: '1px solid #E8DCD6', borderRadius: 10, background: '#FCF6F3', color: '#765F57', fontSize: 12.5, lineHeight: 1.55 }}>
         Esta área mostra somente clientes que possuem pacote. A assinatura é liberada quando uma sessão vinculada ao pacote é finalizada na Agenda.
       </div>
 
