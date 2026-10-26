@@ -1,5 +1,16 @@
 const ACTIVE_SESSION_STATUSES = new Set(['pending_signature', 'signed', 'legacy']);
 
+export function patientsWithPackages(patients = [], packages = []) {
+  const clientIds = new Set(
+    packages
+      .map((patientPackage) => patientPackage?.client_id)
+      .filter((clientId) => clientId !== null && clientId !== undefined)
+      .map(String),
+  );
+
+  return patients.filter((patient) => clientIds.has(String(patient?.id)));
+}
+
 export function activePackageSessions(sessions = [], packageId = null) {
   return sessions.filter((session) => (
     (!packageId || String(session.patient_package_id) === String(packageId))

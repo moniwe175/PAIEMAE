@@ -8,6 +8,7 @@ import {
   eligiblePatientPackages,
   packageAcceptsService,
   packageProgress,
+  patientsWithPackages,
 } from '../src/lib/patientPackages.js';
 
 const pkg = {
@@ -51,6 +52,19 @@ test('calcula validade do catálogo a partir da data de compra', () => {
   assert.equal(addMonthsToDate('2026-10-26', '1 ano'), '2027-10-26');
 });
 
+test('a área de assinaturas lista somente pacientes que possuem pacote', () => {
+  const patients = [
+    { id: 12, nome: 'Ana' },
+    { id: 99, nome: 'Beatriz' },
+    { id: 34, nome: 'Carla' },
+  ];
+  const patientPackages = [
+    { id: 'pacote-1', client_id: 12 },
+    { id: 'pacote-2', client_id: 34 },
+  ];
+  assert.deepEqual(patientsWithPackages(patients, patientPackages).map((patient) => patient.nome), ['Ana', 'Carla']);
+});
+
 test('migração e interfaces preservam vínculo, assinatura e estorno', async () => {
   const [migration, patients, agenda, signatures] = await Promise.all([
     readFile(new URL('../patient_packages_migration.sql', import.meta.url), 'utf8'),
@@ -69,5 +83,6 @@ test('migração e interfaces preservam vínculo, assinatura e estorno', async (
   assert.match(agenda, /Utilizar pacote da paciente/);
   assert.match(agenda, /não duplicar a receita/);
   assert.match(signatures, /Aguardando assinatura/);
+  assert.match(signatures, /Somente quem possui pacote aparece aqui/);
   assert.match(signatures, /<PackageSignatureDialog/);
 });
