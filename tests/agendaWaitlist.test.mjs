@@ -72,6 +72,7 @@ test('contrato da lista usa Pacientes e permanece separada dos agendamentos', as
   assert.match(panel, /fetchClients\(\)/);
   assert.doesNotMatch(panel, /crm_leads/);
   assert.match(agenda, /<WaitlistPanel/);
+  assert.match(agenda, /\[waitlistOpen, setWaitlistOpen\]\s*=\s*useState\(false\)/);
   assert.match(migration, /CREATE TABLE IF NOT EXISTS public\.appointment_waitlist/i);
   assert.match(migration, /client_id integer NOT NULL REFERENCES public\.clients\(id\)/i);
   assert.match(migration, /waitlist_date date NOT NULL DEFAULT CURRENT_DATE/i);

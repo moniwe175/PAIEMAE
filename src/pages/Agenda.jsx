@@ -1501,7 +1501,7 @@ export default function Agenda() {
   const [bloqueioModal, setBloqueioModal] = useState({ open: false, bloqueio: null, prefillProf: '', prefillHora: '' });
   const [atendimentoBlockedInfo, setAtendimentoBlockedInfo] = useState(null);
   const [tabletModal, setTabletModal] = useState({ open: false, paciente: null, tipoFicha: '', apt: null });
-  const [waitlistOpen, setWaitlistOpen] = useState(true);
+  const [waitlistOpen, setWaitlistOpen] = useState(false);
   const [waitlistVacancy, setWaitlistVacancy] = useState(null);
   const [waitlistRefreshKey, setWaitlistRefreshKey] = useState(0);
 
