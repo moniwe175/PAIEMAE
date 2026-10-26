@@ -10,9 +10,11 @@ import {
   Signature,
 } from 'lucide-react';
 import {
+  buildPackageSignatureDraft,
   buildPackageSessionGrid,
   packageProgress,
   patientsWithPackages,
+  signatureAppointmentCandidates,
 } from '../../lib/patientPackages';
 import PackageSignatureDialog from './PackageSignatureDialog';
 
@@ -23,7 +25,7 @@ const formatDateTime = (value) => value
 const patientName = (patient) => patient?.nome || patient?.name || 'Paciente removido';
 const patientPhone = (patient) => patient?.telefone || patient?.phone || '';
 
-export default function PackageSignaturesPanel({ patients = [], packages = [], sessions = [], loading, loadError, onSessionUpdated }) {
+export default function PackageSignaturesPanel({ patients = [], packages = [], sessions = [], appointments = [], loading, loadError, onSessionUpdated }) {
   const [search, setSearch] = useState('');
   const [selectedClientId, setSelectedClientId] = useState(null);
   const [signing, setSigning] = useState(null);
@@ -85,6 +87,7 @@ export default function PackageSignaturesPanel({ patients = [], packages = [], s
           patient={selectedPatient}
           packages={selectedPackages}
           sessions={sessions}
+          appointments={appointments}
           onBack={() => setSelectedClientId(null)}
           onOpenSession={setSigning}
         />
@@ -167,7 +170,7 @@ function PatientList({ loading, patients, packages, sessions, search, onSearch, 
   );
 }
 
-function PatientSignatureRecord({ patient, packages, sessions, onBack, onOpenSession }) {
+function PatientSignatureRecord({ patient, packages, sessions, appointments, onBack, onOpenSession }) {
   const packageIds = new Set(packages.map((item) => String(item.id)));
   const patientSessions = sessions.filter((item) => packageIds.has(String(item.patient_package_id)));
   const pending = patientSessions.filter((item) => item.status === 'pending_signature').length;
@@ -202,6 +205,7 @@ function PatientSignatureRecord({ patient, packages, sessions, onBack, onOpenSes
             key={item.id}
             patientPackage={item}
             sessions={sessions}
+            appointments={appointments}
             onOpenSession={onOpenSession}
           />
         ))}
@@ -210,10 +214,13 @@ function PatientSignatureRecord({ patient, packages, sessions, onBack, onOpenSes
   );
 }
 
-function PackageSessionGrid({ patientPackage, sessions, onOpenSession }) {
+function PackageSessionGrid({ patientPackage, sessions, appointments, onOpenSession }) {
   const grid = buildPackageSessionGrid(patientPackage, sessions);
   const progress = packageProgress(patientPackage, sessions);
   const packageAvailable = progress.status === 'active';
+  const candidatesByColumn = grid.columns.map((column) => (
+    signatureAppointmentCandidates(patientPackage, sessions, appointments, column.name)
+  ));
 
   return (
     <article style={packageCard}>
@@ -244,11 +251,26 @@ function PackageSessionGrid({ patientPackage, sessions, onOpenSession }) {
             {grid.rows.map((row) => (
               <tr key={row.number}>
                 <th style={{ ...rowNumber, left: 0 }}><span>{row.number}</span></th>
-                {row.cells.map((cell, columnIndex) => (
-                  <td key={`${row.number}-${grid.columns[columnIndex].key}`} style={gridTd}>
-                    <SessionCell cell={cell} packageAvailable={packageAvailable} onOpenSession={onOpenSession}/>
-                  </td>
-                ))}
+                {row.cells.map((cell, columnIndex) => {
+                  const column = grid.columns[columnIndex];
+                  const availableIndex = row.number - column.sessions.length - 1;
+                  const appointment = cell.available && availableIndex >= 0
+                    ? candidatesByColumn[columnIndex][availableIndex]
+                    : null;
+                  return (
+                    <td key={`${row.number}-${column.key}`} style={gridTd}>
+                      <SessionCell
+                        cell={cell}
+                        packageAvailable={packageAvailable}
+                        appointment={appointment}
+                        patientPackage={patientPackage}
+                        sessions={sessions}
+                        serviceName={column.name}
+                        onOpenSession={onOpenSession}
+                      />
+                    </td>
+                  );
+                })}
               </tr>
             ))}
           </tbody>
@@ -258,7 +280,20 @@ function PackageSessionGrid({ patientPackage, sessions, onOpenSession }) {
   );
 }
 
-function SessionCell({ cell, packageAvailable, onOpenSession }) {
+function SessionCell({ cell, packageAvailable, appointment, patientPackage, sessions, serviceName, onOpenSession }) {
+  if (!cell.session && packageAvailable && appointment) return (
+    <button
+      onClick={() => {
+        const draft = buildPackageSignatureDraft(patientPackage, sessions, appointment, serviceName);
+        if (draft) onOpenSession(draft);
+      }}
+      style={availableSignatureCell}
+    >
+      <span>Disponível</span>
+      <small>{formatDateTime(`${appointment.appointment_date}T${appointment.appointment_time || '12:00:00'}-03:00`)}</small>
+      <strong><Signature size={12}/> Assinar sessão finalizada</strong>
+    </button>
+  );
   if (cell.disabled) return <div style={disabledCell}>—</div>;
   if (!cell.session) return <div style={availableCell}>{packageAvailable ? 'Disponível' : 'Indisponível'}</div>;
 
@@ -361,6 +396,7 @@ const gridTd = { minWidth: 190, padding: 7, borderRight: '1px solid #EEE7E2', bo
 const baseCell = { minHeight: 55, width: '100%', borderRadius: 8, padding: '8px 9px', fontSize: 9.5, textAlign: 'left' };
 const disabledCell = { ...baseCell, display: 'grid', placeItems: 'center', background: '#F6F3F1', color: '#C1B6B1' };
 const availableCell = { ...baseCell, display: 'grid', placeItems: 'center', border: '1px dashed #D9CBC4', background: '#FFFEFD', color: '#9A8780', textAlign: 'center' };
+const availableSignatureCell = { ...baseCell, display: 'flex', flexDirection: 'column', gap: 4, border: '1px dashed #C68F80', background: '#FFF9F7', color: '#8F4E42', cursor: 'pointer' };
 const pendingCell = { ...baseCell, display: 'flex', flexDirection: 'column', gap: 4, border: '1px solid #E9B949', background: '#FFF9E9', color: '#9A5A08', cursor: 'pointer' };
 const signedCell = { ...baseCell, display: 'flex', flexDirection: 'column', gap: 4, border: '1px solid #8BD3AE', background: '#EDFBF4', color: '#047857', cursor: 'pointer' };
 const legacyCell = { ...baseCell, display: 'flex', flexDirection: 'column', gap: 5, border: '1px solid #D7CCC7', background: '#F5F1EF', color: '#75635C' };

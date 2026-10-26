@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { FileSignature, RefreshCw } from 'lucide-react';
 import PackageSignaturesPanel from '../components/patients/PackageSignaturesPanel';
 import {
+  fetchAppointments,
   fetchClients,
   fetchPatientPackages,
   fetchPatientPackageSessions,
@@ -11,22 +12,25 @@ export default function Assinaturas() {
   const [patients, setPatients] = useState([]);
   const [packages, setPackages] = useState([]);
   const [sessions, setSessions] = useState([]);
+  const [appointments, setAppointments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
 
   const loadData = useCallback(async () => {
     setLoading(true);
-    const [clientsResult, packagesResult, sessionsResult] = await Promise.all([
+    const [clientsResult, packagesResult, sessionsResult, appointmentsResult] = await Promise.all([
       fetchClients(),
       fetchPatientPackages(),
       fetchPatientPackageSessions(),
+      fetchAppointments(),
     ]);
 
     setPatients(clientsResult.data || []);
     setPackages(packagesResult.data || []);
     setSessions(sessionsResult.data || []);
+    setAppointments(appointmentsResult.data || []);
 
-    const error = clientsResult.error || packagesResult.error || sessionsResult.error;
+    const error = clientsResult.error || packagesResult.error || sessionsResult.error || appointmentsResult.error;
     setLoadError(error ? (error.message || String(error)) : '');
     setLoading(false);
   }, []);
@@ -55,9 +59,15 @@ export default function Assinaturas() {
         patients={patients}
         packages={packages}
         sessions={sessions}
+        appointments={appointments}
         loading={loading}
         loadError={loadError}
-        onSessionUpdated={(updated) => setSessions((current) => current.map((item) => item.id === updated.id ? updated : item))}
+        onSessionUpdated={(updated) => setSessions((current) => {
+          const exists = current.some((item) => item.id === updated.id);
+          return exists
+            ? current.map((item) => item.id === updated.id ? updated : item)
+            : [updated, ...current];
+        })}
       />
     </div>
   );

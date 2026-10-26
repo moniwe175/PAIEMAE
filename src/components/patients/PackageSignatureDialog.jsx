@@ -1,7 +1,7 @@
 /* eslint-disable react/prop-types */
 import { useEffect, useRef, useState } from 'react';
 import { CheckCircle2, Eraser, Loader2, PenLine, X } from 'lucide-react';
-import { updatePatientPackageSession } from '../../services/supabaseService';
+import { insertPatientPackageSession, updatePatientPackageSession } from '../../services/supabaseService';
 
 export default function PackageSignatureDialog({ session, patientPackage, patient, onClose, onSigned }) {
   const canvasRef = useRef(null);
@@ -65,13 +65,25 @@ export default function PackageSignatureDialog({ session, patientPackage, patien
     if (!accepted) { alert('Confirme a declaração antes de salvar a assinatura.'); return; }
     setSaving(true);
     const signedAt = new Date().toISOString();
-    const { data, error } = await updatePatientPackageSession(session.id, {
+    const signature = {
       status: 'signed',
       signed_name: patient?.nome || patient?.name || 'Paciente',
       signature_data_url: canvasRef.current.toDataURL('image/png'),
       signed_at: signedAt,
       acknowledgment_text: session.acknowledgment_text || `Confirmo a realização desta sessão do pacote ${patientPackage?.package_name || ''}.`,
-    });
+    };
+    const { data, error } = session.id
+      ? await updatePatientPackageSession(session.id, signature)
+      : await insertPatientPackageSession({
+        patient_package_id: session.patient_package_id,
+        client_id: session.client_id,
+        appointment_id: session.appointment_id,
+        session_number: session.session_number,
+        service_name: session.service_name,
+        professional_name: session.professional_name,
+        performed_at: session.performed_at,
+        ...signature,
+      });
     setSaving(false);
     if (error) { alert(`Não foi possível salvar a assinatura: ${error.message || error}`); return; }
     onSigned(data);
