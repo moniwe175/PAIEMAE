@@ -25,7 +25,6 @@ import Services from './pages/Services';
 import Equipe from './pages/Equipe';
 import Marketing from './pages/Marketing';
 import MotorMarketing from './pages/MotorMarketing';
-import GuiaMarketing from './pages/GuiaMarketing';
 import Integration from './pages/Integration';
 import Reports from './pages/Reports';
 import ClientBooking from './pages/ClientBooking';
@@ -80,7 +79,6 @@ function MainLayout() {
           <Route path="/equipe" element={<ModuleGate module="equipe"><Equipe /></ModuleGate>} />
           <Route path="/marketing" element={<ModuleGate module="marketing"><Marketing /></ModuleGate>} />
           <Route path="/motor-marketing" element={<ModuleGate module="motor"><MotorMarketing /></ModuleGate>} />
-          <Route path="/guia-marketing" element={<ModuleGate module="marketing"><GuiaMarketing /></ModuleGate>} />
           <Route path="/integration" element={<ModuleGate module="integracoes"><Integration /></ModuleGate>} />
           <Route path="/reports" element={<ModuleGate module="relatorios"><Reports /></ModuleGate>} />
           <Route path="/anamnese" element={<ModuleGate module="anamnese"><Anamnese /></ModuleGate>} />

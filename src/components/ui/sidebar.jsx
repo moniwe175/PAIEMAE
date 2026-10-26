@@ -40,7 +40,6 @@ const menuItems = [
   { key: 'crm', name: 'Interessados', path: '/crm', icon: UserPlus },
   { key: 'marketing', name: 'Marketing', path: '/marketing', icon: Megaphone },
   { key: 'motor', name: 'Motor', path: '/motor-marketing', icon: Zap, badgeKey: 'pending' },
-  { key: 'marketing', name: 'Guia Marketing', path: '/guia-marketing', icon: BookOpen },
   { key: 'comissoes', name: 'Comissões', path: '/comissoes', icon: Coins },
   { key: 'financeiro', name: 'Financeiro', path: '/financial', icon: Wallet },
   { key: 'franquia', name: 'Franquia & Viabilidade', path: '/franquia', icon: Building2 },
