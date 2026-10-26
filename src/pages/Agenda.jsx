@@ -1143,7 +1143,7 @@ function AgendamentoModal({ onClose, date, profissional: prefillProf, hora: pref
                 const selectedPackage = eligiblePackages.find((item) => String(item.id) === String(form.patient_package_id));
                 const progress = packageProgress(selectedPackage, packageSessions);
                 return <div style={{ padding: '9px 11px', borderRadius: 8, background: '#ECFDF5', border: '1px solid #A7F3D0', color: '#047857', fontSize: 10.5 }}>
-                  <strong>Pacote identificado automaticamente:</strong> {selectedPackage?.package_name} · próxima sessão {progress.used + 1} de {progress.total}. O saldo será descontado somente ao finalizar.
+                  <strong>Pacote identificado automaticamente:</strong> {selectedPackage?.package_name} · próxima sessão {progress.used + 1} de {progress.total}. A sessão só será descontada quando o repasse aparecer na planilha.
                 </div>;
               })() : (
                 <div style={{ padding: '9px 11px', borderRadius: 8, background: '#F9FAFB', border: '1px solid #E5E7EB', color: '#6B7280', fontSize: 10.5 }}>

@@ -107,7 +107,7 @@ function sincronizarComSupabase() {
  */
 function parseSheetData(rows) {
   var headerRowIdx = -1;
-  var colMap = { cliente: 0, credito: 1, debito: 2, dinheiro: 3, pix: 4, gross: 5, procedimento: 6, profissional: 7, comanda: 8 };
+  var colMap = { cliente: 0, credito: 1, debito: 2, dinheiro: 3, pix: 4, repasse: 5, procedimento: 6, profissional: 7, comanda: 8 };
 
   // Identifica o cabeçalho
   for (var i = 0; i < rows.length; i++) {
@@ -120,6 +120,7 @@ function parseSheetData(rows) {
         if (/DEBITO|DÉBITO/.test(txt)) colMap.debito = ci;
         if (/DINHEIRO/.test(txt)) colMap.dinheiro = ci;
         if (/PIX/.test(txt)) colMap.pix = ci;
+        if (/REPASSE/.test(txt)) colMap.repasse = ci;
         if (/PROCEDIMENTO/.test(txt)) colMap.procedimento = ci;
         if (/PROFISSIONAL/.test(txt)) colMap.profissional = ci;
         if (/COMANDA|ID|TICKET|CODIGO/.test(txt)) colMap.comanda = ci;
@@ -174,15 +175,18 @@ function parseSheetData(rows) {
     var debito = parseNum(row[colMap.debito] != null ? row[colMap.debito] : row[2]);
     var dinheiro = parseNum(row[colMap.dinheiro] != null ? row[colMap.dinheiro] : row[3]);
     var pix = parseNum(row[colMap.pix] != null ? row[colMap.pix] : row[4]);
+    var repasse = parseNum(row[colMap.repasse] != null ? row[colMap.repasse] : row[5]);
 
-    var gross = (credito + debito + dinheiro + pix) || parseNum(row[colMap.gross] != null ? row[colMap.gross] : row[5]);
+    // REPASSE comprova uma sessao de pacote. Nao e um novo recebimento.
+    var gross = credito + debito + dinheiro + pix;
 
-    if (gross <= 0 || !clienteVal || String(clienteVal).trim() === '--') continue;
+    if (!clienteVal || String(clienteVal).trim() === '--') continue;
 
-    var payMethod = pix > 0 ? 'Pix' : credito > 0 ? 'Crédito' : debito > 0 ? 'Débito' : 'Dinheiro';
+    var rowTypeAtendimento = gross <= 0 && repasse <= 0 ? 'rascunho' : 'receita';
+    var payMethod = rowTypeAtendimento === 'rascunho' ? 'Sem movimentação' : repasse > 0 && gross <= 0 ? 'Repasse de pacote' : pix > 0 ? 'Pix' : credito > 0 ? 'Crédito' : debito > 0 ? 'Débito' : 'Dinheiro';
     var comandaStr = dateRef + '_' + (comandaVal ? String(comandaVal).trim() : ('rec_' + r));
 
-    list.push(criarObjetoTx(comandaStr, dateRef, String(clienteVal).trim(), String(procVal).trim() || '—', String(profVal).trim() || '—', gross, payMethod, pix, credito, debito, dinheiro, 'receita'));
+    list.push(criarObjetoTx(comandaStr, dateRef, String(clienteVal).trim(), String(procVal).trim() || '—', String(profVal).trim() || '—', gross, payMethod, pix, credito, debito, dinheiro, rowTypeAtendimento, repasse));
   }
 
   return list;
@@ -247,7 +251,7 @@ function parseNum(v) {
   return isNaN(n) ? 0 : n;
 }
 
-function criarObjetoTx(comanda, dateRef, client, procedure, professional, gross, payMethod, pix, credito, debito, dinheiro, rowType) {
+function criarObjetoTx(comanda, dateRef, client, procedure, professional, gross, payMethod, pix, credito, debito, dinheiro, rowType, repasse) {
   return {
     comanda: comanda,
     date_ref: dateRef,
@@ -260,7 +264,7 @@ function criarObjetoTx(comanda, dateRef, client, procedure, professional, gross,
     credito: credito || 0,
     debito: debito || 0,
     dinheiro: dinheiro || 0,
-    repasse: 0,
+    repasse: repasse || 0,
     commission_value: null,
     row_type: rowType,
     tipo: rowType

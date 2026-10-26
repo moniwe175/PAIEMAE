@@ -1,5 +1,11 @@
 const ACTIVE_SESSION_STATUSES = new Set(['pending_signature', 'signed', 'legacy']);
 
+export function isPackageRepasseTransaction(transaction) {
+  return Number(transaction?.repasse) > 0
+    && transaction?.is_metadata !== true
+    && !transaction?.deleted_at;
+}
+
 export function patientsWithPackages(patients = [], packages = []) {
   const clientIds = new Set(
     packages

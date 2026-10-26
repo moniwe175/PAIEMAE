@@ -7,6 +7,7 @@ import {
   addMonthsToDate,
   buildPackageSessionGrid,
   eligiblePatientPackages,
+  isPackageRepasseTransaction,
   packageAcceptsService,
   packageProgress,
   patientsWithPackages,
@@ -69,6 +70,13 @@ test('calcula validade do catálogo a partir da data de compra', () => {
   assert.equal(addMonthsToDate('2026-10-26', '1 ano'), '2027-10-26');
 });
 
+test('somente repasse real identifica uma sessão realizada do pacote', () => {
+  assert.equal(isPackageRepasseTransaction({ repasse: 80, is_metadata: false, deleted_at: null }), true);
+  assert.equal(isPackageRepasseTransaction({ repasse: 0, is_metadata: false, deleted_at: null }), false);
+  assert.equal(isPackageRepasseTransaction({ repasse: 80, is_metadata: true, deleted_at: null }), false);
+  assert.equal(isPackageRepasseTransaction({ repasse: 80, is_metadata: false, deleted_at: '2026-10-26T12:00:00Z' }), false);
+});
+
 test('a área de assinaturas lista somente pacientes que possuem pacote', () => {
   const patients = [
     { id: 12, nome: 'Ana' },
@@ -114,8 +122,10 @@ test('usa cada serviço como coluna e respeita o limite individual de sessões',
 });
 
 test('migração e interfaces preservam vínculo, assinatura e estorno', async () => {
-  const [migration, patients, agenda, signatures, signaturesPage, app, sidebar, packageCatalog] = await Promise.all([
+  const [migration, repasseMigration, sheetSync, patients, agenda, signatures, signaturesPage, app, sidebar, packageCatalog] = await Promise.all([
     readFile(new URL('../patient_packages_migration.sql', import.meta.url), 'utf8'),
+    readFile(new URL('../package_sessions_repasse_sync.sql', import.meta.url), 'utf8'),
+    readFile(new URL('../google-apps-script/web-app-endpoint.gs', import.meta.url), 'utf8'),
     readFile(new URL('../src/pages/Pacientes.jsx', import.meta.url), 'utf8'),
     readFile(new URL('../src/pages/Agenda.jsx', import.meta.url), 'utf8'),
     readFile(new URL('../src/components/patients/PackageSignaturesPanel.jsx', import.meta.url), 'utf8'),
@@ -130,12 +140,22 @@ test('migração e interfaces preservam vínculo, assinatura e estorno', async (
   assert.match(migration, /ADD COLUMN IF NOT EXISTS patient_package_id/i);
   assert.match(migration, /status = 'reversed'/i);
   assert.match(migration, /ENABLE ROW LEVEL SECURITY/i);
+  assert.match(repasseMigration, /DROP TRIGGER IF EXISTS trg_sync_package_session_from_appointment/i);
+  assert.match(repasseMigration, /CREATE TRIGGER trg_normalize_sheet_package_repasse/i);
+  assert.match(repasseMigration, /NEW\.repasse := NEW\.gross/i);
+  assert.match(repasseMigration, /sheet_transaction_id uuid/i);
+  assert.match(repasseMigration, /COALESCE\(NEW\.repasse, 0\) <= 0/i);
+  assert.match(repasseMigration, /CREATE TRIGGER trg_sync_package_session_from_repasse_upsert/i);
+  assert.match(repasseMigration, /CREATE TRIGGER trg_sync_package_session_from_repasse_delete/i);
+  assert.match(sheetSync, /repasse: repasse \|\| 0/i);
+  assert.match(sheetSync, /var gross = credito \+ debito \+ dinheiro \+ pix/i);
+  assert.match(sheetSync, /rowTypeAtendimento = gross <= 0 && repasse <= 0 \? 'rascunho'/i);
   assert.match(patients, /<PatientPackagesPanel/);
   assert.doesNotMatch(patients, /PackageSignaturesPanel/);
   assert.match(agenda, /Pacote identificado automaticamente/);
   assert.match(agenda, /Selecione o serviço primeiro/);
   assert.match(agenda, /eligiblePackages\.length > 1/);
-  assert.match(agenda, /saldo será descontado somente ao finalizar/i);
+  assert.match(agenda, /só será descontada quando o repasse aparecer na planilha/i);
   assert.match(agenda, /service_id: item\.service_id/);
   assert.match(packageCatalog, /id: service\.id/);
   assert.match(signatures, /Abrir assinaturas/);
