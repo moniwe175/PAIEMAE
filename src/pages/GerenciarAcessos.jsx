@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+﻿import { useState, useEffect } from 'react';
 import {
   Shield, Loader2, Lock, UserPlus, ExternalLink,
   Plus, Edit3, Trash2, X, Check, Save, RefreshCw, AlertTriangle, Briefcase, Users
@@ -303,12 +303,12 @@ export default function GerenciarAcessos() {
         if (editingRole?.id === role.id) handleCloseModal();
       } else {
         const member = confirmTarget.member;
-        const { data, error: fnErr } = await supabase.functions.invoke('admin-delete-user', {
-          body: { userId: member.id },
+        const { data: rpcData, error: rpcErr } = await supabase.rpc('admin_delete_user', {
+          target_user_id: member.id,
         });
-        if (fnErr) throw fnErr;
-        const res = data || {};
-        if (res.success === false) throw new Error(res.error || 'Falha ao excluir o usuário.');
+        if (rpcErr) throw new Error(rpcErr.message || 'Falha ao chamar a fun��o de exclus�o.');
+        const res = rpcData || {};
+        if (res.success === false) throw new Error(res.error || 'Falha ao excluir o usuario.');
         setMembers(prev => prev.filter(m => m.id !== member.id));
       }
       setConfirmTarget(null);
