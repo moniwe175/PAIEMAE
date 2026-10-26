@@ -8,7 +8,7 @@ export const INITIAL_ROLES = [
     permissions: {
       dashboard: { ver: true, edit: false },
       agenda: { ver: true, edit: true },
-      pacientes: { ver: true, edit: true },
+      pacientes: { ver: true, edit: true, verMetricas: false, verValores: false },
       anamnese: { ver: true, edit: false },
       servicos: { ver: true, edit: false },
       crm: { ver: true, edit: true }
@@ -20,7 +20,7 @@ export const INITIAL_ROLES = [
     permissions: {
       dashboard: { ver: true, edit: false },
       agenda: { ver: true, edit: true },
-      pacientes: { ver: true, edit: true },
+      pacientes: { ver: true, edit: true, verMetricas: false, verValores: false },
       anamnese: { ver: true, edit: true },
       estoque: { ver: true, edit: false }
     }
@@ -42,7 +42,7 @@ export const INITIAL_ROLES = [
     permissions: {
       dashboard: { ver: true, edit: true },
       agenda: { ver: true, edit: true },
-      pacientes: { ver: true, edit: true },
+      pacientes: { ver: true, edit: true, verMetricas: true, verValores: true },
       equipe: { ver: true, edit: true },
       servicos: { ver: true, edit: true },
       estoque: { ver: true, edit: true },

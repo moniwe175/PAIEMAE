@@ -118,6 +118,34 @@ export function AuthProvider({ children }) {
     return false;
   };
 
+  // Helper para checar se o usuário pode ver métricas/indicadores do topo (ex: pacientes)
+  const canViewMetrics = (moduleKey = 'pacientes') => {
+    if (!user) return false;
+    if (checkIsAdmin()) return true;
+    if (profile?.role === 'staff' || profile?.permissions) {
+      const modPerm = permissions[moduleKey];
+      if (!modPerm) return false;
+      if (typeof modPerm === 'boolean') return modPerm;
+      if (!modPerm.ver) return false;
+      return modPerm.verMetricas !== false;
+    }
+    return false;
+  };
+
+  // Helper para checar se o usuário pode ver valores financeiros (ex: pacientes)
+  const canViewValues = (moduleKey = 'pacientes') => {
+    if (!user) return false;
+    if (checkIsAdmin()) return true;
+    if (profile?.role === 'staff' || profile?.permissions) {
+      const modPerm = permissions[moduleKey];
+      if (!modPerm) return false;
+      if (typeof modPerm === 'boolean') return modPerm;
+      if (!modPerm.ver) return false;
+      return modPerm.verValores !== false;
+    }
+    return false;
+  };
+
   const signIn = async (email, password) => {
     setLoading(true);
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
@@ -158,6 +186,8 @@ export function AuthProvider({ children }) {
       loading,
       canView,
       canEdit,
+      canViewMetrics,
+      canViewValues,
       checkIsAdmin,
       reloadProfile: () => loadProfileData(user?.id),
       signIn,

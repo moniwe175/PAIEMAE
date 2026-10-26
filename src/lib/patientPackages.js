@@ -142,6 +142,67 @@ export function buildPackageSessionGrid(patientPackage, sessions = []) {
   return { columns, rows, rowCount };
 }
 
+const COMPLETED_APPOINTMENT_STATUSES = new Set(['finalizado', 'concluido', 'completed']);
+
+function completedAppointment(appointment) {
+  return COMPLETED_APPOINTMENT_STATUSES.has(normalizePackageText(appointment?.status));
+}
+
+export function signatureAppointmentCandidates(patientPackage, sessions = [], appointments = [], serviceName = '') {
+  const linkedAppointmentIds = new Set(
+    activePackageSessions(sessions, patientPackage?.id)
+      .map((session) => session?.appointment_id)
+      .filter(Boolean)
+      .map(String),
+  );
+  const targetService = normalizePackageText(serviceName);
+
+  return appointments
+    .filter((appointment) => {
+      if (!completedAppointment(appointment)) return false;
+      if (String(appointment?.patient_package_id || '') !== String(patientPackage?.id || '')) return false;
+      if (String(appointment?.client_id || '') !== String(patientPackage?.client_id || '')) return false;
+      if (linkedAppointmentIds.has(String(appointment?.id || ''))) return false;
+      if (!targetService) return true;
+      const appointmentService = normalizePackageText(appointment?.procedure);
+      return appointmentService === targetService
+        || appointmentService.includes(targetService)
+        || targetService.includes(appointmentService);
+    })
+    .sort((left, right) => {
+      const leftDate = `${left?.appointment_date || ''}T${left?.appointment_time || '00:00:00'}`;
+      const rightDate = `${right?.appointment_date || ''}T${right?.appointment_time || '00:00:00'}`;
+      return leftDate.localeCompare(rightDate) || String(left?.id || '').localeCompare(String(right?.id || ''));
+    });
+}
+
+export function buildPackageSignatureDraft(patientPackage, sessions = [], appointment, serviceName = '') {
+  if (!patientPackage?.id || !appointment?.id) return null;
+  const occupiedNumbers = new Set(
+    activePackageSessions(sessions, patientPackage.id)
+      .map((session) => positiveInteger(session?.session_number))
+      .filter(Boolean),
+  );
+  const total = positiveInteger(patientPackage.total_sessions, 1);
+  const sessionNumber = Array.from({ length: total }, (_, index) => index + 1)
+    .find((number) => !occupiedNumbers.has(number));
+  if (!sessionNumber) return null;
+
+  const date = String(appointment.appointment_date || '').slice(0, 10);
+  const time = String(appointment.appointment_time || '12:00:00').slice(0, 8);
+  return {
+    patient_package_id: patientPackage.id,
+    client_id: patientPackage.client_id,
+    appointment_id: appointment.id,
+    session_number: sessionNumber,
+    service_name: appointment.procedure || serviceName || patientPackage.package_name,
+    professional_name: appointment.professional || null,
+    performed_at: date ? `${date}T${time || '12:00:00'}-03:00` : new Date().toISOString(),
+    status: 'pending_signature',
+    acknowledgment_text: `Confirmo a realizacao da sessao ${sessionNumber} de ${total} do pacote ${patientPackage.package_name || ''}.`,
+  };
+}
+
 function packageServiceEntries(patientPackage) {
   const services = Array.isArray(patientPackage?.services) ? patientPackage.services : [];
   return services.map((service) => ({

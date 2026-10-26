@@ -397,7 +397,9 @@ function CommercialHistoryModal({ patient, packages = [], packageSessions = [], 
 
 // ─── Componente Principal Pacientes ───────────────────────────
 export default function Pacientes() {
-  const { canEdit } = useAuth();
+  const { canEdit, canViewMetrics, canViewValues } = useAuth();
+  const showMetrics = canViewMetrics ? canViewMetrics('pacientes') : true;
+  const showValues = canViewValues ? canViewValues('pacientes') : true;
   const location = useLocation();
   const [pacientes, setPacientes] = useState([]);
   const [allAppointments, setAllAppointments] = useState([]);
@@ -911,7 +913,7 @@ export default function Pacientes() {
           }}
         />
       )}
-      {commercialHistoryOpen && selected && (
+      {commercialHistoryOpen && selected && showValues && (
         <CommercialHistoryModal patient={selected} packages={patientPackages} packageSessions={packageSessions} onClose={() => setCommercialHistoryOpen(false)} />
       )}
       {deleteModal && (
@@ -938,8 +940,10 @@ export default function Pacientes() {
         </div>
       )}
 
-      {/* ─── 1. Top KPI Cards (Retorno, Risco, Tempo Médio, Indicação) ─── */}
-      <div className="grid-4 section-gap">
+      {/* ─── 1. Top KPI Cards & Gráficos (Retorno, Risco, Tempo Médio, Indicação) ─── */}
+      {showMetrics && (
+        <>
+          <div className="grid-4 section-gap">
         {/* 1. Taxa de retorno no período */}
         <div className="stat-card" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
           <div>
@@ -1103,10 +1107,10 @@ export default function Pacientes() {
             <div>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 6 }}>
                 <span>
-                  <strong>Novos:</strong> {novosVsRecorrentes.qtdNovos} ({formatBRL(novosVsRecorrentes.faturamentoNovos)})
+                  <strong>Novos:</strong> {novosVsRecorrentes.qtdNovos}{showValues ? ` (${formatBRL(novosVsRecorrentes.faturamentoNovos)})` : ''}
                 </span>
                 <span>
-                  <strong>Recorrentes:</strong> {novosVsRecorrentes.qtdRecorrentes} ({formatBRL(novosVsRecorrentes.faturamentoRecorrentes)})
+                  <strong>Recorrentes:</strong> {novosVsRecorrentes.qtdRecorrentes}{showValues ? ` (${formatBRL(novosVsRecorrentes.faturamentoRecorrentes)})` : ''}
                 </span>
               </div>
               <div style={{ width: '100%', height: 12, background: 'var(--border-light)', borderRadius: 99, overflow: 'hidden', display: 'flex' }}>
@@ -1139,10 +1143,10 @@ export default function Pacientes() {
                   PRIMEIRA VISITA (NOVOS)
                 </div>
                 <div style={{ fontSize: 18, fontWeight: 700, color: '#0369A1' }}>
-                  {formatBRL(novosVsRecorrentes.faturamentoNovos)}
+                  {showValues ? formatBRL(novosVsRecorrentes.faturamentoNovos) : `${novosVsRecorrentes.qtdNovos} pacientes`}
                 </div>
                 <div style={{ fontSize: 11, color: '#0284C7', marginTop: 2 }}>
-                  {novosVsRecorrentes.qtdNovos} pacientes ({novosVsRecorrentes.pctNovos.toFixed(1)}% do valor registrado)
+                  {novosVsRecorrentes.qtdNovos} pacientes {showValues ? `(${novosVsRecorrentes.pctNovos.toFixed(1)}% do valor registrado)` : ''}
                 </div>
               </div>
 
@@ -1152,16 +1156,18 @@ export default function Pacientes() {
                   RETORNOS (RECORRENTES)
                 </div>
                 <div style={{ fontSize: 18, fontWeight: 700, color: '#047857' }}>
-                  {formatBRL(novosVsRecorrentes.faturamentoRecorrentes)}
+                  {showValues ? formatBRL(novosVsRecorrentes.faturamentoRecorrentes) : `${novosVsRecorrentes.qtdRecorrentes} pacientes`}
                 </div>
                 <div style={{ fontSize: 11, color: '#059669', marginTop: 2 }}>
-                  {novosVsRecorrentes.qtdRecorrentes} pacientes ({novosVsRecorrentes.pctRecorrentes.toFixed(1)}% do valor registrado)
+                  {novosVsRecorrentes.qtdRecorrentes} pacientes {showValues ? `(${novosVsRecorrentes.pctRecorrentes.toFixed(1)}% do valor registrado)` : ''}
                 </div>
               </div>
             </div>
           </div>
         </div>
       </div>
+        </>
+      )}
 
       {/* ─── Listagem de Pacientes com Filtros e Alerta de Churn ───── */}
       <div style={{ display: 'flex', gap: 16 }}>
@@ -1228,7 +1234,7 @@ export default function Pacientes() {
                     <th>Última Visita</th>
                     <th style={{ textAlign: 'center' }}>Intervalo Médio</th>
                     <th style={{ textAlign: 'center' }}>Sessões</th>
-                    <th style={{ textAlign: 'right' }}>Valor Agenda*</th>
+                    {showValues && <th style={{ textAlign: 'right' }}>Valor Agenda*</th>}
                     <th>Status</th>
                     <th></th>
                   </tr>
@@ -1280,9 +1286,11 @@ export default function Pacientes() {
                         )}
                       </td>
                       <td style={{ fontWeight: 600, textAlign: 'center' }}>{p.totalSessoes}</td>
-                      <td style={{ fontWeight: 600, color: 'var(--success)', textAlign: 'right' }}>
-                        {formatBRL(p.totalGasto)}
-                      </td>
+                      {showValues && (
+                        <td style={{ fontWeight: 600, color: 'var(--success)', textAlign: 'right' }}>
+                          {formatBRL(p.totalGasto)}
+                        </td>
+                      )}
                       <td>
                         {p.isEmRisco ? (
                           <span
@@ -1423,33 +1431,39 @@ export default function Pacientes() {
               <div className="divider" />
 
               {/* 3. Tempo Médio entre Visitas & Métricas do Paciente */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 12 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: showValues ? '1fr 1fr' : '1fr', gap: 8, marginBottom: 12 }}>
                 <div style={{ textAlign: 'center', background: 'var(--bg-main)', borderRadius: 8, padding: '10px 6px' }}>
                   <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--color-primary)' }}>
                     {selected.totalSessoes}
                   </div>
                   <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>Sessões Feitas</div>
                 </div>
-                <div style={{ textAlign: 'center', background: 'var(--bg-main)', borderRadius: 8, padding: '10px 6px' }}>
-                  <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--success)' }}>
-                    {formatBRL(selected.totalGasto)}
+                {showValues && (
+                  <div style={{ textAlign: 'center', background: 'var(--bg-main)', borderRadius: 8, padding: '10px 6px' }}>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--success)' }}>
+                      {formatBRL(selected.totalGasto)}
+                    </div>
+                    <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>Valor em Finalizados*</div>
                   </div>
-                  <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>Valor em Finalizados*</div>
+                )}
+              </div>
+
+              {showValues && (
+                <div style={{ padding: '9px 10px', borderRadius: 8, background: '#FFFBEB', border: '1px solid #FDE68A', color: '#92400E', fontSize: 9.5, lineHeight: 1.4, marginBottom: 12 }}>
+                  * Valor informado na Agenda. Não confirma pagamento.
                 </div>
-              </div>
+              )}
 
-              <div style={{ padding: '9px 10px', borderRadius: 8, background: '#FFFBEB', border: '1px solid #FDE68A', color: '#92400E', fontSize: 9.5, lineHeight: 1.4, marginBottom: 12 }}>
-                * Valor informado na Agenda. Não confirma pagamento.
-              </div>
-
-              <button
-                className="btn btn-primary btn-sm"
-                style={{ width: '100%', justifyContent: 'center', marginBottom: 12 }}
-                onClick={() => setCommercialHistoryOpen(true)}
-              >
-                <Activity style={{ width: 14, height: 14 }} />
-                Ver Histórico Comercial
-              </button>
+              {showValues && (
+                <button
+                  className="btn btn-primary btn-sm"
+                  style={{ width: '100%', justifyContent: 'center', marginBottom: 12 }}
+                  onClick={() => setCommercialHistoryOpen(true)}
+                >
+                  <Activity style={{ width: 14, height: 14 }} />
+                  Ver Histórico Comercial
+                </button>
+              )}
 
               {/* 3. Card Intervalo Médio */}
               <div style={{ background: '#EFF6FF', borderRadius: 8, padding: '10px 12px', border: '1px solid #BFDBFE', marginBottom: 14 }}>
@@ -1513,9 +1527,11 @@ export default function Pacientes() {
                         )
                       )}
                     </div>
-                    <div style={{ fontWeight: 700, color: 'var(--success)', fontSize: 12 }}>
-                      {formatBRL(h.valor)}
-                    </div>
+                    {showValues && (
+                      <div style={{ fontWeight: 700, color: 'var(--success)', fontSize: 12 }}>
+                        {formatBRL(h.valor)}
+                      </div>
+                    )}
                   </div>
                 );
               })}

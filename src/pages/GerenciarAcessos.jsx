@@ -202,22 +202,63 @@ export default function GerenciarAcessos() {
       const currentMod = prev[modKey] || { ver: false, edit: false };
       const nextMod = { ...currentMod, [type]: !currentMod[type] };
 
-      // If disabling "ver", also disable "edit"
+      // If disabling "ver", also disable "edit" and sub-permissions
       if (type === 'ver' && !nextMod.ver) {
         nextMod.edit = false;
+        if (modKey === 'pacientes') {
+          nextMod.verMetricas = false;
+          nextMod.verValores = false;
+        }
+      }
+      // If enabling "ver", default sub-permissions to true
+      if (type === 'ver' && nextMod.ver) {
+        if (modKey === 'pacientes') {
+          nextMod.verMetricas = true;
+          nextMod.verValores = true;
+        }
       }
       // If enabling "edit", auto enable "ver"
       if (type === 'edit' && nextMod.edit) {
         nextMod.ver = true;
+        if (modKey === 'pacientes') {
+          if (nextMod.verMetricas === undefined) nextMod.verMetricas = true;
+          if (nextMod.verValores === undefined) nextMod.verValores = true;
+        }
       }
 
       return { ...prev, [modKey]: nextMod };
     });
   };
 
+  const handleToggleCustomPerm = (modKey, customKey) => {
+    setRoleFormPerms(prev => {
+      const currentMod = prev[modKey] || { ver: true, edit: false };
+      const currentVal = currentMod[customKey] !== false;
+      return {
+        ...prev,
+        [modKey]: {
+          ...currentMod,
+          [customKey]: !currentVal
+        }
+      };
+    });
+  };
+
   const handleToggleVerTudo = (modKey) => {
     setRoleFormPerms(prev => {
       const currentMod = prev[modKey] || { ver: false, edit: false };
+      if (modKey === 'pacientes') {
+        const allActive = currentMod.ver && currentMod.edit && currentMod.verMetricas !== false && currentMod.verValores !== false;
+        return {
+          ...prev,
+          [modKey]: {
+            ver: !allActive,
+            edit: !allActive,
+            verMetricas: !allActive,
+            verValores: !allActive
+          }
+        };
+      }
       const allActive = currentMod.ver && currentMod.edit;
       return {
         ...prev,
@@ -879,7 +920,9 @@ export default function GerenciarAcessos() {
               }}>
                 {MODULE_LIST.map(mod => {
                   const perm = roleFormPerms[mod.key] || { ver: false, edit: false };
-                  const isVerTudo = perm.ver && perm.edit;
+                  const isVerTudo = mod.key === 'pacientes'
+                    ? (perm.ver && perm.edit && perm.verMetricas !== false && perm.verValores !== false)
+                    : (perm.ver && perm.edit);
 
                   return (
                     <div key={mod.key} style={{
@@ -888,53 +931,107 @@ export default function GerenciarAcessos() {
                       padding: '12px 16px',
                       background: 'var(--bg-main)',
                       display: 'flex',
-                      alignItems: 'center',
-                      justify: 'space-between'
+                      flexDirection: 'column',
+                      gap: 8
                     }}>
-                      <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-dark)' }}>
-                        {mod.label}
-                      </span>
+                      <div style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between'
+                      }}>
+                        <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-dark)' }}>
+                          {mod.label}
+                        </span>
 
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-                        {/* Ver Checkbox */}
-                        <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 12, fontWeight: 500, color: perm.ver ? 'var(--sidebar-bg)' : 'var(--text-muted)' }}>
-                          <input
-                            type="checkbox"
-                            checked={perm.ver}
-                            onChange={() => handleTogglePerm(mod.key, 'ver')}
-                            style={{ accentColor: 'var(--sidebar-bg)', cursor: 'pointer' }}
-                          />
-                          Ver
-                        </label>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                          {/* Ver Checkbox */}
+                          <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 12, fontWeight: 500, color: perm.ver ? 'var(--sidebar-bg)' : 'var(--text-muted)' }}>
+                            <input
+                              type="checkbox"
+                              checked={perm.ver}
+                              onChange={() => handleTogglePerm(mod.key, 'ver')}
+                              style={{ accentColor: 'var(--sidebar-bg)', cursor: 'pointer' }}
+                            />
+                            Ver
+                          </label>
 
-                        {/* Edit Checkbox */}
-                        <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 12, fontWeight: 500, color: perm.edit ? 'var(--sidebar-bg)' : 'var(--text-muted)' }}>
-                          <input
-                            type="checkbox"
-                            checked={perm.edit}
-                            onChange={() => handleTogglePerm(mod.key, 'edit')}
-                            style={{ accentColor: 'var(--sidebar-bg)', cursor: 'pointer' }}
-                          />
-                          Edit
-                        </label>
+                          {/* Edit Checkbox */}
+                          <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 12, fontWeight: 500, color: perm.edit ? 'var(--sidebar-bg)' : 'var(--text-muted)' }}>
+                            <input
+                              type="checkbox"
+                              checked={perm.edit}
+                              onChange={() => handleTogglePerm(mod.key, 'edit')}
+                              style={{ accentColor: 'var(--sidebar-bg)', cursor: 'pointer' }}
+                            />
+                            Edit
+                          </label>
 
-                        {/* Ver Tudo Special Action */}
-                        <button
-                          type="button"
-                          onClick={() => handleToggleVerTudo(mod.key)}
-                          style={{
-                            background: 'none',
-                            border: 'none',
-                            fontSize: 11,
-                            fontWeight: 700,
-                            color: isVerTudo ? 'var(--danger)' : 'var(--text-light)',
-                            cursor: 'pointer',
-                            padding: 0
-                          }}
-                        >
-                          {isVerTudo ? 'Ver Tudo' : ''}
-                        </button>
+                          {/* Ver Tudo Special Action */}
+                          <button
+                            type="button"
+                            onClick={() => handleToggleVerTudo(mod.key)}
+                            style={{
+                              background: 'none',
+                              border: 'none',
+                              fontSize: 11,
+                              fontWeight: 700,
+                              color: isVerTudo ? 'var(--danger)' : 'var(--text-light)',
+                              cursor: 'pointer',
+                              padding: 0
+                            }}
+                          >
+                            {isVerTudo ? 'Ver Tudo' : ''}
+                          </button>
+                        </div>
                       </div>
+
+                      {/* Sub-permissões específicas de Pacientes */}
+                      {mod.key === 'pacientes' && perm.ver && (
+                        <div style={{
+                          marginTop: 4,
+                          paddingTop: 8,
+                          borderTop: '1px dashed var(--border-color)',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: 6
+                        }}>
+                          <label style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 7,
+                            cursor: 'pointer',
+                            fontSize: 11.5,
+                            fontWeight: 500,
+                            color: perm.verMetricas !== false ? 'var(--text-dark)' : 'var(--text-muted)'
+                          }}>
+                            <input
+                              type="checkbox"
+                              checked={perm.verMetricas !== false}
+                              onChange={() => handleToggleCustomPerm('pacientes', 'verMetricas')}
+                              style={{ accentColor: 'var(--sidebar-bg)', cursor: 'pointer' }}
+                            />
+                            <span>Ver painel do topo (métricas e gráficos)</span>
+                          </label>
+
+                          <label style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 7,
+                            cursor: 'pointer',
+                            fontSize: 11.5,
+                            fontWeight: 500,
+                            color: perm.verValores !== false ? 'var(--text-dark)' : 'var(--text-muted)'
+                          }}>
+                            <input
+                              type="checkbox"
+                              checked={perm.verValores !== false}
+                              onChange={() => handleToggleCustomPerm('pacientes', 'verValores')}
+                              style={{ accentColor: 'var(--sidebar-bg)', cursor: 'pointer' }}
+                            />
+                            <span>Ver valores financeiros (R$ na tabela e perfil)</span>
+                          </label>
+                        </div>
+                      )}
                     </div>
                   );
                 })}
