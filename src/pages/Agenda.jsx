@@ -19,10 +19,13 @@ import {
   updateAppointment,
   deleteAppointment,
   fetchAnamneses,
-  updateAppointmentWaitlist
+  updateAppointmentWaitlist,
+  fetchPatientPackages,
+  fetchPatientPackageSessions
 } from '../services/supabaseService';
 import TabletAnamneseModal from '../components/agenda/TabletAnamneseModal';
 import WaitlistPanel from '../components/agenda/WaitlistPanel';
+import { eligiblePatientPackages, packageProgress } from '../lib/patientPackages';
 
 // ─── Search helpers ──────────────────────────────────────────
 
@@ -146,7 +149,7 @@ function mapToSupabase(item, isBlock = false) {
       notes: item.observacoes || ''
     };
   } else {
-    return {
+    const payload = {
       client_name: item.paciente,
       client_phone: item.telefone || '',
       client_id: item.client_id || null,
@@ -164,6 +167,10 @@ function mapToSupabase(item, isBlock = false) {
         ficha_pendente: !!item.ficha_pendente
       })
     };
+    if (Object.prototype.hasOwnProperty.call(item, 'patient_package_id')) {
+      payload.patient_package_id = item.patient_package_id || null;
+    }
+    return payload;
   }
 }
 
@@ -190,7 +197,7 @@ function mapFromSupabase(item) {
       }
     } catch (e) {}
 
-    return {
+    const mapped = {
       id: item.id,
       data: item.appointment_date,
       hora: time,
@@ -208,6 +215,10 @@ function mapFromSupabase(item) {
       observacoes: extra.observacoes || '',
       fixo: extra.fixo || false
     };
+    if (Object.prototype.hasOwnProperty.call(item, 'patient_package_id')) {
+      mapped.patient_package_id = item.patient_package_id || null;
+    }
+    return mapped;
   }
 }
 
@@ -718,6 +729,9 @@ function AtendimentoBlockedModal({ info, onClose, onPreencherFicha }) {
 function AgendamentoModal({ onClose, date, profissional: prefillProf, hora: prefillHora, profissionais, apt, prefill, onSave }) {
   const isEdit = !!apt;
   const [pacientes, setPacientes] = useState([]);
+  const [patientPackages, setPatientPackages] = useState([]);
+  const [packageSessions, setPackageSessions] = useState([]);
+  const [packageLoadError, setPackageLoadError] = useState('');
   const [showNewClient, setShowNewClient] = useState(false);
   const [clienteBusca, setClienteBusca] = useState(isEdit ? apt.paciente : prefill?.patientName || '');
   const [showClienteList, setShowClienteList] = useState(false);
@@ -775,6 +789,27 @@ function AgendamentoModal({ onClose, date, profissional: prefillProf, hora: pref
     status: 'aguardando_confirmacao', valor: '', observacoes: '', exames_pendentes: false,
     ficha_pendente: false,
   });
+
+  useEffect(() => {
+    if (!form.client_id) {
+      setPatientPackages([]);
+      setPackageSessions([]);
+      setPackageLoadError('');
+      return;
+    }
+    let cancelled = false;
+    Promise.all([
+      fetchPatientPackages(form.client_id),
+      fetchPatientPackageSessions(form.client_id),
+    ]).then(([packagesRes, sessionsRes]) => {
+      if (cancelled) return;
+      setPatientPackages(packagesRes.data || []);
+      setPackageSessions(sessionsRes.data || []);
+      const error = packagesRes.error || sessionsRes.error;
+      setPackageLoadError(error ? (error.message || String(error)) : '');
+    });
+    return () => { cancelled = true; };
+  }, [form.client_id]);
   const [repetir, setRepetir] = useState(false);
   const [recFreq, setRecFreq] = useState('semanal');
   const [recAte, setRecAte] = useState('');
@@ -826,6 +861,15 @@ function AgendamentoModal({ onClose, date, profissional: prefillProf, hora: pref
 
   const profObj = profissionais.find(p => p.nome === form.profissional);
   const servicos = profObj ? profObj.servicos : [];
+  const eligiblePackages = useMemo(
+    () => eligiblePatientPackages(patientPackages, packageSessions, form.client_id, form.servico),
+    [patientPackages, packageSessions, form.client_id, form.servico]
+  );
+  const selectablePackages = useMemo(() => {
+    if (!form.patient_package_id) return eligiblePackages;
+    const current = patientPackages.find((item) => String(item.id) === String(form.patient_package_id));
+    return current && !eligiblePackages.some((item) => item.id === current.id) ? [current, ...eligiblePackages] : eligiblePackages;
+  }, [eligiblePackages, patientPackages, form.patient_package_id]);
   const canSave = form.paciente && form.profissional && form.servico && form.hora && form.data;
 
   const handleSave = () => {
@@ -1005,11 +1049,38 @@ function AgendamentoModal({ onClose, date, profissional: prefillProf, hora: pref
             )}
           </div>
 
+          {form.client_id && !packageLoadError && (
+            <div style={{ marginBottom: 14 }}>
+              <label style={labelSt}><span style={{ display: 'flex', alignItems: 'center', gap: 5 }}><CheckSquare style={{ width: 12, height: 12, color: '#C73B6D' }} />Utilizar pacote da paciente</span></label>
+              <select
+                value={form.patient_package_id || ''}
+                onChange={(event) => {
+                  const packageId = event.target.value || null;
+                  setForm((current) => ({ ...current, patient_package_id: packageId, valor: packageId ? 0 : current.valor }));
+                }}
+                style={inputSt}
+              >
+                <option value="">Não utilizar pacote (atendimento avulso)</option>
+                {selectablePackages.map((item) => {
+                  const progress = packageProgress(item, packageSessions);
+                  return <option key={item.id} value={item.id}>{item.package_name} · {progress.remaining} de {progress.total} restantes</option>;
+                })}
+              </select>
+              {form.patient_package_id ? (
+                <div style={{ marginTop: 6, padding: '7px 10px', borderRadius: 8, background: '#ECFDF5', border: '1px solid #A7F3D0', color: '#047857', fontSize: 10.5 }}>
+                  A sessão será consumida somente ao finalizar o atendimento. O valor fica zerado para não duplicar a receita da venda do pacote.
+                </div>
+              ) : selectablePackages.length === 0 && form.servico ? (
+                <div style={{ marginTop: 5, fontSize: 10.5, color: '#9CA3AF' }}>Nenhum pacote ativo compatível com este serviço.</div>
+              ) : null}
+            </div>
+          )}
+
           {/* Valor + Telefone */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 14 }}>
             <div>
               <label style={labelSt}><span style={{ display: 'flex', alignItems: 'center', gap: 5 }}><DollarSign style={{ width: 12, height: 12, color: '#C73B6D' }} />Valor (R$)</span></label>
-              <input type="number" step="0.01" placeholder="0,00" value={form.valor} onChange={e => set('valor', e.target.value)} style={inputSt} />
+              <input type="number" step="0.01" placeholder="0,00" value={form.valor} onChange={e => set('valor', e.target.value)} disabled={!!form.patient_package_id} style={{ ...inputSt, opacity: form.patient_package_id ? 0.65 : 1 }} />
             </div>
             <div>
               <label style={labelSt}><span style={{ display: 'flex', alignItems: 'center', gap: 5 }}><Phone style={{ width: 12, height: 12, color: '#C73B6D' }} />Telefone</span></label>

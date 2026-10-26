@@ -5,13 +5,20 @@ import {
   Users, Plus, Search, Phone, Calendar, FileText, XCircle,
   ChevronRight, Mail, Instagram, Upload, Trash2, AlertTriangle,
   RefreshCw, UserCheck, UserPlus, Clock, Sparkles, Share2,
-  DollarSign, CalendarCheck, CalendarX, UserX, CheckCircle2, Activity
+  DollarSign, CalendarCheck, CalendarX, UserX, CheckCircle2, Activity,
+  Package, FileSignature
 } from 'lucide-react';
 import {
   ResponsiveContainer, PieChart, Pie, Cell, Tooltip
 } from 'recharts';
-import { fetchClients, insertClient, deleteClient, updateClient, fetchAppointments } from '../services/supabaseService';
+import {
+  fetchClients, insertClient, deleteClient, updateClient, fetchAppointments,
+  fetchPackages, fetchPatientPackages, fetchPatientPackageSessions,
+} from '../services/supabaseService';
 import { getCurrentUser, supabase } from '../lib/supabase';
+import PatientPackagesPanel from '../components/patients/PatientPackagesPanel';
+import PackageSignaturesPanel from '../components/patients/PackageSignaturesPanel';
+import { packageProgress, packageServiceNames } from '../lib/patientPackages';
 import {
   appointmentPatientKey,
   buildPatientCommercialHistory,
@@ -103,6 +110,21 @@ const CANAL_COLORS = {
   'Outro': '#8B5CF6',
   [UNKNOWN_PATIENT_SOURCE]: '#6B7280',
 };
+
+// eslint-disable-next-line react/prop-types
+function PatientsSectionTabs({ active, onChange, pendingSignatures }) {
+  return (
+    <div className="tabs" style={{ marginBottom: 16, width: 'fit-content' }}>
+      <button className={`tab-item${active === 'patients' ? ' active' : ''}`} onClick={() => onChange('patients')}>
+        <Users style={{ width: 13, height: 13 }} /> Pacientes
+      </button>
+      <button className={`tab-item${active === 'signatures' ? ' active' : ''}`} onClick={() => onChange('signatures')}>
+        <FileSignature style={{ width: 13, height: 13 }} /> Assinaturas de sessões
+        {pendingSignatures > 0 && <span style={{ marginLeft: 4, minWidth: 17, height: 17, padding: '0 4px', borderRadius: 20, background: '#F59E0B', color: '#fff', display: 'inline-grid', placeItems: 'center', fontSize: 9, fontWeight: 900 }}>{pendingSignatures}</span>}
+      </button>
+    </div>
+  );
+}
 
 // ─── Modal Novo / Editar Paciente ─────────────────────────────
 // eslint-disable-next-line react/prop-types
@@ -235,11 +257,12 @@ function PacienteModal({ onClose, onSave, initialData }) {
 
 // Histórico operacional baseado somente na Agenda. Não presume pagamento.
 // eslint-disable-next-line react/prop-types
-function CommercialHistoryModal({ patient, onClose }) {
+function CommercialHistoryModal({ patient, packages = [], packageSessions = [], onClose }) {
   // eslint-disable-next-line react/prop-types
   const history = patient?.commercialHistory || {};
   const timeline = history.timeline || [];
   const maxMonthlyValue = Math.max(0, ...(history.monthlyEvolution || []).map((item) => item.recordedValue));
+  const patientPackages = packages.filter((item) => String(item.client_id) === String(patient?.id));
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -265,6 +288,25 @@ function CommercialHistoryModal({ patient, onClose }) {
               <strong>Valores informados na Agenda.</strong> Atendimento finalizado não comprova pagamento. Parcelas, formas de pagamento, estornos e valores em aberto não fazem parte desta versão.
             </div>
           </div>
+
+          {patientPackages.length > 0 && (
+            <div style={{ padding: 15, border: '1px solid var(--border-color)', borderRadius: 10, marginBottom: 16 }}>
+              <div style={{ fontSize: 12, fontWeight: 800, color: 'var(--text-dark)', marginBottom: 11 }}>Pacotes adquiridos</div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 9 }}>
+                {patientPackages.map((item) => {
+                  const progress = packageProgress(item, packageSessions);
+                  return (
+                    <div key={item.id} style={{ padding: 11, borderRadius: 9, background: '#FDF8FA', border: '1px solid #F1DDE5' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}><strong style={{ fontSize: 11.5 }}>{item.package_name}</strong><span style={{ fontSize: 10, fontWeight: 800, color: progress.remaining ? '#9B2C50' : '#047857' }}>{progress.remaining} restantes</span></div>
+                      <div style={{ fontSize: 9.5, color: 'var(--text-muted)', marginTop: 3 }}>{packageServiceNames(item).join(' · ') || 'Serviços conforme pacote'}</div>
+                      <div style={{ height: 6, background: '#EEDFE4', borderRadius: 99, overflow: 'hidden', marginTop: 9 }}><div style={{ width: `${progress.percent}%`, height: '100%', background: '#B7796B' }}/></div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 5, fontSize: 9.5, color: 'var(--text-muted)' }}><span>{progress.used} realizadas</span><span>{progress.total} contratadas</span></div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(145px, 1fr))', gap: 10, marginBottom: 16 }}>
             {[
@@ -384,6 +426,29 @@ export default function Pacientes() {
   const [selected, setSelected] = useState(null);
   const [commercialHistoryOpen, setCommercialHistoryOpen] = useState(false);
   const [servicos, setServicos] = useState([]);
+  const [pageSection, setPageSection] = useState('patients');
+  const [packageCatalog, setPackageCatalog] = useState([]);
+  const [patientPackages, setPatientPackages] = useState([]);
+  const [packageSessions, setPackageSessions] = useState([]);
+  const [packagesLoading, setPackagesLoading] = useState(true);
+  const [packagesLoadError, setPackagesLoadError] = useState('');
+
+  const refreshPackageData = async () => {
+    setPackagesLoading(true);
+    const [catalogRes, packagesRes, sessionsRes] = await Promise.all([
+      fetchPackages(),
+      fetchPatientPackages(),
+      fetchPatientPackageSessions(),
+    ]);
+    setPackageCatalog(catalogRes.data || []);
+    setPatientPackages(packagesRes.data || []);
+    setPackageSessions(sessionsRes.data || []);
+    const error = packagesRes.error || sessionsRes.error;
+    setPackagesLoadError(error ? (error.message || String(error)) : '');
+    setPackagesLoading(false);
+  };
+
+  useEffect(() => { refreshPackageData(); }, []);
 
   // Período de Análise de Retenção & Recorrência: '30d' | '60d' | '90d'
   const [periodoRetencao, setPeriodoRetencao] = useState('60d');
@@ -821,6 +886,31 @@ export default function Pacientes() {
     });
   }, [pacientes, busca, filtro]);
 
+  const pendingPackageSignatures = packageSessions.filter((session) => session.status === 'pending_signature').length;
+
+  if (pageSection === 'signatures') {
+    return (
+      <div>
+        <div className="page-header" style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
+          <div>
+            <div className="page-header-label"><Package /> PACIENTES E FIDELIZAÇÃO</div>
+            <h1 className="page-title">Assinaturas de sessões</h1>
+            <p className="page-subtitle">Comprovantes digitais das sessões utilizadas em pacotes</p>
+          </div>
+        </div>
+        <PatientsSectionTabs active={pageSection} onChange={setPageSection} pendingSignatures={pendingPackageSignatures} />
+        <PackageSignaturesPanel
+          patients={pacientes}
+          packages={patientPackages}
+          sessions={packageSessions}
+          loading={packagesLoading}
+          loadError={packagesLoadError}
+          onSessionUpdated={(updated) => setPackageSessions((current) => current.map((item) => item.id === updated.id ? updated : item))}
+        />
+      </div>
+    );
+  }
+
   return (
     <div>
       {/* Header */}
@@ -848,6 +938,8 @@ export default function Pacientes() {
         </div>
       </div>
 
+      <PatientsSectionTabs active={pageSection} onChange={setPageSection} pendingSignatures={pendingPackageSignatures} />
+
       {/* Modais */}
       {modal && <PacienteModal onClose={() => setModal(false)} onSave={handleSaveNovoPaciente} />}
       {editModal && (
@@ -868,7 +960,7 @@ export default function Pacientes() {
         />
       )}
       {commercialHistoryOpen && selected && (
-        <CommercialHistoryModal patient={selected} onClose={() => setCommercialHistoryOpen(false)} />
+        <CommercialHistoryModal patient={selected} packages={patientPackages} packageSessions={packageSessions} onClose={() => setCommercialHistoryOpen(false)} />
       )}
       {deleteModal && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,20,30,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 11000, backdropFilter: 'blur(6px)', padding: 16 }} onClick={() => setDeleteModal(null)}>
@@ -1364,6 +1456,18 @@ export default function Pacientes() {
                   </div>
                 )}
               </div>
+              <div className="divider" />
+
+              <PatientPackagesPanel
+                patient={selected}
+                catalog={packageCatalog}
+                packages={patientPackages}
+                sessions={packageSessions}
+                canEdit={canEdit('pacientes')}
+                loadError={packagesLoadError}
+                onRefresh={refreshPackageData}
+              />
+
               <div className="divider" />
 
               {/* 3. Tempo Médio entre Visitas & Métricas do Paciente */}

@@ -1523,6 +1523,79 @@ export async function fetchQueueHistory() {
   return { data: data || [], error: null };
 }
 
+// Pacotes efetivamente adquiridos por pacientes
+export async function fetchPatientPackages(clientId = null) {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured', []);
+  let query = supabase
+    .from('patient_packages')
+    .select('*')
+    .order('created_at', { ascending: false });
+  if (clientId) query = query.eq('client_id', clientId);
+  const { data, error } = await query;
+  if (error) return handleError(error, []);
+  return { data: data || [], error: null };
+}
+
+export async function insertPatientPackage(patientPackage) {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured');
+  const userId = patientPackage.user_id || await getUserId();
+  const { data, error } = await supabase
+    .from('patient_packages')
+    .insert([{ ...patientPackage, user_id: userId }])
+    .select()
+    .single();
+  if (error) return handleError(error);
+  return { data, error: null };
+}
+
+export async function updatePatientPackage(id, updates) {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured');
+  const { data, error } = await supabase
+    .from('patient_packages')
+    .update(updates)
+    .eq('id', id)
+    .select()
+    .single();
+  if (error) return handleError(error);
+  return { data, error: null };
+}
+
+export async function fetchPatientPackageSessions(clientId = null) {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured', []);
+  let query = supabase
+    .from('patient_package_sessions')
+    .select('*')
+    .order('performed_at', { ascending: false });
+  if (clientId) query = query.eq('client_id', clientId);
+  const { data, error } = await query;
+  if (error) return handleError(error, []);
+  return { data: data || [], error: null };
+}
+
+export async function insertPatientPackageSession(session) {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured');
+  const userId = session.user_id || await getUserId();
+  const { data, error } = await supabase
+    .from('patient_package_sessions')
+    .insert([{ ...session, user_id: userId }])
+    .select()
+    .single();
+  if (error) return handleError(error);
+  return { data, error: null };
+}
+
+export async function updatePatientPackageSession(id, updates) {
+  if (!isSupabaseConfigured()) return handleError('Supabase not configured');
+  const { data, error } = await supabase
+    .from('patient_package_sessions')
+    .update(updates)
+    .eq('id', id)
+    .select()
+    .single();
+  if (error) return handleError(error);
+  return { data, error: null };
+}
+
 // ─── Agenda: lista de espera ────────────────────────────────────────────────
 
 export async function fetchAppointmentWaitlist({ date = null, includeClosed = false } = {}) {
