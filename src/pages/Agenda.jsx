@@ -26,9 +26,11 @@ import {
 import TabletAnamneseModal from '../components/agenda/TabletAnamneseModal';
 import WaitlistPanel from '../components/agenda/WaitlistPanel';
 import { eligiblePatientPackages, packageProgress, resolvePackageChoice } from '../lib/patientPackages';
+import { findUniqueExactClient, searchClients } from '../lib/clientSearch';
 
 // ─── Search helpers ──────────────────────────────────────────
 
+/* Busca antiga mantida apenas neste bloco durante a migração.
 function normalizeSearchText(str) {
   if (!str) return '';
   return str
@@ -73,6 +75,7 @@ function scoreClientMatch(clientName, clientPhone, rawQuery) {
 
   return 0;
 }
+*/
 
 // ─── Constants ───────────────────────────────────────────────
 
@@ -739,6 +742,7 @@ function AgendamentoModal({ onClose, date, profissional: prefillProf, hora: pref
   const [showNewClient, setShowNewClient] = useState(false);
   const [clienteBusca, setClienteBusca] = useState(isEdit ? apt.paciente : prefill?.patientName || '');
   const [showClienteList, setShowClienteList] = useState(false);
+  const [activeClientIndex, setActiveClientIndex] = useState(0);
   const clienteRef = useRef(null);
 
   useEffect(() => {
@@ -765,22 +769,7 @@ function AgendamentoModal({ onClose, date, profissional: prefillProf, hora: pref
   }, []);
 
   const clientesFiltrados = useMemo(() => {
-    const q = clienteBusca.trim();
-    if (!q) return pacientes.slice(0, 8);
-
-    const scored = pacientes
-      .map(p => ({
-        paciente: p,
-        score: scoreClientMatch(p.nome, p.telefone, q)
-      }))
-      .filter(item => item.score > 0);
-
-    scored.sort((a, b) => {
-      if (b.score !== a.score) return b.score - a.score;
-      return (a.paciente.nome || '').localeCompare(b.paciente.nome || '', 'pt-BR');
-    });
-
-    return scored.map(item => item.paciente);
+    return searchClients(pacientes, clienteBusca, 12);
   }, [pacientes, clienteBusca]);
 
   const [form, setForm] = useState(() => isEdit ? { ...apt } : {
@@ -895,6 +884,62 @@ function AgendamentoModal({ onClose, date, profissional: prefillProf, hora: pref
     }
     return next;
   }), [pacientes, profissionais, serviceOptions]);
+
+  const selectClient = useCallback((patient) => {
+    if (!patient) return;
+    setClienteBusca(patient.nome || '');
+    setShowClienteList(false);
+    setActiveClientIndex(0);
+    setForm((current) => ({
+      ...current,
+      paciente: patient.nome || '',
+      telefone: patient.telefone || '',
+      client_id: patient.id || null,
+      patient_package_id: null,
+    }));
+  }, []);
+
+  const handleClientSearchChange = useCallback((value) => {
+    const exact = findUniqueExactClient(pacientes, value);
+    setActiveClientIndex(0);
+    setShowClienteList(!exact);
+    if (exact) {
+      setClienteBusca(exact.nome || value);
+      setForm((current) => ({
+        ...current,
+        paciente: exact.nome || value,
+        telefone: exact.telefone || '',
+        client_id: exact.id || null,
+        patient_package_id: null,
+      }));
+      return;
+    }
+
+    setClienteBusca(value);
+    setForm((current) => ({
+      ...current,
+      paciente: value,
+      telefone: '',
+      client_id: null,
+      patient_package_id: null,
+    }));
+  }, [pacientes]);
+
+  const handleClientSearchKeyDown = useCallback((event) => {
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      setShowClienteList(true);
+      setActiveClientIndex((current) => Math.min(current + 1, Math.max(clientesFiltrados.length - 1, 0)));
+    } else if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      setActiveClientIndex((current) => Math.max(current - 1, 0));
+    } else if (event.key === 'Enter' && showClienteList && clientesFiltrados[activeClientIndex]) {
+      event.preventDefault();
+      selectClient(clientesFiltrados[activeClientIndex]);
+    } else if (event.key === 'Escape') {
+      setShowClienteList(false);
+    }
+  }, [activeClientIndex, clientesFiltrados, selectClient, showClienteList]);
 
   const selectedService = serviceOptions.find((service) => (
     (form.service_id && service.id && String(service.id) === String(form.service_id))
@@ -1019,8 +1064,9 @@ function AgendamentoModal({ onClose, date, profissional: prefillProf, hora: pref
                 <input
                   type="text"
                   value={clienteBusca}
-                  onChange={e => { setClienteBusca(e.target.value); setShowClienteList(true); set('paciente', e.target.value); }}
-                  onFocus={() => setShowClienteList(true)}
+                  onChange={(event) => handleClientSearchChange(event.target.value)}
+                  onKeyDown={handleClientSearchKeyDown}
+                  onFocus={() => { setActiveClientIndex(0); setShowClienteList(true); }}
                   placeholder="Digite o nome do cliente..."
                   style={inputSt}
                   autoComplete="off"
@@ -1033,19 +1079,20 @@ function AgendamentoModal({ onClose, date, profissional: prefillProf, hora: pref
                     boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
                   }}>
                     {clientesFiltrados.length > 0 ? (
-                      clientesFiltrados.map(p => {
+                      clientesFiltrados.map((p, index) => {
                         const isSelected = form.paciente === p.nome;
+                        const isActive = index === activeClientIndex;
                         return (
-                          <div key={p.nome} onClick={() => { set('paciente', p.nome); setClienteBusca(p.nome); setShowClienteList(false); }}
+                          <div key={p.id || `${p.nome}-${p.telefone || index}`} onClick={() => selectClient(p)}
                             style={{
                               padding: '9px 12px', cursor: 'pointer', fontSize: 13,
-                              background: isSelected ? '#FDF4F7' : '#fff',
+                              background: isSelected || isActive ? '#FDF4F7' : '#fff',
                               borderBottom: '1px solid #F3F4F6',
                               display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                               transition: 'background 0.15s'
                             }}
-                            onMouseEnter={e => { if (!isSelected) e.currentTarget.style.background = '#F9FAFB'; }}
-                            onMouseLeave={e => { if (!isSelected) e.currentTarget.style.background = '#fff'; }}>
+                            onMouseEnter={(event) => { setActiveClientIndex(index); event.currentTarget.style.background = '#FDF4F7'; }}
+                            onMouseLeave={event => { if (!isSelected && index !== activeClientIndex) event.currentTarget.style.background = '#fff'; }}>
                             <span style={{ fontWeight: 600, color: '#1F2937' }}>{p.nome}</span>
                             {p.telefone && <span style={{ fontSize: 11, color: '#9CA3AF' }}>{p.telefone}</span>}
                           </div>
