@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useLocation } from 'react-router-dom';
 import {
@@ -7,9 +7,6 @@ import {
   RefreshCw, UserCheck, UserPlus, Clock, Share2,
   DollarSign, CalendarCheck, CalendarX, UserX, CheckCircle2, Activity
 } from 'lucide-react';
-import {
-  ResponsiveContainer, PieChart, Pie, Cell, Tooltip
-} from 'recharts';
 import {
   fetchClients, insertClient, deleteClient, updateClient, fetchAppointments,
   fetchPackages, fetchPatientPackages, fetchPatientPackageSessions,
@@ -23,7 +20,9 @@ import {
   calculateLoyalPatientStats,
   calculateScheduledReturnStats,
   derivePatientRelationship,
+  getIndexedAppointmentsForPatient,
   getAppointmentRecordedValue,
+  indexAppointmentsByPatient,
   isCompletedAppointment,
   resolvePatientSource,
   UNKNOWN_PATIENT_SOURCE,
@@ -248,6 +247,7 @@ function CommercialHistoryModal({ patient, packages = [], packageSessions = [], 
   const history = patient?.commercialHistory || {};
   const timeline = history.timeline || [];
   const maxMonthlyValue = Math.max(0, ...(history.monthlyEvolution || []).map((item) => item.recordedValue));
+  // eslint-disable-next-line react/prop-types
   const patientPackages = packages.filter((item) => String(item.client_id) === String(patient?.id));
 
   return (
@@ -423,20 +423,30 @@ export default function Pacientes() {
   const PAGE_SIZE = 50;
   const [paginaAtual, setPaginaAtual] = useState(1);
 
-  const refreshPackageData = async () => {
+  const refreshPackageData = useCallback(async (clientId = selected?.id) => {
+    if (!clientId) return;
     const [catalogRes, packagesRes, sessionsRes] = await Promise.all([
       fetchPackages(),
-      fetchPatientPackages(),
-      fetchPatientPackageSessions(),
+      fetchPatientPackages(clientId),
+      fetchPatientPackageSessions(clientId),
     ]);
     setPackageCatalog(catalogRes.data || []);
     setPatientPackages(packagesRes.data || []);
     setPackageSessions(sessionsRes.data || []);
     const error = packagesRes.error || sessionsRes.error;
     setPackagesLoadError(error ? (error.message || String(error)) : '');
-  };
+  }, [selected?.id]);
 
-  useEffect(() => { refreshPackageData(); }, []);
+  useEffect(() => {
+    if (!selected?.id) {
+      setPackageCatalog([]);
+      setPatientPackages([]);
+      setPackageSessions([]);
+      setPackagesLoadError('');
+      return;
+    }
+    refreshPackageData(selected.id);
+  }, [selected?.id, refreshPackageData]);
 
   // Período de Análise de Retenção & Recorrência: '30d' | '60d' | '90d'
   const [periodoRetencao, setPeriodoRetencao] = useState('60d');
@@ -485,6 +495,7 @@ export default function Pacientes() {
       ]);
       const data = clientsRes.data;
       const appts = apptsRes.data || [];
+      const appointmentsByPatient = indexAppointmentsByPatient(appts);
       setAllAppointments(appts);
       if (svcRes.data) setServicos(svcRes.data);
 
@@ -494,11 +505,16 @@ export default function Pacientes() {
 
         const mapped = data.map((item) => {
           const sourceInfo = resolvePatientSource(item);
+          const patientAppointments = getIndexedAppointmentsForPatient(appointmentsByPatient, {
+            id: item.id,
+            name: item.name,
+            phone: item.phone,
+          });
           const commercialHistory = buildPatientCommercialHistory({
             id: item.id,
             name: item.name,
             phone: item.phone,
-          }, appts, today);
+          }, patientAppointments, today);
 
           let ultimaVisita = item.last_visit ? item.last_visit.split('-').reverse().join('/') : 'Nunca';
           let ultimaVisitaIso = item.last_visit || null;
@@ -760,16 +776,6 @@ export default function Pacientes() {
     return calculateScheduledReturnStats(pacientes, clinicDateKey(cutoff));
   }, [pacientes, periodoRetencao]);
 
-  const retornoAgendadoChart = useMemo(() => {
-    if (retornoAgendadoStats.recentlyAttended === 0) {
-      return [{ name: 'Sem atendimentos no período', value: 1, color: '#E5E7EB' }];
-    }
-    return [
-      { name: 'Com retorno marcado', value: retornoAgendadoStats.scheduled, color: '#10B981' },
-      { name: 'Sem retorno marcado', value: retornoAgendadoStats.withoutReturn, color: '#F3C7D5' },
-    ].filter((item) => item.value > 0);
-  }, [retornoAgendadoStats]);
-
   // ─── 4. Novos vs Recorrentes (e Faturamento) ─────────────────
   const novosVsRecorrentes = useMemo(() => {
     const days = periodoRetencao === '30d' ? 30 : periodoRetencao === '90d' ? 90 : 60;
@@ -842,6 +848,17 @@ export default function Pacientes() {
 
     return list.filter((i) => i.value > 0);
   }, [pacientes]);
+
+  const canaisGradient = useMemo(() => {
+    if (canaisData.length === 0) return '#E5E7EB';
+    let cursor = 0;
+    const stops = canaisData.map((item) => {
+      const start = cursor;
+      cursor += item.pct;
+      return `${item.color} ${start}% ${cursor}%`;
+    });
+    return `conic-gradient(${stops.join(', ')})`;
+  }, [canaisData]);
 
   // A origem continua disponível no gráfico de canais abaixo.
   // ─── Filtro e Busca ──────────────────────────────────────────
@@ -1044,26 +1061,19 @@ export default function Pacientes() {
 
         {/* 4. Retorno Já Agendado */}
         <div className="stat-card" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-            <div style={{ minWidth: 0 }}>
-              <div className="stat-card-icon" style={{ background: '#EFF6FF', margin: '0 0 8px' }}>
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
+              <div className="stat-card-icon" style={{ background: '#EFF6FF', margin: 0 }}>
                 <CalendarCheck style={{ color: '#2563EB', width: 20, height: 20 }} />
               </div>
-              <div className="stat-value" style={{ color: '#2563EB' }}>
-                {retornoAgendadoStats.recentlyAttended > 0 ? `${retornoAgendadoStats.percentage}%` : '—'}
-              </div>
-              <div className="stat-label">Retorno Já Agendado</div>
+              <span className="stat-badge" style={{ fontSize: 10, color: '#1D4ED8', background: '#EFF6FF' }}>
+                {retornoAgendadoStats.recentlyAttended} atendidos
+              </span>
             </div>
-            <div style={{ width: 86, height: 86, flexShrink: 0 }} aria-label="Gráfico de clientes com e sem retorno agendado">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie data={retornoAgendadoChart} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={24} outerRadius={38} paddingAngle={retornoAgendadoChart.length > 1 ? 3 : 0} stroke="none">
-                    {retornoAgendadoChart.map((entry) => <Cell key={entry.name} fill={entry.color} />)}
-                  </Pie>
-                  {retornoAgendadoStats.recentlyAttended > 0 && <Tooltip formatter={(value, name) => [`${value} cliente(s)`, name]} />}
-                </PieChart>
-              </ResponsiveContainer>
+            <div className="stat-value" style={{ color: '#2563EB' }}>
+              {retornoAgendadoStats.recentlyAttended > 0 ? `${retornoAgendadoStats.percentage}%` : '—'}
             </div>
+            <div className="stat-label">Retorno Já Agendado</div>
           </div>
           <div className="stat-sub" style={{ marginTop: 6 }}>
             {retornoAgendadoStats.scheduled} de {retornoAgendadoStats.recentlyAttended} atendidos no período · {retornoAgendadoStats.withoutReturn} sem próxima visita
@@ -1084,17 +1094,34 @@ export default function Pacientes() {
 
           {canaisData.length > 0 ? (
             <div style={{ display: 'grid', gridTemplateColumns: '160px 1fr', gap: 16, alignItems: 'center' }}>
-              <div style={{ height: 160 }}>
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie data={canaisData} cx="50%" cy="50%" innerRadius={42} outerRadius={68} dataKey="value" paddingAngle={3}>
-                      {canaisData.map((entry, idx) => (
-                        <Cell key={idx} fill={entry.color} />
-                      ))}
-                    </Pie>
-                    <Tooltip formatter={(v) => [`${v} clientes`, 'Quantidade']} />
-                  </PieChart>
-                </ResponsiveContainer>
+              <div style={{ height: 160, display: 'grid', placeItems: 'center' }}>
+                <div
+                  role="img"
+                  aria-label="Distribuição dos pacientes por canal de aquisição"
+                  title={canaisData.map((item) => `${item.name}: ${item.value}`).join(' · ')}
+                  style={{
+                    width: 136,
+                    height: 136,
+                    borderRadius: '50%',
+                    background: canaisGradient,
+                    position: 'relative',
+                  }}
+                >
+                  <div style={{
+                    position: 'absolute',
+                    inset: 31,
+                    borderRadius: '50%',
+                    background: 'var(--bg-card, #fff)',
+                    display: 'grid',
+                    placeItems: 'center',
+                    textAlign: 'center',
+                  }}>
+                    <div>
+                      <div style={{ fontSize: 18, lineHeight: 1, fontWeight: 700, color: 'var(--text-dark)' }}>{pacientes.length}</div>
+                      <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 4 }}>pacientes</div>
+                    </div>
+                  </div>
+                </div>
               </div>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>

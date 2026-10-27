@@ -222,3 +222,42 @@ export function appointmentPatientKey(appointment = {}) {
   const name = String(appointment.client_name || '').trim().toLocaleLowerCase('pt-BR');
   return name ? `name:${name}` : '';
 }
+
+export function indexAppointmentsByPatient(appointments = []) {
+  const index = new Map();
+
+  appointments.forEach((appointment) => {
+    const key = appointmentPatientKey(appointment);
+    if (!key) return;
+    const current = index.get(key);
+    if (current) current.push(appointment);
+    else index.set(key, [appointment]);
+  });
+
+  return index;
+}
+
+export function getIndexedAppointmentsForPatient(index, patient = {}) {
+  if (!(index instanceof Map)) return [];
+
+  const keys = [];
+  if (patient.id != null && patient.id !== '') keys.push(`id:${patient.id}`);
+
+  const phone = digits(patient.phone || patient.telefone);
+  if (phone.length >= 10) keys.push(`phone:${phone}`);
+
+  const name = normalizedName(patient.name || patient.nome);
+  if (name) keys.push(`name:${name}`);
+
+  const seen = new Set();
+  const matches = [];
+  keys.forEach((key) => {
+    (index.get(key) || []).forEach((appointment) => {
+      const identity = appointment.id || appointment;
+      if (seen.has(identity)) return;
+      seen.add(identity);
+      matches.push(appointment);
+    });
+  });
+  return matches;
+}

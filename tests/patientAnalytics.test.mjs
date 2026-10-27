@@ -8,8 +8,10 @@ import {
   calculateLoyalPatientStats,
   calculateScheduledReturnStats,
   derivePatientRelationship,
+  getIndexedAppointmentsForPatient,
   getAppointmentRecordedValue,
   getCommercialStatus,
+  indexAppointmentsByPatient,
   isCompletedAppointment,
   resolvePatientSource,
   UNKNOWN_PATIENT_SOURCE,
@@ -85,6 +87,23 @@ test('vincula o histórico por id e usa telefone apenas quando o agendamento nã
   assert.equal(appointmentMatchesPatient({ client_phone: '(21) 99999-0000' }, patient), true);
 });
 
+test('indexa agendamentos sem comparar toda a agenda para cada paciente', () => {
+  const appointments = [
+    { id: 'por-id', client_id: 42, client_name: 'Maria' },
+    { id: 'por-telefone', client_phone: '(21) 99999-0000', client_name: 'Maria' },
+    { id: 'por-nome', client_name: 'Maria' },
+    { id: 'outro', client_id: 99, client_name: 'Outra pessoa' },
+  ];
+  const index = indexAppointmentsByPatient(appointments);
+  const matches = getIndexedAppointmentsForPatient(index, {
+    id: 42,
+    nome: 'Maria',
+    telefone: '(21) 99999-0000',
+  });
+
+  assert.deepEqual(matches.map((item) => item.id), ['por-id', 'por-telefone', 'por-nome']);
+});
+
 test('lê o valor informado na Agenda sem tratar texto comum como dinheiro', () => {
   assert.equal(getAppointmentRecordedValue({ notes: JSON.stringify({ valor: 650 }) }), 650);
   assert.equal(getAppointmentRecordedValue({ valor: 320 }), 320);
@@ -140,6 +159,10 @@ test('contrato da tela e da migração impede origem fictícia', () => {
   assert.match(page, /Histórico Comercial/);
   assert.match(page, /Clientes Fidelizados/);
   assert.match(page, /Retorno Já Agendado/);
+  assert.doesNotMatch(page, /ResponsiveContainer|PieChart|retornoAgendadoChart/);
+  assert.match(page, /conic-gradient/);
+  assert.match(page, /paginados\.map/);
+  assert.match(page, /indexAppointmentsByPatient/);
   assert.doesNotMatch(page, /Taxa de Indicação/);
   assert.match(page, /Atendimento finalizado não comprova pagamento/);
   assert.match(sql, /ADD COLUMN IF NOT EXISTS source_confirmed_at timestamptz/i);
