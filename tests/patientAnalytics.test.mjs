@@ -5,6 +5,8 @@ import {
   appointmentMatchesPatient,
   appointmentPatientKey,
   buildPatientCommercialHistory,
+  calculateLoyalPatientStats,
+  calculateScheduledReturnStats,
   derivePatientRelationship,
   getAppointmentRecordedValue,
   getCommercialStatus,
@@ -12,6 +14,26 @@ import {
   resolvePatientSource,
   UNKNOWN_PATIENT_SOURCE,
 } from '../src/lib/patientAnalytics.js';
+
+test('resume fidelização somente sobre clientes com histórico real', () => {
+  const stats = calculateLoyalPatientStats([
+    { totalSessoes: 4, isEmRisco: false },
+    { totalSessoes: 3, isEmRisco: true },
+    { totalSessoes: 1, isEmRisco: false },
+    { totalSessoes: 0, isEmRisco: false },
+  ]);
+  assert.deepEqual(stats, { loyal: 1, withHistory: 3, percentage: 33 });
+});
+
+test('mede retorno futuro apenas entre clientes atendidos no período', () => {
+  const stats = calculateScheduledReturnStats([
+    { totalSessoes: 2, ultimaVisitaIso: '2026-10-20', commercialHistory: { futureCount: 1 } },
+    { totalSessoes: 1, ultimaVisitaIso: '2026-10-19', commercialHistory: { futureCount: 0 } },
+    { totalSessoes: 4, ultimaVisitaIso: '2026-07-01', commercialHistory: { futureCount: 1 } },
+    { totalSessoes: 0, ultimaVisitaIso: null, commercialHistory: { futureCount: 0 } },
+  ], '2026-09-01');
+  assert.deepEqual(stats, { scheduled: 1, withoutReturn: 1, recentlyAttended: 2, percentage: 50 });
+});
 
 test('não atribui Instagram quando o valor veio do padrão antigo', () => {
   assert.deepEqual(resolvePatientSource({ source: 'Instagram' }), {
@@ -116,6 +138,9 @@ test('contrato da tela e da migração impede origem fictícia', () => {
   assert.doesNotMatch(page, /item\.source\s*\|\|\s*['"]Instagram['"]/);
   assert.match(page, /Não informado — configurar depois/);
   assert.match(page, /Histórico Comercial/);
+  assert.match(page, /Clientes Fidelizados/);
+  assert.match(page, /Retorno Já Agendado/);
+  assert.doesNotMatch(page, /Taxa de Indicação/);
   assert.match(page, /Atendimento finalizado não comprova pagamento/);
   assert.match(sql, /ADD COLUMN IF NOT EXISTS source_confirmed_at timestamptz/i);
   assert.match(sql, /ALTER COLUMN source DROP DEFAULT/i);

@@ -20,6 +20,35 @@ export function derivePatientRelationship(totalSessions = 0, isAtRisk = false) {
   return 'Sem histórico';
 }
 
+export function calculateLoyalPatientStats(patients = []) {
+  const withHistory = patients.filter((patient) => Number(patient.totalSessoes) > 0);
+  const loyal = withHistory.filter((patient) => Number(patient.totalSessoes) >= 3 && !patient.isEmRisco);
+  return {
+    loyal: loyal.length,
+    withHistory: withHistory.length,
+    percentage: withHistory.length > 0 ? Math.round((loyal.length / withHistory.length) * 100) : 0,
+  };
+}
+
+export function calculateScheduledReturnStats(patients = [], cutoffDate = '') {
+  const recentlyAttended = patients.filter((patient) => (
+    Number(patient.totalSessoes) > 0
+    && String(patient.ultimaVisitaIso || '') >= String(cutoffDate || '')
+  ));
+  const scheduled = recentlyAttended.filter((patient) => (
+    Number(patient.commercialHistory?.futureCount) > 0
+    || Boolean(patient.commercialHistory?.nextAppointment)
+  ));
+  return {
+    scheduled: scheduled.length,
+    withoutReturn: recentlyAttended.length - scheduled.length,
+    recentlyAttended: recentlyAttended.length,
+    percentage: recentlyAttended.length > 0
+      ? Math.round((scheduled.length / recentlyAttended.length) * 100)
+      : 0,
+  };
+}
+
 export function isCompletedAppointment(appointment = {}) {
   return ['finalizado', 'completed', 'concluido', 'concluído'].includes(String(appointment.status || '').toLowerCase());
 }
