@@ -1,3 +1,4 @@
+import { clinicDateKey } from './clinicDate';
 // ─── Auto-generation engine for Sticky Notes ─────────────────
 // Derives priority notes from current system state (stock, OKRs, etc.)
 
@@ -111,7 +112,7 @@ export function generateAutoNotes({ stockAlerts = [], okrs = [], appointments = 
   });
 
   // ── 4. High no-show rate (unchanged) ────────────────────────────────────────
-  const todayStr = new Date().toISOString().split('T')[0];
+  const todayStr = clinicDateKey();
   const todayApts = appointments.filter(a => a.data === todayStr);
   const noShows = todayApts.filter(a => a.status === 'cliente_faltou');
   if (todayApts.length > 0 && noShows.length / todayApts.length > 0.25) {

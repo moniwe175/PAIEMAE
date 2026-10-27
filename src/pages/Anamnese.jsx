@@ -6,7 +6,7 @@ import {
   Circle, ArrowLeft, Eye, Edit3, Trash2, Calendar, Loader2,
   FileText, X, PenLine, RotateCcw
 } from 'lucide-react';
-import { fetchClients, fetchAnamneses, upsertAnamnese, deleteAnamnese } from '../services/supabaseService';
+import { fetchClients, fetchAnamneses, upsertAnamnese, deleteAnamnese, todayBRT } from '../services/supabaseService';
 import { getCurrentUser } from '../lib/supabase';
 import PatientDocuments from '../components/anamnese/PatientDocuments';
 
@@ -101,7 +101,7 @@ function emptyForm() {
 
     // ── Termo e assinatura ──
     leuTermos: false,
-    dataPreenchimento: new Date().toISOString().split('T')[0],
+    dataPreenchimento: todayBRT(),
     preenchidoPor: 'cliente',
     observacoesProfissional: '',
   };
@@ -461,7 +461,7 @@ function AnamneseForm({ paciente, initial, onSave, onCancel }) {
     if (!form.leuTermos || !signatureData) return;
     setIsSaving(true);
     try {
-      const saved = { ...form, dataPreenchimento: new Date().toISOString().split('T')[0] };
+      const saved = { ...form, dataPreenchimento: todayBRT() };
       await onSave(saved, signatureData);
     } finally {
       setIsSaving(false);

@@ -1,3 +1,4 @@
+import { clinicDateKey } from './clinicDate';
 import { calculateCustomerMetrics, calculateUnitDre, isRevenueTransaction, roundMetric, safeDivide, toNumber } from './franchiseMetrics.js';
 
 export const FINANCIAL_TARGETS = {
@@ -41,7 +42,7 @@ export function deriveMonthlyCosts(entries = [], periodMonth = '') {
   return Object.fromEntries(Object.entries(result).map(([key, value]) => [key, roundMetric(value)]));
 }
 
-export function summarizeAccounts(entries = [], today = new Date().toISOString().slice(0, 10)) {
+export function summarizeAccounts(entries = [], today = clinicDateKey()) {
   const summary = {
     receivableOpen: 0,
     payableOpen: 0,
@@ -72,7 +73,7 @@ export function summarizeAccounts(entries = [], today = new Date().toISOString()
 }
 
 export function buildCashForecast({ entries = [], currentCash, startDate, weeks = 13 } = {}) {
-  const start = new Date(`${startDate || new Date().toISOString().slice(0, 10)}T12:00:00Z`);
+  const start = new Date(`${startDate || clinicDateKey()}T12:00:00Z`);
   const cashKnown = currentCash !== null && currentCash !== undefined && currentCash !== '';
   let balance = cashKnown ? toNumber(currentCash) : null;
 
