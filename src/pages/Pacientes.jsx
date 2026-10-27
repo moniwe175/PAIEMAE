@@ -5,9 +5,11 @@ import {
   Users, Plus, Search, Phone, Calendar, FileText, XCircle,
   ChevronRight, Mail, Instagram, Upload, Trash2, AlertTriangle,
   RefreshCw, UserCheck, UserPlus, Clock, Share2,
-  DollarSign, CalendarCheck, CalendarX, UserX, CheckCircle2, Activity,
-  MapPin
+  DollarSign, CalendarCheck, CalendarX, UserX, CheckCircle2, Activity
 } from 'lucide-react';
+import {
+  ResponsiveContainer, PieChart, Pie, Cell, Tooltip
+} from 'recharts';
 import {
   fetchClients, insertClient, deleteClient, updateClient, fetchAppointments,
   fetchPackages, fetchPatientPackages, fetchPatientPackageSessions,
@@ -396,225 +398,6 @@ function CommercialHistoryModal({ patient, packages = [], packageSessions = [], 
   );
 }
 
-// ─── Helpers Visuais de Canais (Leve e Bonito) ─────────────────
-function getCanalIcon(name) {
-  const n = (name || '').toLowerCase();
-  if (n.includes('insta')) return Instagram;
-  if (n.includes('indica')) return Users;
-  if (n.includes('google') || n.includes('site')) return Search;
-  if (n.includes('rua') || n.includes('passou')) return MapPin;
-  if (n.includes('whats') || n.includes('motor')) return Phone;
-  return Share2;
-}
-
-function AcquisitionChannelsView({ data, total }) {
-  const [hovered, setHovered] = useState(null);
-
-  if (!data || data.length === 0) {
-    return (
-      <div style={{ textAlign: 'center', padding: 30, color: 'var(--text-muted)' }}>
-        Nenhum dado de origem cadastrado
-      </div>
-    );
-  }
-
-  const topChannel = data[0];
-  const size = 160;
-  const strokeWidth = 18;
-  const radius = (size - strokeWidth) / 2 - 2;
-  const circumference = 2 * Math.PI * radius;
-
-  let accumulatedPercent = 0;
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-      {/* Barra Macro de Distribuição */}
-      <div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-          <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 0.5 }}>
-            Distribuição por Canal
-          </span>
-          {topChannel && (
-            <span style={{ fontSize: 11, fontWeight: 700, color: topChannel.color, background: `${topChannel.color}15`, padding: '2px 8px', borderRadius: 99 }}>
-              ⭐ {topChannel.name} lidera ({topChannel.pct.toFixed(0)}%)
-            </span>
-          )}
-        </div>
-        <div style={{ width: '100%', height: 10, background: 'var(--border-light, #F3F4F6)', borderRadius: 99, overflow: 'hidden', display: 'flex', gap: 2 }}>
-          {data.map((c) => (
-            <div
-              key={c.name}
-              style={{
-                width: `${c.pct}%`,
-                height: '100%',
-                background: c.color,
-                cursor: 'pointer',
-                transition: 'opacity 0.2s',
-                opacity: hovered && hovered.name !== c.name ? 0.35 : 1,
-              }}
-              onMouseEnter={() => setHovered(c)}
-              onMouseLeave={() => setHovered(null)}
-              title={`${c.name}: ${c.value} pacientes (${c.pct.toFixed(1)}%)`}
-            />
-          ))}
-        </div>
-      </div>
-
-      {/* Grid: Donut com Centro Informativo + Ranking com Barras e Ícones */}
-      <div style={{ display: 'grid', gridTemplateColumns: '150px 1fr', gap: 16, alignItems: 'center' }}>
-        {/* Donut SVG Moderno */}
-        <div style={{ position: 'relative', width: size, height: size, margin: '0 auto', flexShrink: 0 }}>
-          <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ transform: 'rotate(-90deg)' }}>
-            <circle cx={size / 2} cy={size / 2} r={radius} fill="none" stroke="var(--border-light, #F3F4F6)" strokeWidth={strokeWidth} />
-            {data.map((item) => {
-              const percent = total > 0 ? item.value / total : 0;
-              const strokeDash = percent * circumference;
-              const gap = data.length > 1 && strokeDash > 4 ? 2 : 0;
-              const strokeDasharray = `${Math.max(1, strokeDash - gap)} ${circumference}`;
-              const strokeDashoffset = -(accumulatedPercent * circumference);
-              accumulatedPercent += percent;
-              const isHovered = hovered?.name === item.name;
-
-              return (
-                <circle
-                  key={item.name}
-                  cx={size / 2}
-                  cy={size / 2}
-                  r={radius}
-                  fill="none"
-                  stroke={item.color}
-                  strokeWidth={isHovered ? strokeWidth + 4 : strokeWidth}
-                  strokeDasharray={strokeDasharray}
-                  strokeDashoffset={strokeDashoffset}
-                  style={{
-                    cursor: 'pointer',
-                    transition: 'all 0.2s ease',
-                    opacity: hovered && !isHovered ? 0.35 : 1,
-                  }}
-                  onMouseEnter={() => setHovered(item)}
-                  onMouseLeave={() => setHovered(null)}
-                >
-                  <title>{`${item.name}: ${item.value} (${(percent * 100).toFixed(1)}%)`}</title>
-                </circle>
-              );
-            })}
-          </svg>
-
-          {/* Centro Dinâmico do Donut */}
-          <div
-            style={{
-              position: 'absolute',
-              inset: 0,
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              pointerEvents: 'none',
-              textAlign: 'center',
-              padding: 6,
-            }}
-          >
-            <span style={{ fontSize: 20, fontWeight: 800, color: 'var(--text-dark, #111827)', lineHeight: 1.1 }}>
-              {hovered ? hovered.value : total}
-            </span>
-            <span
-              style={{
-                fontSize: 10,
-                fontWeight: 700,
-                color: hovered ? hovered.color : 'var(--text-muted, #6B7280)',
-                textTransform: 'uppercase',
-                letterSpacing: 0.5,
-                marginTop: 2,
-                maxWidth: 86,
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-              }}
-            >
-              {hovered ? hovered.name : 'Pacientes'}
-            </span>
-            <span style={{ fontSize: 9, color: 'var(--text-muted, #9CA3AF)', marginTop: 1 }}>
-              {hovered ? `${hovered.pct.toFixed(0)}% do total` : 'cadastrados'}
-            </span>
-          </div>
-        </div>
-
-        {/* Lista de Ranking */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          {data.map((c, idx) => {
-            const Icon = getCanalIcon(c.name);
-            const isHovered = hovered?.name === c.name;
-            const isTop = idx === 0;
-
-            return (
-              <div
-                key={c.name}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 10,
-                  padding: '4px 6px',
-                  borderRadius: 8,
-                  background: isHovered ? 'var(--bg-main, #F9FAFB)' : 'transparent',
-                  transition: 'background 0.2s ease',
-                  cursor: 'pointer',
-                }}
-                onMouseEnter={() => setHovered(c)}
-                onMouseLeave={() => setHovered(null)}
-              >
-                <div
-                  style={{
-                    width: 26,
-                    height: 26,
-                    borderRadius: 6,
-                    background: `${c.color}15`,
-                    color: c.color,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    flexShrink: 0,
-                  }}
-                >
-                  <Icon style={{ width: 13, height: 13 }} />
-                </div>
-
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2, fontSize: 11 }}>
-                    <span style={{ fontWeight: 600, color: 'var(--text-dark, #111827)', display: 'flex', alignItems: 'center', gap: 4 }}>
-                      {c.name}
-                      {isTop && (
-                        <span style={{ fontSize: 9, fontWeight: 700, padding: '1px 5px', borderRadius: 99, background: `${c.color}20`, color: c.color }}>
-                          #1
-                        </span>
-                      )}
-                    </span>
-                    <span style={{ fontWeight: 700, color: 'var(--text-dark, #111827)' }}>
-                      {c.value}{' '}
-                      <span style={{ fontWeight: 500, color: 'var(--text-muted, #6B7280)', fontSize: 10 }}>
-                        ({c.pct.toFixed(0)}%)
-                      </span>
-                    </span>
-                  </div>
-                  <div style={{ width: '100%', height: 4, background: 'var(--border-light, #F3F4F6)', borderRadius: 99, overflow: 'hidden' }}>
-                    <div
-                      style={{
-                        width: `${c.pct}%`,
-                        height: '100%',
-                        background: c.color,
-                        borderRadius: 99,
-                        transition: 'width 0.4s ease',
-                      }}
-                    />
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    </div>
-  );
-}
 
 // ─── Componente Principal Pacientes ───────────────────────────
 export default function Pacientes() {
@@ -1036,20 +819,23 @@ export default function Pacientes() {
     const map = {};
     CANAIS_AQUISICAO.forEach((c) => (map[c] = 0));
 
+    let totalComOrigem = 0;
     pacientes.forEach((p) => {
-      const orig = p.origem || UNKNOWN_PATIENT_SOURCE;
-      map[orig] = (map[orig] || 0) + 1;
+      const orig = p.origem;
+      if (orig && orig !== UNKNOWN_PATIENT_SOURCE && map[orig] !== undefined) {
+        map[orig] = (map[orig] || 0) + 1;
+        totalComOrigem++;
+      }
     });
 
-    const total = pacientes.length;
     const list = Object.entries(map).map(([name, value]) => ({
       name,
       value,
-      pct: total > 0 ? (value / total) * 100 : 0,
+      pct: totalComOrigem > 0 ? (value / totalComOrigem) * 100 : 0,
       color: CANAL_COLORS[name] || '#6B7280',
     }));
 
-    return list.filter((i) => i.value > 0).sort((a, b) => b.value - a.value);
+    return list.filter((i) => i.value > 0);
   }, [pacientes]);
 
   // A origem continua disponível no gráfico de canais abaixo.
@@ -1253,46 +1039,21 @@ export default function Pacientes() {
 
         {/* 4. Retorno Já Agendado */}
         <div className="stat-card" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
-            <div style={{ minWidth: 0 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                <div className="stat-card-icon" style={{ background: '#EFF6FF', margin: 0 }}>
-                  <CalendarCheck style={{ color: '#2563EB', width: 20, height: 20 }} />
-                </div>
-                {retornoAgendadoStats.recentlyAttended > 0 && (
-                  <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 99, background: '#DBEAFE', color: '#1D4ED8' }}>
-                    {retornoAgendadoStats.scheduled} marcados
-                  </span>
-                )}
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
+              <div className="stat-card-icon" style={{ background: '#EFF6FF', margin: 0 }}>
+                <CalendarCheck style={{ color: '#2563EB', width: 20, height: 20 }} />
               </div>
-              <div className="stat-value" style={{ color: '#2563EB' }}>
-                {retornoAgendadoStats.recentlyAttended > 0 ? `${retornoAgendadoStats.percentage}%` : '—'}
-              </div>
-              <div className="stat-label">Retorno Já Agendado</div>
-            </div>
-
-            {/* Anel de Progresso Circular SVG (Leve, moderno e preciso) */}
-            <div style={{ width: 68, height: 68, flexShrink: 0, position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <svg width="68" height="68" viewBox="0 0 68 68" style={{ transform: 'rotate(-90deg)' }}>
-                <circle cx="34" cy="34" r="26" fill="none" stroke="#EFF6FF" strokeWidth="6" />
-                <circle
-                  cx="34"
-                  cy="34"
-                  r="26"
-                  fill="none"
-                  stroke="#2563EB"
-                  strokeWidth="6"
-                  strokeDasharray={`${(retornoAgendadoStats.percentage / 100) * 163.36} 163.36`}
-                  strokeLinecap="round"
-                  style={{ transition: 'stroke-dasharray 0.5s ease' }}
-                />
-              </svg>
-              <div style={{ position: 'absolute', textAlign: 'center' }}>
-                <span style={{ fontSize: 12, fontWeight: 800, color: '#2563EB' }}>
-                  {retornoAgendadoStats.percentage}%
+              {retornoAgendadoStats.recentlyAttended > 0 && (
+                <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 99, background: '#DBEAFE', color: '#1D4ED8' }}>
+                  {retornoAgendadoStats.scheduled} marcados
                 </span>
-              </div>
+              )}
             </div>
+            <div className="stat-value" style={{ color: '#2563EB' }}>
+              {retornoAgendadoStats.recentlyAttended > 0 ? `${retornoAgendadoStats.percentage}%` : '—'}
+            </div>
+            <div className="stat-label">Retorno Já Agendado</div>
           </div>
           <div className="stat-sub" style={{ marginTop: 6 }}>
             {retornoAgendadoStats.scheduled} de {retornoAgendadoStats.recentlyAttended} atendidos no período · {retornoAgendadoStats.withoutReturn} sem próxima visita
@@ -1302,16 +1063,54 @@ export default function Pacientes() {
 
       {/* ─── 4 & 5. Gráficos de Canais de Aquisição & Novos vs Recorrentes ─── */}
       <div className="grid-2 section-gap">
-        {/* 5. Origem do Cliente (Canal de Aquisição) */}
+        {/* 5. Origem dos Clientes */}
         <div className="card">
           <div className="card-header">
             <span className="card-title">
               <Share2 style={{ color: '#8B5CF6' }} />
-              Origem dos Clientes (Canais de Aquisição)
+              Origem dos Clientes
             </span>
           </div>
 
-          <AcquisitionChannelsView data={canaisData} total={pacientes.length} />
+          {canaisData.length > 0 ? (
+            <div style={{ display: 'grid', gridTemplateColumns: '160px 1fr', gap: 16, alignItems: 'center' }}>
+              <div style={{ height: 160 }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie data={canaisData} cx="50%" cy="50%" innerRadius={42} outerRadius={68} dataKey="value" paddingAngle={3} isAnimationActive={false}>
+                      {canaisData.map((entry, idx) => (
+                        <Cell key={idx} fill={entry.color} />
+                      ))}
+                    </Pie>
+                    <Tooltip formatter={(v) => [`${v} clientes`, 'Quantidade']} />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {canaisData.map((c) => (
+                  <div key={c.name} style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11 }}>
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 500 }}>
+                        <span style={{ width: 8, height: 8, borderRadius: '50%', background: c.color }} />
+                        {c.name}
+                      </span>
+                      <span style={{ fontWeight: 700, color: 'var(--text-dark)' }}>
+                        {c.value} ({c.pct.toFixed(0)}%)
+                      </span>
+                    </div>
+                    <div style={{ width: '100%', height: 4, background: 'var(--border-light)', borderRadius: 99, overflow: 'hidden' }}>
+                      <div style={{ width: `${c.pct}%`, height: '100%', background: c.color, borderRadius: 99 }} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div style={{ textAlign: 'center', padding: 30, color: 'var(--text-muted)' }}>
+              Nenhum dado de origem cadastrado
+            </div>
+          )}
         </div>
 
         {/* 4. Novos Clientes vs Clientes Recorrentes */}
