@@ -122,13 +122,15 @@ export default function Dashboard() {
       const { data } = await fetchAppointments();
       if (data) {
         setAllAppointments(data);
-        const todayStr = new Date().toISOString().split('T')[0];
+        const todayStr = todayBRT();
         const todayApts = data
-          .filter(a => a.appointment_date === todayStr)
+          .filter(a => a.appointment_date === todayStr && a.status !== 'bloqueado' && a.status !== 'cancelado')
+          .sort((a, b) => (a.appointment_time || '').localeCompare(b.appointment_time || ''))
           .map(a => ({
-            hora: a.appointment_time || '',
-            paciente: a.client_name || '',
-            servico: a.service_name || '',
+            id: a.id,
+            hora: a.appointment_time ? a.appointment_time.slice(0, 5) : '',
+            paciente: a.client_name || 'Sem nome',
+            servico: a.service_name || 'Procedimento',
             status: a.status || 'aguardando',
           }));
         setTodayAppointments(todayApts);
@@ -725,27 +727,56 @@ export default function Dashboard() {
                 </tr>
               </thead>
               <tbody>
-                {todayAppointments.map((apt, i) => (
-                  <tr key={i}>
-                    <td>
-                      <span style={{ fontWeight: 600, color: 'var(--text-dark)' }}>{apt.hora}</span>
-                    </td>
-                    <td>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <div className="avatar">
-                          {apt.paciente.charAt(0)}
+                {todayAppointments.map((apt, i) => {
+                  const s = (apt.status || '').toLowerCase();
+                  let badgeStyle = { background: '#FEF3C7', color: '#D97706' };
+                  let label = 'Aguardando';
+
+                  if (s === 'confirmado') {
+                    badgeStyle = { background: '#DCFCE7', color: '#15803D' };
+                    label = 'Confirmado';
+                  } else if (['finalizado', 'completed', 'concluido', 'concluído'].includes(s)) {
+                    badgeStyle = { background: '#E0F2FE', color: '#0369A1' };
+                    label = 'Finalizado';
+                  } else if (['falta', 'no_show', 'no-show'].includes(s)) {
+                    badgeStyle = { background: '#FEE2E2', color: '#DC2626' };
+                    label = 'Falta';
+                  } else if (s === 'agendado') {
+                    badgeStyle = { background: '#EFF6FF', color: '#2563EB' };
+                    label = 'Agendado';
+                  }
+
+                  return (
+                    <tr key={apt.id || i}>
+                      <td>
+                        <span style={{ fontWeight: 600, color: 'var(--text-dark)' }}>{apt.hora}</span>
+                      </td>
+                      <td>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <div className="avatar">
+                            {apt.paciente ? apt.paciente.charAt(0).toUpperCase() : 'P'}
+                          </div>
+                          <span style={{ fontWeight: 500 }}>{apt.paciente}</span>
                         </div>
-                        <span style={{ fontWeight: 500 }}>{apt.paciente}</span>
-                      </div>
-                    </td>
-                    <td style={{ color: 'var(--text-light)' }}>{apt.servico}</td>
-                    <td>
-                      <span className={`badge ${apt.status === 'confirmado' ? 'badge-success' : 'badge-warning'}`}>
-                        {apt.status === 'confirmado' ? 'Confirmado' : 'Aguardando'}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
+                      </td>
+                      <td style={{ color: 'var(--text-light)' }}>{apt.servico}</td>
+                      <td>
+                        <span
+                          className="badge"
+                          style={{
+                            ...badgeStyle,
+                            fontWeight: 600,
+                            fontSize: 11,
+                            padding: '3px 8px',
+                            borderRadius: 6,
+                          }}
+                        >
+                          {label}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
