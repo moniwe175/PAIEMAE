@@ -8,6 +8,9 @@ import {
   DollarSign, CalendarCheck, CalendarX, UserX, CheckCircle2, Activity
 } from 'lucide-react';
 import {
+  ResponsiveContainer, PieChart, Pie, Cell, Tooltip
+} from 'recharts';
+import {
   fetchClients, insertClient, deleteClient, updateClient, fetchAppointments,
   fetchPackages, fetchPatientPackages, fetchPatientPackageSessions,
 } from '../services/supabaseService';
@@ -1067,24 +1070,17 @@ export default function Pacientes() {
 
           {canaisData.length > 0 ? (
             <div style={{ display: 'grid', gridTemplateColumns: '160px 1fr', gap: 16, alignItems: 'center' }}>
-              <div style={{ height: 160, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                {/* SVG donut leve — sem recharts, sem animação */}
-                <svg width="148" height="148" viewBox="-74 -74 148 148" aria-hidden="true">
-                  {(() => {
-                    const total = canaisData.reduce((s, d) => s + d.value, 0);
-                    if (total === 0) return null;
-                    const ro = 67, ri = 42;
-                    let a = -Math.PI / 2;
-                    return canaisData.map((d) => {
-                      const slice = (d.value / total) * 2 * Math.PI;
-                      const sa = a; a += slice;
-                      const large = slice > Math.PI ? 1 : 0;
-                      const fmt = (n) => n.toFixed(3);
-                      const pth = `M ${fmt(Math.cos(sa)*ro)} ${fmt(Math.sin(sa)*ro)} A ${ro} ${ro} 0 ${large} 1 ${fmt(Math.cos(a)*ro)} ${fmt(Math.sin(a)*ro)} L ${fmt(Math.cos(a)*ri)} ${fmt(Math.sin(a)*ri)} A ${ri} ${ri} 0 ${large} 0 ${fmt(Math.cos(sa)*ri)} ${fmt(Math.sin(sa)*ri)} Z`;
-                      return <path key={d.name} d={pth} fill={d.color}><title>{d.name}: {d.value}</title></path>;
-                    });
-                  })()}
-                </svg>
+              <div style={{ height: 160 }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie data={canaisData} cx="50%" cy="50%" innerRadius={42} outerRadius={68} dataKey="value" paddingAngle={3} isAnimationActive={false}>
+                      {canaisData.map((entry, idx) => (
+                        <Cell key={idx} fill={entry.color} />
+                      ))}
+                    </Pie>
+                    <Tooltip formatter={(v) => [`${v} clientes`, 'Quantidade']} />
+                  </PieChart>
+                </ResponsiveContainer>
               </div>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
