@@ -4,7 +4,7 @@ import { useLocation } from 'react-router-dom';
 import {
   Users, Plus, Search, Phone, Calendar, FileText, XCircle,
   ChevronRight, Mail, Instagram, Upload, Trash2, AlertTriangle,
-  RefreshCw, UserCheck, UserPlus, Clock, Sparkles, Share2,
+  RefreshCw, UserCheck, UserPlus, Clock, Share2,
   DollarSign, CalendarCheck, CalendarX, UserX, CheckCircle2, Activity
 } from 'lucide-react';
 import {
@@ -20,12 +20,15 @@ import { packageProgress, packageServiceNames } from '../lib/patientPackages';
 import {
   appointmentPatientKey,
   buildPatientCommercialHistory,
+  calculateLoyalPatientStats,
+  calculateScheduledReturnStats,
   derivePatientRelationship,
   getAppointmentRecordedValue,
   isCompletedAppointment,
   resolvePatientSource,
   UNKNOWN_PATIENT_SOURCE,
 } from '../lib/patientAnalytics';
+import { clinicDateKey } from '../lib/clinicDate';
 
 // ─── Search helpers ──────────────────────────────────────────
 function normalizeSearchText(str) {
@@ -709,7 +712,7 @@ export default function Pacientes() {
     const days = periodoRetencao === '30d' ? 30 : periodoRetencao === '90d' ? 90 : 60;
     const cutoff = new Date();
     cutoff.setDate(cutoff.getDate() - days);
-    const cutoffStr = cutoff.toISOString().split('T')[0];
+    const cutoffStr = clinicDateKey(cutoff);
 
     const visitsInPeriod = allAppointments.filter(
       (a) => a.appointment_date >= cutoffStr && isCompletedAppointment(a)
@@ -748,19 +751,31 @@ export default function Pacientes() {
   }, [pacientes, churnDiasLimite]);
 
   // ─── 3. Frequência / Tempo Médio Geral da Clínica ────────────
-  const tempoMedioGeralClinica = useMemo(() => {
-    const comIntervalo = pacientes.filter((p) => p.tempoMedioDias !== null && p.tempoMedioDias > 0);
-    if (comIntervalo.length === 0) return 0;
-    const soma = comIntervalo.reduce((acc, p) => acc + p.tempoMedioDias, 0);
-    return Math.round(soma / comIntervalo.length);
-  }, [pacientes]);
+  const fidelizacaoStats = useMemo(() => calculateLoyalPatientStats(pacientes), [pacientes]);
+
+  const retornoAgendadoStats = useMemo(() => {
+    const days = periodoRetencao === '30d' ? 30 : periodoRetencao === '90d' ? 90 : 60;
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - days);
+    return calculateScheduledReturnStats(pacientes, clinicDateKey(cutoff));
+  }, [pacientes, periodoRetencao]);
+
+  const retornoAgendadoChart = useMemo(() => {
+    if (retornoAgendadoStats.recentlyAttended === 0) {
+      return [{ name: 'Sem atendimentos no período', value: 1, color: '#E5E7EB' }];
+    }
+    return [
+      { name: 'Com retorno marcado', value: retornoAgendadoStats.scheduled, color: '#10B981' },
+      { name: 'Sem retorno marcado', value: retornoAgendadoStats.withoutReturn, color: '#F3C7D5' },
+    ].filter((item) => item.value > 0);
+  }, [retornoAgendadoStats]);
 
   // ─── 4. Novos vs Recorrentes (e Faturamento) ─────────────────
   const novosVsRecorrentes = useMemo(() => {
     const days = periodoRetencao === '30d' ? 30 : periodoRetencao === '90d' ? 90 : 60;
     const cutoff = new Date();
     cutoff.setDate(cutoff.getDate() - days);
-    const cutoffStr = cutoff.toISOString().split('T')[0];
+    const cutoffStr = clinicDateKey(cutoff);
 
     // Agrupamento de agendamentos finalizados no período
     const apptsPeriodo = allAppointments.filter((a) => a.appointment_date >= cutoffStr && isCompletedAppointment(a));
@@ -828,19 +843,7 @@ export default function Pacientes() {
     return list.filter((i) => i.value > 0);
   }, [pacientes]);
 
-  // ─── 6. Taxa de Indicação ────────────────────────────────────
-  const indicacaoStats = useMemo(() => {
-    const origemConfirmada = pacientes.filter((p) => p.origemConfirmada);
-    const indicados = origemConfirmada.filter((p) => (p.origem || '').toLowerCase().includes('indica')).length;
-    const taxa = origemConfirmada.length > 0 ? Math.round((indicados / origemConfirmada.length) * 100) : 0;
-    return {
-      indicados,
-      totalConfirmado: origemConfirmada.length,
-      semOrigem: pacientes.length - origemConfirmada.length,
-      taxa,
-    };
-  }, [pacientes]);
-
+  // A origem continua disponível no gráfico de canais abaixo.
   // ─── Filtro e Busca ──────────────────────────────────────────
   const filtrados = useMemo(() => {
     let list = pacientes;
@@ -1018,39 +1021,52 @@ export default function Pacientes() {
           </div>
         </div>
 
-        {/* 3. Tempo Médio entre Visitas */}
+        {/* 3. Clientes Fidelizados */}
         <div className="stat-card" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
           <div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
-              <div className="stat-card-icon" style={{ background: '#EFF6FF', margin: 0 }}>
-                <Clock style={{ color: '#3B82F6', width: 20, height: 20 }} />
+              <div className="stat-card-icon" style={{ background: '#ECFDF5', margin: 0 }}>
+                <UserCheck style={{ color: '#059669', width: 20, height: 20 }} />
               </div>
+              <span className="stat-badge" style={{ fontSize: 10, color: '#047857', background: '#ECFDF5' }}>
+                {fidelizacaoStats.percentage}% da base atendida
+              </span>
             </div>
-            <div className="stat-value" style={{ color: '#3B82F6' }}>
-              {tempoMedioGeralClinica > 0 ? `${tempoMedioGeralClinica} dias` : '—'}
+            <div className="stat-value" style={{ color: '#059669' }}>
+              {fidelizacaoStats.loyal}
             </div>
-            <div className="stat-label">Tempo Médio entre Visitas</div>
+            <div className="stat-label">Clientes Fidelizados</div>
           </div>
           <div className="stat-sub" style={{ marginTop: 6 }}>
-            frequência média dos clientes recorrentes
+            3 ou mais atendimentos · {fidelizacaoStats.withHistory} clientes com histórico
           </div>
         </div>
 
-        {/* 6. Taxa de Indicação */}
+        {/* 4. Retorno Já Agendado */}
         <div className="stat-card" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
-          <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
-              <div className="stat-card-icon" style={{ background: '#FDF4F7', margin: 0 }}>
-                <Sparkles style={{ color: 'var(--color-primary, #C73B6D)', width: 20, height: 20 }} />
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+            <div style={{ minWidth: 0 }}>
+              <div className="stat-card-icon" style={{ background: '#EFF6FF', margin: '0 0 8px' }}>
+                <CalendarCheck style={{ color: '#2563EB', width: 20, height: 20 }} />
               </div>
+              <div className="stat-value" style={{ color: '#2563EB' }}>
+                {retornoAgendadoStats.recentlyAttended > 0 ? `${retornoAgendadoStats.percentage}%` : '—'}
+              </div>
+              <div className="stat-label">Retorno Já Agendado</div>
             </div>
-            <div className="stat-value" style={{ color: 'var(--color-primary, #C73B6D)' }}>
-              {indicacaoStats.taxa}%
+            <div style={{ width: 86, height: 86, flexShrink: 0 }} aria-label="Gráfico de clientes com e sem retorno agendado">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie data={retornoAgendadoChart} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={24} outerRadius={38} paddingAngle={retornoAgendadoChart.length > 1 ? 3 : 0} stroke="none">
+                    {retornoAgendadoChart.map((entry) => <Cell key={entry.name} fill={entry.color} />)}
+                  </Pie>
+                  {retornoAgendadoStats.recentlyAttended > 0 && <Tooltip formatter={(value, name) => [`${value} cliente(s)`, name]} />}
+                </PieChart>
+              </ResponsiveContainer>
             </div>
-            <div className="stat-label">Taxa de Indicação</div>
           </div>
           <div className="stat-sub" style={{ marginTop: 6 }}>
-            {indicacaoStats.indicados} de {indicacaoStats.totalConfirmado} com origem confirmada · {indicacaoStats.semOrigem} não informados
+            {retornoAgendadoStats.scheduled} de {retornoAgendadoStats.recentlyAttended} atendidos no período · {retornoAgendadoStats.withoutReturn} sem próxima visita
           </div>
         </div>
       </div>
