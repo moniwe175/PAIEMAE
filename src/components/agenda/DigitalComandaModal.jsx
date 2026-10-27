@@ -302,7 +302,7 @@ export default function DigitalComandaModal({
                   </div>
                   <div style={{ display: 'grid', gap: 5 }}>
                     <PaperLine label="Cliente" value={appointment.paciente || '—'} />
-                    <PaperLine label="Data marcada" value={`${displayDate(appointment.data)}${appointment.hora ? ` às ${appointment.hora}` : ''}`} />
+                    <PaperLine label="Data marcada" value={displayDate(appointment.data)} />
                     <PaperLine label="Tel." value={appointment.telefone || '—'} />
                     <label style={paperLineStyle}>
                       <strong style={paperLabelStyle}>Profissional:</strong>
@@ -407,7 +407,7 @@ export default function DigitalComandaModal({
                 <section style={stubStyle}>
                   <div style={{ display: 'grid', gap: 8 }}>
                     <PaperLine label="Cliente" value={appointment.paciente || '—'} />
-                    <PaperLine label="Data marcada" value={`${displayDate(appointment.data)}${appointment.hora ? ` às ${appointment.hora}` : ''}`} />
+                    <PaperLine label="Data marcada" value={displayDate(appointment.data)} />
                     <PaperLine label="Profissional" value={mainProfessional || '—'} />
                   </div>
                   <div style={{ display: 'grid', alignContent: 'space-between', justifyItems: 'end', gap: 10 }}>
