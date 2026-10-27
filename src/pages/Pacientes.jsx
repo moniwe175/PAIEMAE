@@ -8,9 +8,6 @@ import {
   DollarSign, CalendarCheck, CalendarX, UserX, CheckCircle2, Activity
 } from 'lucide-react';
 import {
-  ResponsiveContainer, PieChart, Pie, Cell, Tooltip
-} from 'recharts';
-import {
   fetchClients, insertClient, deleteClient, updateClient, fetchAppointments,
   fetchPackages, fetchPatientPackages, fetchPatientPackageSessions,
 } from '../services/supabaseService';
@@ -419,6 +416,10 @@ export default function Pacientes() {
   const [packageSessions, setPackageSessions] = useState([]);
   const [packagesLoadError, setPackagesLoadError] = useState('');
 
+  // Paginação da tabela de pacientes (busca ainda percorre todos)
+  const PAGE_SIZE = 50;
+  const [paginaAtual, setPaginaAtual] = useState(1);
+
   const refreshPackageData = async () => {
     const [catalogRes, packagesRes, sessionsRes] = await Promise.all([
       fetchPackages(),
@@ -756,15 +757,6 @@ export default function Pacientes() {
     return calculateScheduledReturnStats(pacientes, clinicDateKey(cutoff));
   }, [pacientes, periodoRetencao]);
 
-  const retornoAgendadoChart = useMemo(() => {
-    if (retornoAgendadoStats.recentlyAttended === 0) {
-      return [{ name: 'Sem atendimentos no período', value: 1, color: '#E5E7EB' }];
-    }
-    return [
-      { name: 'Com retorno marcado', value: retornoAgendadoStats.scheduled, color: '#10B981' },
-      { name: 'Sem retorno marcado', value: retornoAgendadoStats.withoutReturn, color: '#F3C7D5' },
-    ].filter((item) => item.value > 0);
-  }, [retornoAgendadoStats]);
 
   // ─── 4. Novos vs Recorrentes (e Faturamento) ─────────────────
   const novosVsRecorrentes = useMemo(() => {
@@ -869,6 +861,16 @@ export default function Pacientes() {
       return true;
     });
   }, [pacientes, busca, filtro]);
+
+  // Reseta para p.1 ao trocar busca ou filtro
+  useEffect(() => { setPaginaAtual(1); }, [busca, filtro]);
+
+  // Fatia a lista para a página atual
+  const paginados = useMemo(
+    () => filtrados.slice((paginaAtual - 1) * PAGE_SIZE, paginaAtual * PAGE_SIZE),
+    [filtrados, paginaAtual]
+  );
+  const totalPaginas = Math.ceil(filtrados.length / PAGE_SIZE);
 
   return (
     <div>
@@ -1030,26 +1032,21 @@ export default function Pacientes() {
 
         {/* 4. Retorno Já Agendado */}
         <div className="stat-card" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-            <div style={{ minWidth: 0 }}>
-              <div className="stat-card-icon" style={{ background: '#EFF6FF', margin: '0 0 8px' }}>
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
+              <div className="stat-card-icon" style={{ background: '#EFF6FF', margin: 0 }}>
                 <CalendarCheck style={{ color: '#2563EB', width: 20, height: 20 }} />
               </div>
-              <div className="stat-value" style={{ color: '#2563EB' }}>
-                {retornoAgendadoStats.recentlyAttended > 0 ? `${retornoAgendadoStats.percentage}%` : '—'}
-              </div>
-              <div className="stat-label">Retorno Já Agendado</div>
+              {retornoAgendadoStats.recentlyAttended > 0 && (
+                <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 99, background: '#DBEAFE', color: '#1D4ED8' }}>
+                  {retornoAgendadoStats.scheduled} marcados
+                </span>
+              )}
             </div>
-            <div style={{ width: 86, height: 86, flexShrink: 0 }} aria-label="Gráfico de clientes com e sem retorno agendado">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie data={retornoAgendadoChart} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={24} outerRadius={38} paddingAngle={retornoAgendadoChart.length > 1 ? 3 : 0} stroke="none">
-                    {retornoAgendadoChart.map((entry) => <Cell key={entry.name} fill={entry.color} />)}
-                  </Pie>
-                  {retornoAgendadoStats.recentlyAttended > 0 && <Tooltip formatter={(value, name) => [`${value} cliente(s)`, name]} />}
-                </PieChart>
-              </ResponsiveContainer>
+            <div className="stat-value" style={{ color: '#2563EB' }}>
+              {retornoAgendadoStats.recentlyAttended > 0 ? `${retornoAgendadoStats.percentage}%` : '—'}
             </div>
+            <div className="stat-label">Retorno Já Agendado</div>
           </div>
           <div className="stat-sub" style={{ marginTop: 6 }}>
             {retornoAgendadoStats.scheduled} de {retornoAgendadoStats.recentlyAttended} atendidos no período · {retornoAgendadoStats.withoutReturn} sem próxima visita
@@ -1070,17 +1067,24 @@ export default function Pacientes() {
 
           {canaisData.length > 0 ? (
             <div style={{ display: 'grid', gridTemplateColumns: '160px 1fr', gap: 16, alignItems: 'center' }}>
-              <div style={{ height: 160 }}>
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie data={canaisData} cx="50%" cy="50%" innerRadius={42} outerRadius={68} dataKey="value" paddingAngle={3}>
-                      {canaisData.map((entry, idx) => (
-                        <Cell key={idx} fill={entry.color} />
-                      ))}
-                    </Pie>
-                    <Tooltip formatter={(v) => [`${v} clientes`, 'Quantidade']} />
-                  </PieChart>
-                </ResponsiveContainer>
+              <div style={{ height: 160, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                {/* SVG donut leve — sem recharts, sem animação */}
+                <svg width="148" height="148" viewBox="-74 -74 148 148" aria-hidden="true">
+                  {(() => {
+                    const total = canaisData.reduce((s, d) => s + d.value, 0);
+                    if (total === 0) return null;
+                    const ro = 67, ri = 42;
+                    let a = -Math.PI / 2;
+                    return canaisData.map((d) => {
+                      const slice = (d.value / total) * 2 * Math.PI;
+                      const sa = a; a += slice;
+                      const large = slice > Math.PI ? 1 : 0;
+                      const fmt = (n) => n.toFixed(3);
+                      const pth = `M ${fmt(Math.cos(sa)*ro)} ${fmt(Math.sin(sa)*ro)} A ${ro} ${ro} 0 ${large} 1 ${fmt(Math.cos(a)*ro)} ${fmt(Math.sin(a)*ro)} L ${fmt(Math.cos(a)*ri)} ${fmt(Math.sin(a)*ri)} A ${ri} ${ri} 0 ${large} 0 ${fmt(Math.cos(sa)*ri)} ${fmt(Math.sin(sa)*ri)} Z`;
+                      return <path key={d.name} d={pth} fill={d.color}><title>{d.name}: {d.value}</title></path>;
+                    });
+                  })()}
+                </svg>
               </div>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -1256,7 +1260,7 @@ export default function Pacientes() {
                   </tr>
                 </thead>
                 <tbody>
-                  {filtrados.map((p) => (
+                  {paginados.map((p) => (
                     <tr
                       key={p.id}
                       style={{ cursor: 'pointer', background: selected?.id === p.id ? 'var(--bg-card-hover)' : '' }}
@@ -1362,6 +1366,36 @@ export default function Pacientes() {
                 </tbody>
               </table>
             </div>
+
+            {/* Paginação */}
+            {totalPaginas > 1 && (
+              <div style={{ padding: '12px 20px', borderTop: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                  {(paginaAtual - 1) * PAGE_SIZE + 1}–{Math.min(paginaAtual * PAGE_SIZE, filtrados.length)} de {filtrados.length} pacientes
+                </span>
+                <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                  <button
+                    disabled={paginaAtual === 1}
+                    onClick={() => setPaginaAtual((p) => p - 1)}
+                    style={{ padding: '4px 10px', borderRadius: 6, border: '1px solid var(--border-color)', background: paginaAtual === 1 ? 'var(--bg-main)' : '#fff', cursor: paginaAtual === 1 ? 'default' : 'pointer', fontSize: 12, opacity: paginaAtual === 1 ? 0.5 : 1 }}
+                  >← Ant.</button>
+                  {Array.from({ length: totalPaginas }, (_, i) => i + 1)
+                    .filter((n) => Math.abs(n - paginaAtual) <= 2)
+                    .map((n) => (
+                      <button
+                        key={n}
+                        onClick={() => setPaginaAtual(n)}
+                        style={{ padding: '4px 10px', borderRadius: 6, border: '1px solid', borderColor: n === paginaAtual ? 'var(--color-primary)' : 'var(--border-color)', background: n === paginaAtual ? 'var(--color-primary)' : '#fff', color: n === paginaAtual ? '#fff' : 'var(--text-medium)', cursor: 'pointer', fontSize: 12, fontWeight: n === paginaAtual ? 700 : 500 }}
+                      >{n}</button>
+                    ))}
+                  <button
+                    disabled={paginaAtual === totalPaginas}
+                    onClick={() => setPaginaAtual((p) => p + 1)}
+                    style={{ padding: '4px 10px', borderRadius: 6, border: '1px solid var(--border-color)', background: paginaAtual === totalPaginas ? 'var(--bg-main)' : '#fff', cursor: paginaAtual === totalPaginas ? 'default' : 'pointer', fontSize: 12, opacity: paginaAtual === totalPaginas ? 0.5 : 1 }}
+                  >Próx. →</button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
