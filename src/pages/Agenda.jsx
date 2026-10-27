@@ -7,7 +7,7 @@ import {
   Trash2, Edit3, Phone, DollarSign,
   CalendarCheck, Grid, List, CheckSquare, X,
   Ban, Coffee, UtensilsCrossed, Lock, AlertTriangle, Repeat2, FileText, Tablet,
-  UserX, Timer
+  UserX, Timer, ReceiptText
 } from 'lucide-react';
 import { useProfissionais } from '../lib/profissionais';
 import { useServicos } from '../lib/servicos';
@@ -25,6 +25,7 @@ import {
 } from '../services/supabaseService';
 import TabletAnamneseModal from '../components/agenda/TabletAnamneseModal';
 import WaitlistPanel from '../components/agenda/WaitlistPanel';
+import DigitalComandaModal from '../components/agenda/DigitalComandaModal';
 import { eligiblePatientPackages, packageProgress, resolvePackageChoice } from '../lib/patientPackages';
 import { findUniqueExactClient, searchClients } from '../lib/clientSearch';
 
@@ -561,7 +562,7 @@ function BloqueioModal({ onClose, date, profissional: prefillProf, hora: prefill
 // ═══════════════════════════════════════════════════════════════
 // ─── AppointmentDetailModal ───────────────────────────────────
 // ═══════════════════════════════════════════════════════════════
-function AppointmentDetailModal({ apt, profissionais, onClose, onEdit, onDelete, onDeleteAll, onStatusChange }) {
+function AppointmentDetailModal({ apt, profissionais, onClose, onEdit, onDelete, onDeleteAll, onStatusChange, onOpenComanda, canEdit }) {
   const navigate = useNavigate();
   const [showConfirmDeleteAll, setShowConfirmDeleteAll] = useState(false);
   const prof = profissionais.find(p => p.nome === apt.profissional);
@@ -669,6 +670,9 @@ function AppointmentDetailModal({ apt, profissionais, onClose, onEdit, onDelete,
             </div>
           </div>
           <div style={{ display: 'flex', gap: 8, paddingTop: 14, borderTop: '1px solid #F0EBE6', flexWrap: 'wrap' }}>
+            <button onClick={() => onOpenComanda(apt)} disabled={!canEdit} style={{ padding: '8px 14px', borderRadius: 10, border: '1.5px solid #D9B0BE', background: '#FFF5F8', fontSize: 13, fontWeight: 700, cursor: canEdit ? 'pointer' : 'not-allowed', color: '#9B2C50', display: 'flex', alignItems: 'center', gap: 5, opacity: canEdit ? 1 : .55 }}>
+              <ReceiptText style={{ width: 14, height: 14 }} />Comanda
+            </button>
             <button onClick={() => onDelete(apt.id)} style={{ padding: '8px 14px', borderRadius: 10, border: '1.5px solid #FCA5A5', background: '#FFF5F5', fontSize: 13, fontWeight: 600, cursor: 'pointer', color: '#EF4444', display: 'flex', alignItems: 'center', gap: 5 }}>
               <Trash2 style={{ width: 13, height: 13 }} />Excluir
             </button>
@@ -1498,6 +1502,7 @@ export default function Agenda() {
   // Modals
   const [formModal, setFormModal] = useState({ open: false, apt: null, prefillProf: '', prefillHora: '', prefill: null });
   const [detailModal, setDetailModal] = useState({ open: false, apt: null });
+  const [comandaModal, setComandaModal] = useState({ open: false, apt: null });
   const [bloqueioModal, setBloqueioModal] = useState({ open: false, bloqueio: null, prefillProf: '', prefillHora: '' });
   const [atendimentoBlockedInfo, setAtendimentoBlockedInfo] = useState(null);
   const [tabletModal, setTabletModal] = useState({ open: false, paciente: null, tipoFicha: '', apt: null });
@@ -1539,6 +1544,10 @@ export default function Agenda() {
   const openNew = (prof = '', hora = '', prefill = null) => setFormModal({ open: true, apt: null, prefillProf: prof, prefillHora: hora, prefill });
   const openEdit = apt => { setDetailModal({ open: false, apt: null }); setFormModal({ open: true, apt, prefillProf: '', prefillHora: '', prefill: null }); };
   const openDetail = apt => setDetailModal({ open: true, apt });
+  const openComanda = apt => {
+    setDetailModal({ open: false, apt: null });
+    setComandaModal({ open: true, apt });
+  };
   const openBloqueio = (prof = '', hora = '', blq = null) => setBloqueioModal({ open: true, bloqueio: blq, prefillProf: prof, prefillHora: hora });
 
   const handleSave = async (payload) => {
@@ -1686,6 +1695,11 @@ export default function Agenda() {
     }
   };
 
+  const handleComandaFinalized = (appointmentId) => {
+    setAgendamentos(prev => prev.map(item => item.id === appointmentId ? { ...item, status: 'finalizado' } : item));
+    setDetailModal(prev => prev.apt?.id === appointmentId ? { ...prev, apt: { ...prev.apt, status: 'finalizado' } } : prev);
+  };
+
   const handleScheduleWaitlist = (entry, slot = null) => {
     const client = entry.clients || {};
     const defaultTime = {
@@ -1829,7 +1843,18 @@ export default function Agenda() {
       {detailModal.open && detailModal.apt && (
         <AppointmentDetailModal apt={detailModal.apt} profissionais={profissionais}
           onClose={() => setDetailModal({ open: false, apt: null })}
-          onEdit={openEdit} onDelete={handleDelete} onDeleteAll={handleDeleteAllFixo} onStatusChange={handleStatusChange} />
+          onEdit={openEdit} onDelete={handleDelete} onDeleteAll={handleDeleteAllFixo} onStatusChange={handleStatusChange}
+          onOpenComanda={openComanda} canEdit={canEdit('agenda')} />
+      )}
+      {comandaModal.open && comandaModal.apt && (
+        <DigitalComandaModal
+          appointment={comandaModal.apt}
+          services={todosServicos}
+          professionals={profissionais}
+          canEdit={canEdit('agenda')}
+          onFinalized={handleComandaFinalized}
+          onClose={() => setComandaModal({ open: false, apt: null })}
+        />
       )}
       {bloqueioModal.open && (
         <BloqueioModal onClose={() => setBloqueioModal({ open: false, bloqueio: null, prefillProf: '', prefillHora: '' })}

@@ -202,7 +202,7 @@ function enviarParaSupabase(transactions, serviceKey, userId) {
   
   var payload = transactions.map(function(tx) {
     tx.user_id = userId;
-    tx.origin = 'planilha';
+    tx.origin = String(tx.comanda || '').indexOf('CMD-') >= 0 ? 'comanda_digital' : 'planilha';
     tx.is_metadata = false;
     tx.deleted_at = null;
     tx.updated_at = new Date().toISOString();
@@ -383,6 +383,88 @@ function doGet(e) {
     .setMimeType(ContentService.MimeType.JSON);
 }
 
+function escreverComandaDigital(payload) {
+  var rows = payload && payload.rows;
+  if (!rows || !rows.length) throw new Error('A comanda não possui serviços.');
+
+  var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  var sheet = ss.getSheets()[0];
+  var headerMatch = String(sheet.getRange('A1').getDisplayValue() || '').match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  var sheetDate = headerMatch ? headerMatch[3] + '-' + ('0' + headerMatch[2]).slice(-2) + '-' + ('0' + headerMatch[1]).slice(-2) : '';
+  if (payload.date_ref && sheetDate && String(payload.date_ref) !== sheetDate) {
+    throw new Error('A planilha está aberta no dia ' + sheetDate + ', mas a comanda pertence ao dia ' + payload.date_ref + '.');
+  }
+  var current = sheet.getRange('A4:I67').getValues();
+  var existing = {};
+  var freeRows = [];
+
+  for (var i = 0; i < current.length; i++) {
+    var key = String(current[i][8] || '').trim();
+    if (key) existing[key] = i + 4;
+    if (!String(current[i][0] || '').trim() && !key) freeRows.push(i + 4);
+  }
+
+  var freeIndex = 0;
+  rows.forEach(function(row) {
+    var commandKey = String(row.comanda || '').trim();
+    if (!commandKey) throw new Error('Item da comanda sem identificador.');
+    var targetRow = existing[commandKey] || freeRows[freeIndex++];
+    if (!targetRow) throw new Error('A planilha não possui linhas livres entre 4 e 67.');
+    sheet.getRange(targetRow, 1, 1, 9).setValues([[
+      row.client || '',
+      Number(row.credito || 0),
+      Number(row.debito || 0),
+      Number(row.dinheiro || 0),
+      Number(row.pix || 0),
+      Number(row.repasse || 0),
+      row.procedure || '',
+      row.professional || '',
+      commandKey
+    ]]);
+    existing[commandKey] = targetRow;
+  });
+
+  SpreadsheetApp.flush();
+  sincronizarComSupabase();
+  return { success: true, rowsProcessed: rows.length };
+}
+
+function removerComandaDigital(payload) {
+  var prefix = String(payload.command_number || '').trim();
+  if (!prefix) throw new Error('Número da comanda não informado.');
+  var sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheets()[0];
+  var current = sheet.getRange('A4:I67').getValues();
+  var removed = 0;
+  for (var i = 0; i < current.length; i++) {
+    var key = String(current[i][8] || '').trim();
+    if (key.indexOf(prefix + '-') === 0) {
+      sheet.getRange(i + 4, 1, 1, 9).clearContent();
+      removed++;
+    }
+  }
+  SpreadsheetApp.flush();
+  return { success: true, rowsProcessed: removed };
+}
+
 function doPost(e) {
-  return doGet(e);
+  try {
+    var payload = JSON.parse((e && e.postData && e.postData.contents) || '{}');
+    if (payload.action !== 'writeComanda' && payload.action !== 'deleteComanda') return doGet(e);
+
+    var allowedToken = PropertiesService.getScriptProperties().getProperty('ALLOWED_TOKEN');
+    var receivedToken = payload.token || (e && e.parameter && e.parameter.token) || '';
+    if (!allowedToken || receivedToken !== allowedToken) {
+      return ContentService.createTextOutput(JSON.stringify({ success: false, error: 'Token inválido.' }))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    var result = payload.action === 'deleteComanda'
+      ? removerComandaDigital(payload)
+      : escreverComandaDigital(payload);
+    return ContentService.createTextOutput(JSON.stringify(result))
+      .setMimeType(ContentService.MimeType.JSON);
+  } catch (error) {
+    return ContentService.createTextOutput(JSON.stringify({ success: false, error: error.message }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
 }
