@@ -28,6 +28,7 @@ import WaitlistPanel from '../components/agenda/WaitlistPanel';
 import DigitalComandaModal from '../components/agenda/DigitalComandaModal';
 import { eligiblePatientPackages, packageProgress, resolvePackageChoice } from '../lib/patientPackages';
 import { findUniqueExactClient, searchClients } from '../lib/clientSearch';
+import { clinicDateKey } from '../lib/clinicDate';
 
 // ─── Search helpers ──────────────────────────────────────────
 
@@ -129,7 +130,7 @@ function calcEndTime(hora, duracao) {
   return minutesToTime(timeToMinutes(hora) + (Number(duracao) || 60));
 }
 function fmtDate(d) {
-  return d.toISOString().split('T')[0];
+  return clinicDateKey(d);
 }
 function sameDay(a, b) {
   return a.getFullYear() === b.getFullYear()
@@ -834,7 +835,7 @@ function AgendamentoModal({ onClose, date, profissional: prefillProf, hora: pref
     let cur = new Date(base);
     cur.setDate(cur.getDate() + step);
     while (cur <= until && dates.length < 52) {
-      dates.push(cur.toISOString().split('T')[0]);
+      dates.push(clinicDateKey(cur));
       cur = new Date(cur);
       cur.setDate(cur.getDate() + step);
     }

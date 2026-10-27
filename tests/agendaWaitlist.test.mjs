@@ -9,6 +9,13 @@ import {
   waitlistMatchesSlot,
   waitlistPeriodForTime,
 } from '../src/lib/agendaWaitlist.js';
+import { clinicDateKey } from '../src/lib/clinicDate.js';
+
+test('Agenda mantém o dia da clínica depois das 21h de Brasília', () => {
+  const nightInBrazil = new Date('2026-10-26T21:12:00-03:00');
+  assert.equal(nightInBrazil.toISOString().slice(0, 10), '2026-10-27');
+  assert.equal(clinicDateKey(nightInBrazil), '2026-10-26');
+});
 
 test('classifica o periodo do horario', () => {
   assert.equal(waitlistPeriodForTime('09:00'), 'manha');
@@ -72,6 +79,8 @@ test('contrato da lista usa Pacientes e permanece separada dos agendamentos', as
   assert.match(panel, /fetchClients\(\)/);
   assert.doesNotMatch(panel, /crm_leads/);
   assert.match(agenda, /<WaitlistPanel/);
+  assert.match(agenda, /clinicDateKey\(d\)/);
+  assert.doesNotMatch(agenda, /toISOString\(\)\.split\('T'\)\[0\]/);
   assert.match(agenda, /\[waitlistOpen, setWaitlistOpen\]\s*=\s*useState\(false\)/);
   assert.match(migration, /CREATE TABLE IF NOT EXISTS public\.appointment_waitlist/i);
   assert.match(migration, /client_id integer NOT NULL REFERENCES public\.clients\(id\)/i);
